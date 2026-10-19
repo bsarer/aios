@@ -78,3 +78,11 @@ export type AlphaToolName = (typeof ALPHA_TOOLS)[number]['name'];
 export function toolByName(name: string): ToolDefinition | undefined {
   return ALPHA_TOOLS.find((t) => t.name === name);
 }
+
+/** Tool definitions in the shape the model adapter sends. */
+export function toolSpecs(tools: readonly ToolDefinition[] = ALPHA_TOOLS): { name: string; description: string; parameters: Record<string, unknown> }[] {
+  return tools.map((t) => {
+    const { $schema: _drop, ...parameters } = z.toJSONSchema(t.input, { target: 'draft-7' }) as Record<string, unknown>;
+    return { name: t.name, description: t.description, parameters };
+  });
+}

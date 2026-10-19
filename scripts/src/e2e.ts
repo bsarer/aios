@@ -125,6 +125,13 @@ async function main(): Promise<void> {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    // Newer Chromium returns a Promise from scrollIntoView(); mimic it so effects that leak the return value fail here.
+    await page.addInitScript(`{
+      const orig = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (...args) { orig.apply(this, args); return Promise.resolve(); };
+    }`);
+    const pageErrors: string[] = [];
+    page.on('pageerror', (e) => pageErrors.push(e.message));
     await page.goto(`http://127.0.0.1:${port}/`);
     const chat = page.getByTestId('chat');
     const input = page.getByTestId('input');
@@ -181,6 +188,7 @@ async function main(): Promise<void> {
 
     // 6. History survives a reload.
     await page.reload();
+    check('no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
     check('history restored after reload', await waitFor(async () => (await chat.innerText()).includes('token by token')));
   } catch (err) {
     console.log(`\n--- aios-core output ---\n${coreLog}`);

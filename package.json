@@ -13,7 +13,9 @@
     "test:stack:down": "docker compose -f docker-compose.test.yml down",
     "test:stack:check": "pnpm --filter @aios/scripts check-mail",
     "setup": "pnpm --filter @aios/scripts run setup",
-    "bakeoff": "pnpm --filter @aios/evals run bakeoff"
+    "bakeoff": "pnpm --filter @aios/evals run bakeoff",
+    "test:e2e": "pnpm --filter @aios/ui build && pnpm --filter @aios/scripts run e2e",
+    "start": "pnpm --filter @aios/ui build && pnpm --filter @aios/core start"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail) is done. A1 (model adapter and bake-off) is built; the bake-off runs on your machine with `pnpm bakeoff`, see [evals/README.md](evals/README.md).
+A0 (repo, rules, test mail) and A1 (model adapter and bake-off, default model Claude Haiku 5.5) are merged. A2 (chat UI and core shell) is in review.
 
 ## Quick start
 
@@ -18,7 +18,11 @@ pnpm test:stack:up        # start GreenMail on 127.0.0.1 and seed 40 fixture ema
 pnpm test:stack:check     # list the mailbox over IMAP
 pnpm run setup --dry-run  # walk through setup without touching keyring or disk
 pnpm test:stack:down
+pnpm start                # build the UI and start aios-core on http://127.0.0.1:7777 (needs `pnpm run setup`)
+pnpm test:e2e             # drive the chat in Chromium against a mock model (CHROMIUM_PATH if not on PATH)
 ```
+
+`better-sqlite3` compiles a native module on install; on Omarchy that needs `base-devel` (usually already present).
 
 To look at the seeded mail in a regular client (Thunderbird, aerc, mutt), add an account with
 IMAP `127.0.0.1:3143`, SMTP `127.0.0.1:3025`, no TLS, user `john@aios.test`, password `test-only-password`.
@@ -27,9 +31,9 @@ IMAP `127.0.0.1:3143`, SMTP `127.0.0.1:3025`, no TLS, user `john@aios.test`, pas
 
 ```
 packages/shared   config schema (zod) and TOML parsing
-packages/core     daemon: model adapter (model.ts), keyring wrapper, tool definitions, sanitize(), prompts
-packages/ui       React chat UI (A2)
-scripts           setup/uninstall CLI, mail seeder and checker
+packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, audit log, model adapter, keyring, tools
+packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip
+scripts           setup/uninstall CLI, mail seeder and checker, browser e2e check
 fixtures/mail.ts  40 sample emails: threads, attachments, 6 hostile samples
 evals             model bake-off: tasks, runner, report
 ```
@@ -44,3 +48,15 @@ evals             model bake-off: tasks, runner, report
 | nodemailer | builds RFC 822 fixtures now, SMTP send in A5; ships its own types | MIT-0 | very active |
 | tsx | run TypeScript scripts without a build step (dev) | MIT | active |
 | vitest, typescript | tests and type checking (dev) | MIT, Apache-2.0 | very active |
+
+## Dependencies added in A2
+
+| Package | Why | License | Maintenance |
+|---|---|---|---|
+| fastify, @fastify/websocket, @fastify/static | HTTP + WebSocket server for the UI | MIT | very active |
+| better-sqlite3 | short-term store (history, turns, usage, settings); synchronous and fast | MIT | active |
+| react, react-dom | chat UI | MIT | very active |
+| react-markdown | renders assistant replies; never renders raw HTML, which matters when replies quote email | MIT | active |
+| vite, @vitejs/plugin-react, tailwindcss, @tailwindcss/vite | UI build and styling (dev) | MIT | very active |
+| ws | WebSocket client for server tests (dev) | MIT | very active |
+| playwright-core | drives the system Chromium for `pnpm test:e2e`; downloads no browsers (dev) | Apache-2.0 | very active |

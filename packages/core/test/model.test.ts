@@ -112,8 +112,15 @@ describe('ModelClient.complete', () => {
     expect(body.model).toBe('vendor/model-x'); // core fields beat extraBody
     expect(body.provider).toEqual({ data_collection: 'deny' });
     expect(body.stream).toBe(false);
+    expect(body).not.toHaveProperty('temperature'); // unset in config, so not sent
     expect(calls).toHaveLength(1);
     expect(JSON.stringify(calls)).not.toContain(API_KEY);
+  });
+
+  it('sends temperature only when configured', async () => {
+    handlers.push(json(200, reply('ok')));
+    await client({ temperature: 0.2 }).c.complete(req());
+    expect(seen[0]!.body.temperature).toBe(0.2);
   });
 
   it('sends tools and parses tool calls', async () => {

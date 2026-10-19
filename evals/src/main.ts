@@ -13,6 +13,7 @@ import { type ModelRoleConfig, configDir, parseConfig } from '@aios/shared';
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
 import { renderMarkdown } from './report.js';
+import { roleFor } from './role.js';
 import { type ModelRun, runChatTask, runTriage } from './runner.js';
 import { CHAT_TASKS } from './tasks.js';
 
@@ -24,25 +25,37 @@ function flag(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-/** Confirms each id exists and, where the listing says, supports tools and response_format. */
-async function preflight(base: ModelRoleConfig, models: string[]): Promise<string[]> {
+/** model id -> supported_parameters (undefined when the listing does not say). */
+type Support = Map<string, string[] | undefined>;
+
+/**
+ * Confirms each id exists and supports tools and response_format. Returns what each
+ * model supports so optional request fields can be dropped where they would block routing.
+ */
+async function preflight(base: ModelRoleConfig, models: string[]): Promise<{ problems: string[]; support: Support }> {
+  const support: Support = new Map();
   const res = await fetch(`${base.baseUrl.replace(/\/$/, '')}/models`);
   if (!res.ok) {
     console.warn(`could not list models (HTTP ${res.status}); skipping preflight`);
-    return [];
+    return { problems: [], support };
   }
   const Listing = z.looseObject({ data: z.array(z.looseObject({ id: z.string(), supported_parameters: z.array(z.string()).optional() })) });
   const listing = Listing.parse(await res.json());
   const problems: string[] = [];
   for (const m of models) {
     const entry = listing.data.find((d) => d.id === m);
-    if (!entry) problems.push(`${m}: not in the provider's model list`);
-    else if (entry.supported_parameters) {
+    if (!entry) {
+      problems.push(`${m}: not in the provider's model list`);
+      continue;
+    }
+    support.set(m, entry.supported_parameters);
+    if (entry.supported_parameters) {
       for (const p of ['tools', 'response_format']) if (!entry.supported_parameters.includes(p)) problems.push(`${m}: no ${p} support`);
     }
   }
-  return problems;
+  return { problems, support };
 }
+
 
 async function main(): Promise<void> {
   const repeat = Number(flag('repeat') ?? 1);
@@ -52,8 +65,11 @@ async function main(): Promise<void> {
   const cands = Candidates.parse(parseToml(await readFile(join(here, '..', 'candidates.toml'), 'utf8')));
   const models = cands.candidate.map((c) => c.model).filter((m) => !only || m === only);
 
+  let support: Support = new Map();
   if (!process.argv.includes('--skip-preflight')) {
-    const problems = await preflight(base, models);
+    const pf = await preflight(base, models);
+    support = pf.support;
+    const problems = pf.problems;
     if (problems.length) {
       console.error(`preflight failed:\n  ${problems.join('\n  ')}\nEdit evals/candidates.toml or pass --skip-preflight.`);
       process.exit(1);
@@ -65,7 +81,8 @@ async function main(): Promise<void> {
   const runs: ModelRun[] = [];
 
   for (const model of models) {
-    const role = { ...base, model };
+    const { role, dropped } = roleFor(base, model, support.get(model));
+    if (dropped.length) console.log(`${model}: not sending ${dropped.join(', ')} (unsupported by this model)`);
     const client = new ModelClient({ models: { chat: role, triage: role, nightly: role }, resolveKey: (ref) => keyring.require(ref) });
     const run: ModelRun = { model, chat: [], triage: [] };
     for (let r = 0; r < repeat; r++) {

@@ -1,8 +1,9 @@
 import type { Delta, ModelRequest, ModelResult, ToolCall } from '@aios/core';
-import type { TriageItem } from '@aios/shared';
+import { ModelRoleConfig, type TriageItem } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { recommend, renderMarkdown, summarize } from '../src/report.js';
+import { roleFor } from '../src/role.js';
 import { type ModelRun, runChatTask, runTriage } from '../src/runner.js';
 import { CHAT_TASKS, HOSTILE, INJECTION_TASKS, TOOL_TASKS, TRIAGE_EXPECT, emailAsToolResult } from '../src/tasks.js';
 
@@ -187,5 +188,22 @@ describe('report', () => {
     const md = renderMarkdown([good, gullible], { date: '2026-10-19', baseUrl: 'https://x', repeat: 1 });
     expect(md).toContain('| chat | good/model |');
     expect(md).toContain('inject-');
+  });
+});
+
+describe('roleFor', () => {
+  const base = ModelRoleConfig.parse({ baseUrl: 'https://x.example/v1', model: 'base', apiKeyRef: 'keyring:model-chat', temperature: 0.3 });
+
+  it('drops temperature for models whose listing does not support it', () => {
+    const { role, dropped } = roleFor(base, 'openai/gpt-6-luna', ['tools', 'response_format', 'max_tokens']);
+    expect(role.model).toBe('openai/gpt-6-luna');
+    expect(role).not.toHaveProperty('temperature');
+    expect(dropped).toEqual(['temperature']);
+    expect(base.temperature).toBe(0.3); // base config untouched
+  });
+
+  it('keeps temperature when supported or when the listing is silent', () => {
+    expect(roleFor(base, 'm', ['temperature', 'tools']).role.temperature).toBe(0.3);
+    expect(roleFor(base, 'm', undefined).role.temperature).toBe(0.3);
   });
 });

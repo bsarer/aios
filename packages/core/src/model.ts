@@ -343,7 +343,7 @@ export function buildBody(cfg: ModelRoleConfig, req: ModelRequest, stream: boole
     model: cfg.model,
     messages: req.messages.map(toWireMessage),
     max_tokens: cfg.maxTokens,
-    temperature: cfg.temperature,
+    ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
     stream,
   };
   if (req.tools?.length) {

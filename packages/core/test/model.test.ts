@@ -175,6 +175,14 @@ describe('ModelClient.complete', () => {
     expect(calls.at(-1)).toMatchObject({ ok: false, errorKind: 'unavailable' });
   });
 
+  it("records the provider's reason for a rejected request", async () => {
+    handlers.push(json(404, { error: { code: 404, message: 'No endpoints found that can handle the requested parameters.' } }));
+    const { c, calls } = client();
+    const err = await c.complete(req()).catch((e: unknown) => e);
+    expect((err as ModelError).kind).toBe('bad_request');
+    expect(calls.at(-1)).toMatchObject({ ok: false, errorKind: 'bad_request', errorStatus: 404, errorDetail: 'No endpoints found that can handle the requested parameters.' });
+  });
+
   it.each([
     [401, 'auth'],
     [402, 'credits'],

@@ -44,7 +44,7 @@ async function main(): Promise<void> {
         latencyMs: r.result?.latencyMs,
       });
       // Content never goes in the audit log, only who handled the call and what it cost.
-      audit.append({ kind: 'model', role: r.role, baseUrl: r.baseUrl, model: r.model, ok: r.ok, errorKind: r.errorKind, provider: r.result?.provider, usage: r.result?.usage });
+      audit.append({ kind: 'model', role: r.role, baseUrl: r.baseUrl, model: r.model, ok: r.ok, errorKind: r.errorKind, errorStatus: r.errorStatus, errorDetail: r.errorDetail, provider: r.result?.provider, usage: r.result?.usage });
       shell?.pushStatus();
     },
   });

@@ -80,6 +80,9 @@ export interface CallRecord {
   model: string;
   ok: boolean;
   errorKind?: ModelErrorKind;
+  /** HTTP status and the provider's own error message (never request content), so failures can be diagnosed from the audit log. */
+  errorStatus?: number;
+  errorDetail?: string;
   result?: ModelResult;
 }
 
@@ -115,7 +118,7 @@ export class ModelError extends Error {
   readonly userMessage: string;
   constructor(
     readonly kind: ModelErrorKind,
-    detail: string,
+    readonly detail: string,
     readonly status: number | null = null,
     readonly retryAfterMs: number | null = null,
   ) {
@@ -330,7 +333,7 @@ export class ModelClient {
 
   private fail(role: ModelRole, cfg: ModelRoleConfig, err: unknown): ModelError {
     const e = err instanceof ModelError ? err : toModelError(err);
-    this.record(role, cfg, { ok: false, errorKind: e.kind });
+    this.record(role, cfg, { ok: false, errorKind: e.kind, errorDetail: e.detail, ...(e.status !== null ? { errorStatus: e.status } : {}) });
     return e;
   }
 }

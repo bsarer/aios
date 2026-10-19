@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ChatItem, ServerEvent } from '@aios/shared';
+import type { Memory } from './memory/memory.js';
 import { type ChatMessage, type ModelClient, ModelError, type ModelResult } from './model.js';
 import { chatSystemPrompt } from './prompts.js';
 import type { Store } from './store.js';
@@ -13,6 +14,11 @@ import type { ToolRegistry } from './tools/registry.js';
 
 export const MAX_ITERATIONS = 6;
 const CONTEXT_TURNS = 30;
+/** With memory, the token budget trims the window; this only bounds the query. */
+const CONTEXT_TURNS_BUDGETED = 120;
+
+/** Marks content that came from an untrusted source (see untrusted.ts wrapUntrusted). */
+const UNTRUSTED_MARK = /<untrusted source=/;
 
 export interface AgentOptions {
   model: Pick<ModelClient, 'stream'>;
@@ -21,6 +27,8 @@ export interface AgentOptions {
   userName: string;
   timeZone: string;
   emit: (ev: ServerEvent) => void;
+  /** Profile, recalled facts and summaries, and a token-budgeted window (A3). */
+  memory?: Memory;
   clock?: () => Date;
   newId?: () => string;
 }
@@ -57,13 +65,17 @@ export class Agent {
     store.saveTurn({ role: 'user', content: text }, at());
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      const messages: ChatMessage[] = [
-        { role: 'system', content: chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone) }) },
-        ...store.recentTurns(CONTEXT_TURNS),
-      ];
+      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone) });
+      const messages: ChatMessage[] = this.o.memory
+        ? this.o.memory.context(system, text, store.recentTurns(CONTEXT_TURNS_BUDGETED))
+        : [{ role: 'system', content: system }, ...store.recentTurns(CONTEXT_TURNS)];
+      // Decided in code from what the model can see, so an email cannot talk its way out of it.
+      const untrustedInContext = messages.some(
+        (m) => (m.role === 'tool' && tools.returnsUntrusted(m.name)) || UNTRUSTED_MARK.test(m.content ?? ''),
+      );
 
       let item: Extract<ChatItem, { kind: 'assistant' }> | null = null;
-      let text = '';
+      let reply = '';
       let result: ModelResult | undefined;
       try {
         for await (const d of model.stream({ role: 'chat', messages, tools: tools.specs(), toolChoice: 'auto', signal })) {
@@ -72,7 +84,7 @@ export class Agent {
               item = { kind: 'assistant', id: this.newId(), text: '', at: at(), streaming: true };
               this.post(item);
             }
-            text += d.text;
+            reply += d.text;
             this.o.emit({ type: 'delta', id: item.id, text: d.text });
           } else if (d.type === 'done') {
             result = d.result;
@@ -80,9 +92,9 @@ export class Agent {
         }
       } catch (err) {
         const stopped = signal.aborted;
-        if (item) this.patch({ ...item, text, streaming: false, ...(stopped ? { stopped: true } : {}) });
+        if (item) this.patch({ ...item, text: reply, streaming: false, ...(stopped ? { stopped: true } : {}) });
         // Keep what was shown so the next turn's context matches the screen.
-        if (text) store.saveTurn({ role: 'assistant', content: text }, at());
+        if (reply) store.saveTurn({ role: 'assistant', content: reply }, at());
         if (!stopped) this.notice('error', err instanceof ModelError ? err.userMessage : 'Something went wrong talking to the model.');
         else if (!item) this.notice('info', 'Stopped.');
         return;
@@ -99,7 +111,7 @@ export class Agent {
       for (const call of result.toolCalls) {
         const toolItem: ChatItem = { kind: 'tool', id: this.newId(), label: tools.label(call.name), state: 'running', at: at() };
         this.post(toolItem);
-        const outcome = await tools.execute(call, { signal });
+        const outcome = await tools.execute(call, { signal, untrustedInContext });
         this.patch({ ...toolItem, state: outcome.ok ? 'done' : 'failed' });
         store.saveTurn({ role: 'tool', toolCallId: call.id, name: call.name, content: outcome.content }, at());
         if (signal.aborted) {

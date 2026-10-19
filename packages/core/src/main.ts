@@ -7,6 +7,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDir, parseConfig } from '@aios/shared';
 import { AuditLog } from './audit.js';
+import { MemoryFiles } from './memory/files.js';
+import { Memory } from './memory/memory.js';
+import { Nightly } from './memory/nightly.js';
 import { ModelClient } from './model.js';
 import { dataDir } from './paths.js';
 import { Keyring } from './secrets/keyring.js';
@@ -50,6 +53,16 @@ async function main(): Promise<void> {
   });
 
   const tools = new ToolRegistry(audit).register(nowTool(config.user.timezone));
+  const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
+  const nightly = new Nightly({
+    memory,
+    store,
+    model,
+    userName: config.user.name,
+    timeZone: config.user.timezone,
+    runAfter: config.memory.nightlyAt,
+    onError: (err) => audit.append({ kind: 'memory', decision: 'nightly_failed', error: (err as Error).message }),
+  });
   const themePath = omarchyThemePath();
   shell = new Shell({
     store,
@@ -63,6 +76,7 @@ async function main(): Promise<void> {
     readBattery,
     readWifi,
     theme: await readTheme(themePath),
+    memory,
   });
   watchTheme(themePath, (t) => shell.setTheme(t));
 
@@ -75,6 +89,10 @@ async function main(): Promise<void> {
   shell.greet();
   await shell.refreshSystemStatus();
   setInterval(() => void shell.refreshSystemStatus(), 15_000).unref();
+  // Paused means no model calls, so the nightly summary waits too.
+  const nightlyTick = () => void (shell.paused ? undefined : nightly.runIfDue(Date.now()));
+  nightlyTick();
+  setInterval(nightlyTick, 10 * 60_000).unref();
   console.log(`aios-core listening on http://127.0.0.1:${config.ui.port}`);
 
   const shutdown = async () => {

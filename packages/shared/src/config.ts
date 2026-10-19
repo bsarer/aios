@@ -74,6 +74,14 @@ export const AiosConfig = z.strictObject({
         .optional(),
     })
     .default({ maxPerHour: 6 }),
+  memory: z
+    .strictObject({
+      /** Token budget for one chat request: system prompt, profile, recalled notes and recent turns. */
+      contextTokens: z.int().min(2000).max(200_000).default(8000),
+      /** Local time after which yesterday's chat is summarised (plan §6). */
+      nightlyAt: HourMinute.default('03:00'),
+    })
+    .default({ contextTokens: 8000, nightlyAt: '03:00' }),
   cost: z.strictObject({ dailyCapUsd: z.number().positive().default(2) }).default({ dailyCapUsd: 2 }),
   ui: z
     .strictObject({

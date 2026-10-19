@@ -25,7 +25,7 @@ export function App() {
       <main className="flex-1 overflow-y-auto" data-testid="chat">
         <div className="mx-auto flex w-[min(820px,calc(100%-24px))] flex-col gap-4 py-8">
           {state.items.map((item) => (
-            <Message key={item.id} item={item} />
+            <Message key={item.id} item={item} onMemoryDecision={(id, decision) => send({ type: 'memory', id, decision })} />
           ))}
           <div ref={bottom} />
         </div>

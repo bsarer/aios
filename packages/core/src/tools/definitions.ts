@@ -56,8 +56,12 @@ export const ALPHA_TOOLS = [
   def({
     name: 'memory_propose',
     tier: 'draft',
-    description: 'Suggest a durable fact to remember. Saved only if the user confirms.',
-    input: z.strictObject({ fact: z.string().max(300) }),
+    description:
+      'Suggest something to remember long term: a fact (default) or a line for the user profile (standing instructions, preferences). The user sees a card and it is saved only if they click Save.',
+    input: z.strictObject({
+      fact: z.string().min(1).max(300),
+      target: z.enum(['facts', 'profile']).optional().describe('"profile" for standing instructions and preferences; default "facts"'),
+    }),
   }),
   def({
     name: 'open_app',

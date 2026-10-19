@@ -207,3 +207,16 @@ describe('roleFor', () => {
     expect(roleFor(base, 'm', undefined).role.temperature).toBe(0.3);
   });
 });
+
+describe('chat eligibility', () => {
+  it('does not let triage failures disqualify a model from the chat role', async () => {
+    const client = fake(ideal, () => ({ not: 'valid' }));
+    const chat = [];
+    for (const t of CHAT_TASKS) chat.push(await runChatTask(client, t));
+    const run: ModelRun = { model: 'bad-at-json', chat, triage: await runTriage(client) };
+    const s = summarize(run);
+    expect(s.errors).toBe(4);
+    expect(s.chatErrors).toBe(0);
+    expect(recommend([s]).chat).toBe('bad-at-json');
+  });
+});

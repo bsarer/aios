@@ -3,10 +3,15 @@
  * Transport-agnostic; server.ts wires it to WebSockets.
  */
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { type ClientMessage, type ServerEvent, type Status, type Theme } from '@aios/shared';
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
+import type { Memory } from './memory/memory.js';
+import { localDate } from './memory/nightly.js';
+import { memoryProposeTool } from './memory/tool.js';
 import type { ModelClient } from './model.js';
 import { type Store, startOfDay } from './store.js';
 import type { Battery, Wifi } from './status/system.js';
@@ -24,6 +29,10 @@ export interface ShellOptions {
   readBattery: () => Promise<Battery | null>;
   readWifi: () => Promise<Wifi | null>;
   theme?: Theme;
+  /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
+  memory?: Memory;
+  /** Where /export writes. Default: the memory folder. */
+  exportDir?: string;
   clock?: () => Date;
 }
 
@@ -49,7 +58,9 @@ export class Shell {
       timeZone: o.timeZone,
       emit: (ev) => this.broadcast(ev),
       clock: this.clock,
+      ...(o.memory ? { memory: o.memory } : {}),
     });
+    if (o.memory) o.tools.register(memoryProposeTool({ memory: o.memory, post: (item) => this.agent.post(item), clock: this.clock }));
   }
 
   get paused(): boolean {
@@ -116,6 +127,7 @@ export class Shell {
       this.running?.abort();
       return;
     }
+    if (msg.type === 'memory') return this.decideMemory(msg.id, msg.decision);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -135,6 +147,64 @@ export class Shell {
       this.running = null;
       this.pushStatus();
     }
+  }
+
+  /**
+   * The only code path that writes long-term memory. Reached solely by a Save click on a
+   * pending memory card (a UI message); nothing the model or a tool returns can call it.
+   */
+  private decideMemory(id: string, decision: 'save' | 'skip'): void {
+    const memory = this.o.memory;
+    const item = this.o.store.getItem(id);
+    if (!memory || item?.kind !== 'memory' || item.state !== 'pending') return;
+    let text = item.text;
+    if (decision === 'save') {
+      text =
+        item.target === 'profile'
+          ? memory.files.addToProfile(item.text)
+          : memory.files.addFact(item.text, localDate(this.clock().getTime(), this.o.timeZone), item.source);
+      memory.reindex();
+    }
+    this.o.audit.append({ kind: 'memory', decision, target: item.target, source: item.source, itemId: id });
+    const updated = { ...item, text, state: decision === 'save' ? 'saved' : 'skipped' } as const;
+    this.o.store.saveItem(updated);
+    this.broadcast({ type: 'patch', id, item: updated });
+  }
+
+  private memoryCommand(cmd: { name: 'memory' } | { name: 'forget'; text: string } | { name: 'export' }, say: (t: string) => void): void {
+    const memory = this.o.memory;
+    if (!memory) return say('Memory is turned off.');
+    const f = memory.files;
+    if (cmd.name === 'forget') {
+      if (!cmd.text.trim()) return say('Tell me what to forget, for example: /forget Sara prefers short emails');
+      const r = f.forget(cmd.text);
+      if (r.removed) {
+        memory.reindex();
+        this.o.audit.append({ kind: 'memory', decision: 'forget' });
+        return say(`Forgotten: ${r.removed}`);
+      }
+      if (r.candidates.length) return say(`Several facts match. Type more of the one you mean:\n${r.candidates.map((c) => `- ${c}`).join('\n')}`);
+      return say(`I have no fact matching "${cmd.text.trim()}". Your profile is edited by hand: ${f.profilePath}`);
+    }
+    const facts = f.facts();
+    const dates = f.summaryDates();
+    const all = [
+      `Profile (${f.profilePath}):`,
+      f.profile().trim(),
+      '',
+      `Facts (${f.factsPath}):`,
+      facts.length ? facts.map((x) => `- ${x.text}${x.source === 'email' ? ' (suggested while reading an email)' : ''}`).join('\n') : 'None yet.',
+      '',
+      `Daily summaries (${f.summariesDir}): ${dates.length ? `${dates.length}, latest ${dates.at(-1)}` : 'none yet'}`,
+    ].join('\n');
+    if (cmd.name === 'memory') return say(all);
+    const dir = this.o.exportDir ?? f.dir;
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `memory-export-${localDate(this.clock().getTime(), this.o.timeZone)}.md`);
+    const summaries = dates.map((d) => f.summary(d) ?? '').join('\n');
+    writeFileSync(path, `# AI OS memory export\n\n${all}\n\n${summaries}`, { mode: 0o600 });
+    this.o.audit.append({ kind: 'memory', decision: 'export' });
+    return say(`Exported to ${path}`);
   }
 
   private async command(cmd: NonNullable<ReturnType<typeof parseCommand>>): Promise<void> {
@@ -158,7 +228,8 @@ export class Shell {
       }
       case 'memory':
       case 'forget':
-        return say('Memory is not built yet. It arrives in the next milestone.');
+      case 'export':
+        return this.memoryCommand(cmd, say);
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);
     }

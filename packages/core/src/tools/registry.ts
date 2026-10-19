@@ -4,6 +4,11 @@ import { type ToolDefinition, toolSpecs } from './definitions.js';
 
 export interface ToolContext {
   signal: AbortSignal;
+  /**
+   * True when text from an untrusted source (an email) is in the model's context for
+   * this call, so the call may have been steered by it. Computed by the agent, not the model.
+   */
+  untrustedInContext: boolean;
 }
 
 export interface RegisteredTool {
@@ -11,6 +16,8 @@ export interface RegisteredTool {
   /** Shown in the chat while the tool runs, e.g. "Checking the time…". */
   label: string;
   handler: (args: unknown, ctx: ToolContext) => Promise<string>;
+  /** The result carries untrusted text (mail tools, A4). Anything the model does after reading it is tainted. */
+  untrustedOutput?: boolean;
 }
 
 export interface ToolOutcome {
@@ -38,6 +45,10 @@ export class ToolRegistry {
 
   specs(): ToolSpec[] {
     return toolSpecs([...this.tools.values()].map((t) => t.def));
+  }
+
+  returnsUntrusted(name: string): boolean {
+    return this.tools.get(name)?.untrustedOutput === true;
   }
 
   label(name: string): string {
@@ -77,8 +88,8 @@ export class ToolRegistry {
     const started = Date.now();
     try {
       const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(TOOL_TIMEOUT_MS)]);
-      const content = await tool.handler(parsed.data, { signal });
-      log({ decision: 'allowed', args: parsed.data, ok: true, resultBytes: Buffer.byteLength(content), ms: Date.now() - started });
+      const content = await tool.handler(parsed.data, { ...ctx, signal });
+      log({ decision: 'allowed', untrustedInContext: ctx.untrustedInContext, args: parsed.data, ok: true, resultBytes: Buffer.byteLength(content), ms: Date.now() - started });
       return { ok: true, content, label };
     } catch (err) {
       const message = (err as Error).message;

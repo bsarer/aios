@@ -268,7 +268,7 @@ describe('audit and tiers', () => {
         return 'sent';
       },
     });
-    const out = await reg.execute({ id: 'c', name: 'mail_send_draft', arguments: '{"draftId":"d1"}' }, { signal: new AbortController().signal });
+    const out = await reg.execute({ id: 'c', name: 'mail_send_draft', arguments: '{"draftId":"d1"}' }, { signal: new AbortController().signal, untrustedInContext: false });
     expect(out.ok).toBe(false);
     expect(ran).toBe(false);
     expect(readFileSync(join(dir, 'a.jsonl'), 'utf8')).toContain('"decision":"denied"');

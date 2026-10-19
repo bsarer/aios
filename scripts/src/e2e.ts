@@ -40,6 +40,16 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     res.end('data: [DONE]\n\n');
   };
 
+  if (last.role === 'tool' && /card/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'Tap **Save** if that is right.' } }] });
+    return finish(0.0004);
+  }
+  if (last.role === 'user' && /remember/i.test(lastUser)) {
+    const args = JSON.stringify({ fact: 'Sara prefers short emails' });
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_m', function: { name: 'memory_propose', arguments: args } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
   if (last.role === 'tool') {
     // Answer using the tool result, as a real model would.
     const time = /(\d\d:\d\d)/.exec(last.content ?? '')?.[1] ?? '??:??';
@@ -110,18 +120,32 @@ async function main(): Promise<void> {
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
-  const core: ChildProcess = spawn('pnpm', ['--silent', '--filter', '@aios/core', 'start'], {
-    cwd: root,
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, XDG_CONFIG_HOME: join(tmp, 'config'), XDG_DATA_HOME: join(tmp, 'data'), HOME: tmp, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
   let coreLog = '';
-  core.stdout?.on('data', (d) => (coreLog += d));
-  core.stderr?.on('data', (d) => (coreLog += d));
-  const up = await waitFor(async () => coreLog.includes('listening'), 20_000);
-  if (!up) throw new Error(`aios-core did not start:\n${coreLog}`);
-
-  process.on('exit', () => core.kill('SIGTERM'));
+  let core: ChildProcess | undefined;
+  // Own process group, so stopping it also stops the tsx/node children pnpm starts.
+  const stopCore = async () => {
+    if (!core?.pid || core.exitCode !== null) return;
+    const exited = new Promise((r) => core!.once('exit', r));
+    process.kill(-core.pid, 'SIGTERM');
+    await exited;
+  };
+  const startCore = async () => {
+    const started = coreLog.length;
+    core = spawn('pnpm', ['--silent', '--filter', '@aios/core', 'start'], {
+      cwd: root,
+      detached: true,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, XDG_CONFIG_HOME: join(tmp, 'config'), XDG_DATA_HOME: join(tmp, 'data'), HOME: tmp, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    core.stdout?.on('data', (d) => (coreLog += d));
+    core.stderr?.on('data', (d) => (coreLog += d));
+    const up = await waitFor(async () => coreLog.slice(started).includes('listening'), 20_000);
+    if (!up) throw new Error(`aios-core did not start:\n${coreLog}`);
+  };
+  await startCore();
+  process.on('exit', () => {
+    if (core?.pid && core.exitCode === null) process.kill(-core.pid, 'SIGTERM');
+  });
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -188,14 +212,34 @@ async function main(): Promise<void> {
 
     // 6. History survives a reload.
     await page.reload();
-    check('no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
     check('history restored after reload', await waitFor(async () => (await chat.innerText()).includes('token by token')));
+
+    // 7. Memory: a card, nothing saved until Save, and the fact survives a restart.
+    await input.fill('Please remember that Sara prefers short emails');
+    await input.press('Enter');
+    const card = page.locator('[data-kind="memory"]').last();
+    check('remember shows a Save/Skip card', await waitFor(async () => (await card.getAttribute('data-state')) === 'pending'));
+    await input.fill('/memory');
+    await input.press('Enter');
+    check('nothing saved before the click', await waitFor(async () => /Facts[^]*None yet/.test(await page.locator('[data-kind="notice"]').last().innerText())));
+    await shot(page, '6-memory-card');
+    await card.getByTestId('memory-save').click();
+    check('Save marks the card saved', await waitFor(async () => (await card.getAttribute('data-state')) === 'saved'));
+    await stopCore();
+    await startCore();
+    await page.reload();
+    await waitFor(async () => (await agentState.innerText()).includes('idle'));
+    await input.fill('/memory');
+    await input.press('Enter');
+    check('fact persists across a restart', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).includes('- Sara prefers short emails')));
+    await shot(page, '7-memory-after-restart');
+    check('no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
   } catch (err) {
     console.log(`\n--- aios-core output ---\n${coreLog}`);
     throw err;
   } finally {
     await browser.close();
-    core.kill('SIGTERM');
+    await stopCore();
     mock.close();
   }
   if (failures) console.log(`\n--- aios-core output ---\n${coreLog}`);

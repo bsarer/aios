@@ -2,7 +2,38 @@ import type { ChatItem } from '@aios/shared/protocol';
 import Markdown from 'react-markdown';
 
 /** react-markdown renders no raw HTML by default, which matters: replies can quote email text. */
-export function Message({ item }: { item: ChatItem }) {
+function MemoryCard({ item, onDecide }: { item: Extract<ChatItem, { kind: 'memory' }>; onDecide: (decision: 'save' | 'skip') => void }) {
+  const fromEmail = item.source === 'email';
+  return (
+    <div data-kind="memory" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${fromEmail ? 'var(--warning)' : 'var(--accent)'}` }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {item.target === 'profile' ? 'Add to your profile?' : 'Remember this?'}
+      </div>
+      <div className="mt-1">{item.text}</div>
+      {fromEmail && (
+        <div className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          Suggested while an email was being read. Emails can try to plant false memories, so only save this if you know it is true.
+        </div>
+      )}
+      {item.state === 'pending' ? (
+        <div className="mt-3 flex gap-2">
+          <button type="button" data-testid="memory-save" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => onDecide('save')}>
+            Save
+          </button>
+          <button type="button" data-testid="memory-skip" className="glass rounded-lg px-3 py-1" onClick={() => onDecide('skip')}>
+            Skip
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.state === 'saved' ? '✓ Saved' : 'Skipped'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Message({ item, onMemoryDecision }: { item: ChatItem; onMemoryDecision: (id: string, decision: 'save' | 'skip') => void }) {
   switch (item.kind) {
     case 'user':
       return (
@@ -38,6 +69,8 @@ export function Message({ item }: { item: ChatItem }) {
         </div>
       );
     }
+    case 'memory':
+      return <MemoryCard item={item} onDecide={(d) => onMemoryDecision(item.id, d)} />;
     case 'notification':
       return (
         <div data-kind="notification" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>

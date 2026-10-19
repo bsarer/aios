@@ -1,0 +1,20 @@
+# Models compared by `pnpm bakeoff`. Connection settings (base URL, key, provider
+# routing) come from the chat role in ~/.config/aios/config.toml; only the model changes.
+#
+# Shortlisted 2026-10-19 from https://openrouter.ai/api/v1/models: tools + response_format
+# supported, ≤ $0.50/M input and ≤ $2/M output, one per vendor. Prices are per million tokens.
+# The bake-off checks each id against the live model list before running.
+
+[[candidate]]
+model = "openai/gpt-6-luna"            # $0.10 in / $0.50 out
+[[candidate]]
+model = "anthropic/claude-haiku-5.5"   # $0.10 / $0.50 (higher above 100k prompt tokens)
+[[candidate]]
+model = "deepseek/deepseek-v4.1-flash-1017"  # $0.15 / $0.60 (time-of-day pricing)
+[[candidate]]
+model = "inclusionai/ling-3.1-flash"   # $0.075 / $0.225
+
+# Alternates if one of the above is unavailable:
+# model = "upstage/solar-mini4"           # $0.05 / $0.20
+# model = "nvidia/nemotron-3.5-super-vl"  # $0.10 / $0.40
+# model = "cohere/command-a-plus"         # $0.30 / $1.50

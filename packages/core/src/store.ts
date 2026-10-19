@@ -11,6 +11,9 @@ const MIGRATIONS = [
                        error_kind TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, cost_usd REAL, latency_ms REAL);
    CREATE INDEX usage_at ON usage(at);
    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // A3: full-text index over long-term memory files (rebuilt from the files, never the source of truth).
+  `CREATE VIRTUAL TABLE memory_fts USING fts5(kind UNINDEXED, ref UNINDEXED, body, tokenize = 'unicode61 remove_diacritics 2');
+   CREATE INDEX turns_at ON turns(at);`,
 ];
 
 export interface UsageRow {
@@ -55,6 +58,13 @@ export class Store {
       .run(item.id, JSON.stringify(item), item.at);
   }
 
+  getItem(id: string): ChatItem | null {
+    const row = this.db.prepare('SELECT json FROM items WHERE id = ?').get(id) as { json: string } | undefined;
+    if (!row) return null;
+    const parsed = ChatItem.safeParse(JSON.parse(row.json));
+    return parsed.success ? parsed.data : null;
+  }
+
   recentItems(limit = 200): ChatItem[] {
     const rows = this.db.prepare('SELECT json FROM items ORDER BY seq DESC LIMIT ?').all(limit) as { json: string }[];
     return rows.reverse().flatMap((r) => {
@@ -94,6 +104,17 @@ export class Store {
     });
     const firstUser = msgs.findIndex((m) => m.role === 'user');
     return firstUser < 0 ? [] : msgs.slice(firstUser);
+  }
+
+  /** User messages and assistant replies with text in [from, to), oldest first. No tool calls or tool results. */
+  chatTurnsBetween(from: number, to: number): { role: 'user' | 'assistant'; content: string; at: number }[] {
+    return this.db
+      .prepare(
+        `SELECT role, content, at FROM turns
+         WHERE at >= ? AND at < ? AND role IN ('user', 'assistant') AND content IS NOT NULL AND content != '' AND tool_calls IS NULL
+         ORDER BY seq`,
+      )
+      .all(from, to) as { role: 'user' | 'assistant'; content: string; at: number }[];
   }
 
   // ── Usage and cost ──

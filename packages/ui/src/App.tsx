@@ -10,8 +10,14 @@ export function App() {
   const bottom = useRef<HTMLDivElement>(null);
   const working = state.status?.agent === 'working';
 
-  useEffect(() => applyTheme(state.theme), [state.theme]);
-  useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [state.items]);
+  // Braced bodies: an effect may only return a cleanup function, and newer Chromium
+  // returns a Promise from scrollIntoView(), which React would then try to call.
+  useEffect(() => {
+    applyTheme(state.theme);
+  }, [state.theme]);
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ block: 'end' });
+  }, [state.items]);
 
   return (
     <div className="flex h-full flex-col">

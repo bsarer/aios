@@ -13,7 +13,7 @@ import {
 import { TriageBatch } from '@aios/shared';
 import { type ChatTask, type Score, TRIAGE_EXPECT, triageBatches, triageUserMessage } from './tasks.js';
 
-export const EVAL_NOW = 'Sunday 19 October 2026, 09:14 (Europe/Istanbul, UTC+03:00)';
+export const EVAL_NOW = 'Monday, 19 October 2026, 09:14 (Europe/Istanbul, UTC+03:00)';
 const MAX_ITERATIONS = 4;
 
 export interface ChatTaskResult extends Score {

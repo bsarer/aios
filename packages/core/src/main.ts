@@ -7,6 +7,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDir, parseConfig } from '@aios/shared';
 import { AuditLog } from './audit.js';
+import { MailClient, type MailConnection } from './mail/imap.js';
+import { MailPipeline } from './mail/pipeline.js';
+import { MailState } from './mail/state.js';
+import { mailTools } from './mail/tools.js';
+import { ImapMailSource, MailWatcher } from './mail/watcher.js';
 import { MemoryFiles } from './memory/files.js';
 import { Memory } from './memory/memory.js';
 import { Nightly } from './memory/nightly.js';
@@ -53,6 +58,15 @@ async function main(): Promise<void> {
   });
 
   const tools = new ToolRegistry(audit).register(nowTool(config.user.timezone));
+  const mailConnection: MailConnection = {
+    host: config.mail.imap.host,
+    port: config.mail.imap.port,
+    tls: config.mail.imap.tls,
+    user: config.mail.username,
+    password: async () => (await keyring.require(config.mail.passwordRef)).reveal(),
+  };
+  const mailClient = new MailClient(mailConnection);
+  for (const t of mailTools(mailClient)) tools.register(t);
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
   const nightly = new Nightly({
     memory,
@@ -77,6 +91,39 @@ async function main(): Promise<void> {
     readWifi,
     theme: await readTheme(themePath),
     memory,
+    onResume: () => void pipeline.run(),
+    onIgnoreMail: (id) => mailState.markIgnored(id),
+  });
+  const mailState = new MailState(store);
+  const pipeline = new MailPipeline({
+    state: mailState,
+    model,
+    post: (item) => shell.agent.post(item),
+    notice: (level, text) => shell.agent.notice(level, text),
+    isPaused: () => shell.paused,
+    timeZone: config.user.timezone,
+    batchWindowMs: config.mail.batchWindowSeconds * 1000,
+    maxPerHour: config.notifications.maxPerHour,
+    quietHours: config.notifications.quietHours,
+  });
+  let mailProblem = '';
+  const watcher = new MailWatcher({
+    source: () => new ImapMailSource(mailConnection),
+    state: mailState,
+    pollMs: config.mail.pollIntervalSeconds * 1000,
+    onNew: (count) => {
+      audit.append({ kind: 'mail', event: 'new', count });
+      pipeline.onNew();
+    },
+    onStatus: (status, detail) => {
+      shell.setMailStatus(status);
+      if (status === 'error' && detail && detail !== mailProblem) {
+        audit.append({ kind: 'mail', event: 'error', detail });
+        shell.agent.notice('warning', `I can't reach your mailbox (${detail}). I'll keep retrying.`);
+      }
+      if (status === 'connected' && mailProblem) shell.agent.notice('info', 'Connected to your mailbox again.');
+      mailProblem = status === 'error' ? (detail ?? 'error') : status === 'connected' ? '' : mailProblem;
+    },
   });
   watchTheme(themePath, (t) => shell.setTheme(t));
 
@@ -89,6 +136,9 @@ async function main(): Promise<void> {
   shell.greet();
   await shell.refreshSystemStatus();
   setInterval(() => void shell.refreshSystemStatus(), 15_000).unref();
+  watcher.start();
+  // Catch-up after pause, quiet hours, rate limits and failed triage; a no-op when nothing is queued.
+  setInterval(() => void pipeline.run(), 30_000).unref();
   // Paused means no model calls, so the nightly summary waits too.
   const nightlyTick = () => void (shell.paused ? undefined : nightly.runIfDue(Date.now()));
   nightlyTick();
@@ -96,6 +146,9 @@ async function main(): Promise<void> {
   console.log(`aios-core listening on http://127.0.0.1:${config.ui.port}`);
 
   const shutdown = async () => {
+    pipeline.stop();
+    await watcher.stop();
+    await mailClient.close();
     await app.close();
     store.close();
     process.exit(0);

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Composer } from './components/Composer';
-import { Message } from './components/Message';
+import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
 import { applyTheme } from './theme';
 import { useChat } from './useChat';
@@ -9,6 +9,11 @@ export function App() {
   const { state, conn, send } = useChat();
   const bottom = useRef<HTMLDivElement>(null);
   const working = state.status?.agent === 'working';
+  const actions: MessageActions = {
+    onMemoryDecision: (id, decision) => send({ type: 'memory', id, decision }),
+    onSend: (text) => send({ type: 'send', text }),
+    onIgnoreMail: (itemId, mailId) => send({ type: 'mail_ignore', itemId, mailId }),
+  };
 
   // Braced bodies: an effect may only return a cleanup function, and newer Chromium
   // returns a Promise from scrollIntoView(), which React would then try to call.
@@ -25,7 +30,7 @@ export function App() {
       <main className="flex-1 overflow-y-auto" data-testid="chat">
         <div className="mx-auto flex w-[min(820px,calc(100%-24px))] flex-col gap-4 py-8">
           {state.items.map((item) => (
-            <Message key={item.id} item={item} onMemoryDecision={(id, decision) => send({ type: 'memory', id, decision })} />
+            <Message key={item.id} item={item} actions={actions} />
           ))}
           <div ref={bottom} />
         </div>

@@ -1,0 +1,21 @@
+{
+  "name": "@aios/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "tsx src/seed-mail.ts",
+    "check-mail": "tsx src/check-mail.ts",
+    "setup": "tsx src/setup.ts",
+    "uninstall": "tsx src/uninstall.ts"
+  },
+  "dependencies": {
+    "@aios/core": "workspace:*",
+    "@aios/shared": "workspace:*",
+    "imapflow": "^2.5.5",
+    "nodemailer": "^10.1.7"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

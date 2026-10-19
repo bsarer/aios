@@ -1,0 +1,24 @@
+# Local mail stack for development and tests. Never point tests at a real account.
+# GreenMail accepts any password for auto-created users; the one below exists only here.
+services:
+  greenmail:
+    image: greenmail/standalone:2.1.3
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.all
+        -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.users=john:test-only-password@aios.test
+        -Dgreenmail.users.login=email
+        -Dgreenmail.verbose=false
+    ports:
+      - "127.0.0.1:3025:3025"   # SMTP
+      - "127.0.0.1:3143:3143"   # IMAP
+      - "127.0.0.1:3465:3465"   # SMTPS
+      - "127.0.0.1:3993:3993"   # IMAPS
+      - "127.0.0.1:8080:8080"   # GreenMail API (health)
+    healthcheck:
+      # The image ships without curl/wget; probe the IMAP greeting with bash's /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3143 && head -c 4 <&3 | grep -q OK"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

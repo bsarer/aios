@@ -1,0 +1,6 @@
+{
+  "_note": "Suggestions shown by `pnpm setup`. Starting points from AIOS_ALPHA_PLAN.md §3; verify URLs and model names against each provider's current docs before use.",
+  "openrouter": "https://openrouter.ai/api/v1",
+  "cerebras": "https://api.cerebras.ai/v1",
+  "groq": "https://api.groq.com/openai/v1"
+}

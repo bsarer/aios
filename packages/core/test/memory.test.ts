@@ -264,9 +264,19 @@ describe('memory commands', () => {
     expect(files.facts()).toEqual([]);
   });
 
+  it('/remember offers a card without the model, and still needs Save', async () => {
+    const { shell, files, cards, model } = setup();
+    await shell.handle({ type: 'send', text: '/remember Sara prefers short emails' });
+    expect(cards()).toMatchObject([{ text: 'Sara prefers short emails', source: 'chat', state: 'pending' }]);
+    expect(files.facts()).toEqual([]);
+    await shell.handle({ type: 'memory', id: cards()[0]!.id, decision: 'save' });
+    expect(files.facts().map((f) => f.text)).toEqual(['Sara prefers short emails']);
+    expect(model.requests).toHaveLength(0);
+  });
+
   it('commands never call the model', async () => {
     const { shell, model } = setup();
-    for (const c of ['/memory', '/forget x', '/export']) await shell.handle({ type: 'send', text: c });
+    for (const c of ['/memory', '/forget x', '/export', '/remember']) await shell.handle({ type: 'send', text: c });
     expect(model.requests).toHaveLength(0);
   });
 });

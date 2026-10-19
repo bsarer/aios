@@ -14,7 +14,7 @@ Long-term memory is plain Markdown you own, in `~/.config/aios/memory/`:
 - `facts.md`: one `- fact` per line, each saved only after you click **Save** on a "Remember this?" card.
 - `summaries/YYYY-MM-DD.md`: written after 03:00 (`[memory] nightlyAt`) from the previous day's chat. Tool results and email bodies are never included.
 
-Chat commands: `/memory` shows everything, `/forget <text>` removes a fact, `/export` writes one Markdown file with all of it.
+Chat commands: `/remember <text>` offers a card directly, `/memory` shows everything, `/forget <text>` removes a fact, `/export` writes one Markdown file with all of it.
 A suggestion made while email text was in the model's context is labelled as such on its card. Nothing is written without a click.
 Each chat request fits a token budget (`[memory] contextTokens`, default 8000): the system prompt, the profile, recalled facts and summaries (SQLite FTS5), then as many recent turns as fit.
 

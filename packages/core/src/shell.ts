@@ -9,6 +9,7 @@ import { type ClientMessage, type ServerEvent, type Status, type Theme } from '@
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
+import { cleanFact } from './memory/files.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
 import { memoryProposeTool } from './memory/tool.js';
@@ -171,10 +172,20 @@ export class Shell {
     this.broadcast({ type: 'patch', id, item: updated });
   }
 
-  private memoryCommand(cmd: { name: 'memory' } | { name: 'forget'; text: string } | { name: 'export' }, say: (t: string) => void): void {
+  private memoryCommand(
+    cmd: { name: 'memory' } | { name: 'forget'; text: string } | { name: 'export' } | { name: 'remember'; text: string },
+    say: (t: string) => void,
+  ): void {
     const memory = this.o.memory;
     if (!memory) return say('Memory is turned off.');
     const f = memory.files;
+    if (cmd.name === 'remember') {
+      const text = cleanFact(cmd.text);
+      if (!text) return say('Tell me what to remember, for example: /remember Sara prefers short emails');
+      // Typed by the user, so it is chat-sourced; it still needs the Save click like any other card.
+      this.agent.post({ kind: 'memory', id: randomUUID(), text, target: 'facts', source: 'chat', state: 'pending', at: this.clock().getTime() });
+      return;
+    }
     if (cmd.name === 'forget') {
       if (!cmd.text.trim()) return say('Tell me what to forget, for example: /forget Sara prefers short emails');
       const r = f.forget(cmd.text);
@@ -229,6 +240,7 @@ export class Shell {
       case 'memory':
       case 'forget':
       case 'export':
+      case 'remember':
         return this.memoryCommand(cmd, say);
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

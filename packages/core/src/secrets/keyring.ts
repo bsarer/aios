@@ -46,6 +46,9 @@ export const spawnRunner: CommandRunner = (cmd, args, stdin) =>
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
     child.on('error', reject);
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    // A command that exits without reading stdin (e.g. `lookup`) closes the pipe; that
+    // EPIPE must not become an unhandled error that takes the daemon down.
+    child.stdin.on('error', () => {});
     child.stdin.end(stdin ?? '');
   });
 

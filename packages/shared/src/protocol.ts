@@ -33,7 +33,19 @@ export const ChatItem = z.discriminatedUnion('kind', [
     text: z.string(),
     at: z.number(),
   }),
-  // Reserved for A3–A5; the UI already knows how to show them.
+  z.strictObject({
+    kind: z.literal('memory'),
+    id: z.string(),
+    /** The fact or profile line the assistant suggests remembering. */
+    text: z.string(),
+    target: z.enum(['facts', 'profile']),
+    /** 'email' when untrusted email content was in the model's context at the time. */
+    source: z.enum(['chat', 'email']),
+    /** Only a Save click from the user turns 'pending' into 'saved'. */
+    state: z.enum(['pending', 'saved', 'skipped']),
+    at: z.number(),
+  }),
+  // Reserved for A4–A5; the UI already knows how to show them.
   z.strictObject({ kind: z.literal('notification'), id: z.string(), text: z.string(), at: z.number() }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
@@ -59,6 +71,7 @@ export type Theme = z.infer<typeof Theme>;
 export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('send'), text: z.string().min(1).max(20_000) }),
   z.strictObject({ type: z.literal('stop') }),
+  z.strictObject({ type: z.literal('memory'), id: z.string().max(100), decision: z.enum(['save', 'skip']) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 

@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* Defaults; Omarchy theme colours override these at runtime (see theme.ts). */
+:root {
+  --bg: #11131a;
+  --fg: #e6e8ef;
+  --accent: #7aa2f7;
+  --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+  --panel: color-mix(in srgb, var(--fg) 6%, transparent);
+  --border: color-mix(in srgb, var(--fg) 12%, transparent);
+  --danger: #f7768e;
+  --warning: #e0af68;
+  color-scheme: dark;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  color: var(--fg);
+  background:
+    radial-gradient(1200px 800px at 15% -10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
+    radial-gradient(900px 700px at 110% 110%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+    var(--bg);
+  font-family: ui-sans-serif, system-ui, "Inter", sans-serif;
+  font-size: 18px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.glass {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.md p { margin: 0 0 0.6em; }
+.md p:last-child { margin-bottom: 0; }
+.md ul, .md ol { margin: 0 0 0.6em 1.3em; }
+.md ul { list-style: disc; }
+.md ol { list-style: decimal; }
+.md code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--panel); padding: 0.1em 0.35em; border-radius: 6px; }
+.md pre { background: var(--panel); padding: 0.8em 1em; border-radius: 10px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; }
+.md a { color: var(--accent); text-decoration: underline; }
+
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { to { opacity: 0; } }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.9s linear infinite; }

@@ -7,7 +7,8 @@
     "seed": "tsx src/seed-mail.ts",
     "check-mail": "tsx src/check-mail.ts",
     "setup": "tsx src/setup.ts",
-    "uninstall": "tsx src/uninstall.ts"
+    "uninstall": "tsx src/uninstall.ts",
+    "e2e": "tsx src/e2e.ts"
   },
   "dependencies": {
     "@aios/core": "workspace:*",
@@ -16,6 +17,7 @@
     "nodemailer": "^10.1.7"
   },
   "devDependencies": {
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "playwright-core": "^1.56.1"
   }
 }

@@ -73,3 +73,14 @@ describe('Secret', () => {
     expect(s.reveal()).toBe('sk-live-xyz');
   });
 });
+
+describe('spawnRunner', () => {
+  it('survives a command that exits without reading stdin', async () => {
+    const { spawnRunner } = await import('../src/secrets/keyring.js');
+    const big = 'x'.repeat(1 << 20); // larger than the pipe buffer, so the write must fail
+    for (let i = 0; i < 20; i++) {
+      const r = await spawnRunner('true', [], big);
+      expect(r.code).toBe(0);
+    }
+  });
+});

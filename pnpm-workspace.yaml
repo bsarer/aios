@@ -2,3 +2,6 @@ packages:
   - packages/*
   - scripts
   - evals
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild

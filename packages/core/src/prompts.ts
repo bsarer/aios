@@ -2,7 +2,7 @@
 
 export interface PromptContext {
   userName: string;
-  /** e.g. "Sunday 19 October 2026, 09:14 (Europe/Istanbul, UTC+03:00)" */
+  /** e.g. "Monday, 19 October 2026, 09:14 (Europe/Istanbul, UTC+03:00)" */
   now: string;
 }
 

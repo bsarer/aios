@@ -1,0 +1,20 @@
+{
+  "name": "aios",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:stack:up": "docker compose -f docker-compose.test.yml up -d --wait && pnpm --filter @aios/scripts seed",
+    "test:stack:down": "docker compose -f docker-compose.test.yml down",
+    "test:stack:check": "pnpm --filter @aios/scripts check-mail",
+    "setup": "pnpm --filter @aios/scripts run setup"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

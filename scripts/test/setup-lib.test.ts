@@ -17,13 +17,16 @@ function scripted(answers: [match: string, answer: string | boolean][]): Prompte
   };
 }
 
-const providers = { openrouter: 'https://openrouter.ai/api/v1' };
+const providers = {
+  _note: 'ignored',
+  openrouter: { baseUrl: 'https://openrouter.ai/api/v1', extraBody: { provider: { data_collection: 'deny' } }, extraHeaders: {} },
+};
 
 const firstRun: [string, string | boolean][] = [
   ['first name', 'John'],
   ['Timezone', 'Europe/Istanbul'],
   ['GreenMail', true],
-  ['[chat] OpenAI-compatible base URL', 'https://openrouter.ai/api/v1'],
+  ['[chat] Provider', 'openrouter'],
   ['[chat] Model name', 'some/model'],
   ['[chat] API key', 'sk-test-123'],
   ['for triage', true],
@@ -35,6 +38,8 @@ describe('collectSetup', () => {
     const { config, secrets } = await collectSetup(scripted(firstRun), null, providers);
     expect(config.mail.imap).toEqual({ host: '127.0.0.1', port: 3143, tls: false });
     expect(config.models.triage).toEqual(config.models.chat);
+    expect(config.models.chat.baseUrl).toBe('https://openrouter.ai/api/v1');
+    expect(config.models.chat.extraBody).toEqual({ provider: { data_collection: 'deny' } });
     expect(secrets.get('keyring:model-chat')).toBe('sk-test-123');
     expect(JSON.stringify(config)).not.toContain('sk-test-123');
     expect(secretRefs(config)).toEqual(['keyring:mail', 'keyring:model-chat']);
@@ -44,7 +49,7 @@ describe('collectSetup', () => {
     const { config: first } = await collectSetup(scripted(firstRun), null, providers);
     const rerun = scripted([
       ['first name', ''], ['Timezone', ''], ['GreenMail', true],
-      ['[chat] OpenAI-compatible base URL', ''], ['[chat] Model name', ''], ['[chat] API key', ''],
+      ['[chat] Provider', ''], ['[chat] Model name', ''], ['[chat] API key', ''],
       ['for triage', true], ['for nightly', true],
     ]);
     const { config, secrets } = await collectSetup(rerun, first, providers);

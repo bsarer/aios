@@ -1,4 +1,4 @@
-import { AiosConfig, MODEL_ROLES, type ModelRole, type SecretRef } from '@aios/shared';
+import { AiosConfig, MODEL_ROLES, type ModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
 import { TEST_MAILBOX } from './mailbox.js';
 
 /** Asks the user something. `secret` answers must not be echoed. */
@@ -27,7 +27,14 @@ const num = (s: string) => Number.parseInt(s, 10);
  * Walk the user through every setting, using `existing` as defaults so re-running is safe.
  * Pure apart from the prompter, so it is unit-testable.
  */
-export async function collectSetup(p: Prompter, existing: AiosConfig | null, providers: Record<string, string>): Promise<CollectedSetup> {
+export interface ProviderPreset {
+  baseUrl: string;
+  extraBody: Record<string, unknown>;
+  extraHeaders: Record<string, string>;
+}
+export type ProviderPresets = Record<string, ProviderPreset | string>;
+
+export async function collectSetup(p: Prompter, existing: AiosConfig | null, providers: ProviderPresets): Promise<CollectedSetup> {
   const secrets = new Map<SecretRef, string>();
   const keepOrAsk = async (ref: SecretRef, label: string) => {
     const hint = existing ? ' (leave empty to keep the stored one)' : '';
@@ -77,7 +84,8 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
   }
 
   // Models: chat first; triage and nightly may reuse it.
-  const providerList = Object.entries(providers).filter(([k]) => !k.startsWith('_')).map(([k, v]) => `${k}: ${v}`).join(', ');
+  const presets = Object.entries(providers).flatMap(([k, v]) => (typeof v === 'string' ? [] : [[k, v] as const]));
+  const providerList = presets.map(([k]) => k).join(', ');
   const models = {} as AiosConfig['models'];
   for (const role of MODEL_ROLES) {
     const prev = existing?.models[role];
@@ -85,11 +93,19 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
       models[role] = { ...models.chat };
       continue;
     }
-    const baseUrl = await p.ask(`[${role}] OpenAI-compatible base URL (${providerList})`, { default: prev?.baseUrl ?? '' });
+    const answer = await p.ask(`[${role}] Provider (${providerList}) or an OpenAI-compatible base URL`, { default: prev?.baseUrl ?? '' });
+    const preset = presets.find(([k, v]) => k === answer || v.baseUrl === answer)?.[1];
+    const baseUrl = preset?.baseUrl ?? answer;
     const model = await p.ask(`[${role}] Model name (the A1 bake-off picks the default)`, { default: prev?.model ?? '' });
     const apiKeyRef = modelKeyRef(role);
     await keepOrAsk(apiKeyRef, `[${role}] API key`);
-    models[role] = { baseUrl, model, apiKeyRef, maxTokens: prev?.maxTokens ?? 1024, temperature: prev?.temperature ?? 0.3, timeoutMs: prev?.timeoutMs ?? 30_000 };
+    models[role] = ModelRoleConfig.parse({
+      ...(preset ? { extraBody: preset.extraBody, extraHeaders: preset.extraHeaders } : {}),
+      ...(prev && prev.baseUrl === baseUrl ? prev : {}),
+      baseUrl,
+      model,
+      apiKeyRef,
+    });
   }
 
   const config = AiosConfig.parse({

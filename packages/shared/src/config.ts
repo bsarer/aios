@@ -18,6 +18,15 @@ export const ModelRoleConfig = z.strictObject({
   maxTokens: z.int().positive().max(200_000).default(1024),
   temperature: z.number().min(0).max(2).default(0.3),
   timeoutMs: z.int().positive().default(30_000),
+  /** 'json_schema' where the provider supports it, else 'json_object' + zod validation. */
+  structuredOutput: z.enum(['json_schema', 'json_object']).default('json_schema'),
+  /**
+   * Provider-specific request fields merged into every request body, e.g. OpenRouter's
+   * `provider = { data_collection = "deny", require_parameters = true }`. Core fields
+   * (model, messages, tools, stream...) always win over these.
+   */
+  extraBody: z.record(z.string(), z.unknown()).default({}),
+  extraHeaders: z.record(z.string(), z.string()).default({}),
 });
 export type ModelRoleConfig = z.infer<typeof ModelRoleConfig>;
 

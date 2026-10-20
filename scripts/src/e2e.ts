@@ -16,7 +16,10 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { connect as netConnect } from 'node:net';
+import { ImapFlow } from 'imapflow';
 import { type Page, chromium } from 'playwright-core';
+import { TEST_MAILBOX } from './mailbox.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
@@ -31,15 +34,33 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let raw = '';
   for await (const c of req) raw += c;
-  const body = JSON.parse(raw) as { messages: { role: string; content: string | null }[] };
+  const body = JSON.parse(raw) as { stream?: boolean; response_format?: unknown; messages: { role: string; content: string | null }[] };
   const last = body.messages.at(-1)!;
   const lastUser = [...body.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  if (body.response_format) {
+    // Triage: one item per wrapped message; the first is urgent.
+    const ids = [...(last.content ?? '').matchAll(/id="([^"]+)"/g)].map((m) => m[1]!);
+    const items = ids.map((id, i) => ({ id, urgency: i === 0 ? 'high' : 'normal', summary: `Mock summary ${i + 1}`, needs_reply: i === 0, suggested_action: 'read', category: 'work' }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return void res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 60, cost: 0.0002 } }));
+  }
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   const finish = (cost: number) => {
     chunk(res, { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 500, completion_tokens: 40, cost } });
     res.end('data: [DONE]\n\n');
   };
 
+  if (last.role === 'tool' && /<untrusted source="email"/.test(last.content ?? '')) {
+    const subject = /Subject: (.*)/.exec(last.content ?? '')?.[1] ?? '?';
+    chunk(res, { choices: [{ delta: { content: `That email is about: ${subject}` } }] });
+    return finish(0.0004);
+  }
+  const readId = last.role === 'user' ? /^Read email (\S+)$/.exec(lastUser)?.[1] : undefined;
+  if (readId) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_r', function: { name: 'mail_read', arguments: JSON.stringify({ id: readId }) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
   if (last.role === 'tool' && /card/.test(last.content ?? '')) {
     chunk(res, { choices: [{ delta: { content: 'Tap **Save** if that is right.' } }] });
     return finish(0.0004);
@@ -76,6 +97,23 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
   finish(0.0005);
 }
 
+// ── Test mailbox ─────────────────────────────────────────────────────────────
+
+async function mailStackUp(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const s = netConnect(TEST_MAILBOX.imapPort, TEST_MAILBOX.host);
+    s.once('connect', () => (s.destroy(), resolve(true)));
+    s.once('error', () => resolve(false));
+  });
+}
+
+async function deliverTestMail(subject: string): Promise<void> {
+  const c = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });
+  await c.connect();
+  await c.append('INBOX', `From: Sara Kaya <sara.kaya@northwind.example>\r\nTo: ${TEST_MAILBOX.user}\r\nSubject: ${subject}\r\nMessage-ID: <e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@aios.test>\r\nDate: ${new Date().toUTCString()}\r\n\r\nPlease look at this today.`);
+  await c.logout();
+}
+
 // ── Harness ──────────────────────────────────────────────────────────────────
 
 let failures = 0;
@@ -106,7 +144,8 @@ async function main(): Promise<void> {
   const tmp = mkdtempSync(join(tmpdir(), 'aios-e2e-'));
   const bin = join(tmp, 'bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'secret-tool'), '#!/bin/sh\n[ "$1" = lookup ] && printf test-key && exit 0\nexit 1\n');
+  // Fake keyring: the GreenMail test password for the mail account, a dummy key for the model.
+  writeFileSync(join(bin, 'secret-tool'), '#!/bin/sh\n[ "$1" = lookup ] || exit 1\n[ "$5" = mail ] && printf test-only-password && exit 0\nprintf test-key\n');
   chmodSync(join(bin, 'secret-tool'), 0o755);
   const port = 17_000 + Math.floor(Math.random() * 1000);
   mkdirSync(join(tmp, 'config', 'aios'), { recursive: true });
@@ -115,7 +154,7 @@ async function main(): Promise<void> {
     join(tmp, 'config', 'aios', 'config.toml'),
     `[user]\nname = "John"\ntimezone = "${Intl.DateTimeFormat().resolvedOptions().timeZone}"\n` +
       `[models.chat]\n${role}[models.triage]\n${role}[models.nightly]\n${role}` +
-      `[mail]\naddress = "john@aios.test"\nusername = "john@aios.test"\npasswordRef = "keyring:mail"\n` +
+      `[mail]\naddress = "john@aios.test"\nusername = "john@aios.test"\npasswordRef = "keyring:mail"\nbatchWindowSeconds = 2\n` +
       `imap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
@@ -233,6 +272,24 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('fact persists across a restart', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).includes('- Sara prefers short emails')));
     await shot(page, '7-memory-after-restart');
+    // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
+    if (await mailStackUp()) {
+      check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Mail: connected'), 15_000));
+      const stamp = Date.now();
+      await deliverTestMail(`E2E urgent ${stamp}`);
+      await deliverTestMail(`E2E normal ${stamp}`);
+      const note = page.locator('[data-kind="notification"]').last();
+      check('new mail posts one notification', await waitFor(async () => (await note.count()) > 0 && (await note.getByTestId('mail-row').count()) === 2, 40_000));
+      check('notification headline counts urgent mail', (await note.innerText()).includes('2 new emails. 1 looks urgent.'));
+      await shot(page, '8-mail-notification');
+      await note.getByTestId('mail-ignore').last().click();
+      check('Ignore greys out the row', await waitFor(async () => (await note.getByTestId('mail-ignore').count()) === 1));
+      await note.getByTestId('mail-read').first().click();
+      check('Read opens the email through mail_read', await waitFor(async () => (await lastAssistant().innerText()).includes(`That email is about: E2E urgent ${stamp}`), 15_000));
+      await shot(page, '9-mail-read');
+    } else {
+      console.log('SKIP  mail checks (GreenMail not running; `pnpm test:stack:up` to include them)');
+    }
     check('no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
   } catch (err) {
     console.log(`\n--- aios-core output ---\n${coreLog}`);

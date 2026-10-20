@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type ClientMessage, type ServerEvent, type Status, type Theme } from '@aios/shared';
+import { type ChatItem, type ClientMessage, type ServerEvent, type Status, type Theme } from '@aios/shared';
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
@@ -30,6 +30,10 @@ export interface ShellOptions {
   readBattery: () => Promise<Battery | null>;
   readWifi: () => Promise<Wifi | null>;
   theme?: Theme;
+  /** Called after /resume, so queued work (mail triage) can catch up. */
+  onResume?: () => void;
+  /** Called when the user clicks Ignore on a mail in a notification. */
+  onIgnoreMail?: (mailId: string) => void;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -46,6 +50,7 @@ export class Shell {
   private battery: Battery | null = null;
   private wifi: Wifi | null = null;
   private theme: Theme;
+  private mail: Status['mail'] = 'not_configured';
   private readonly clock: () => Date;
 
   constructor(private readonly o: ShellOptions) {
@@ -87,7 +92,7 @@ export class Shell {
     return {
       battery: this.battery,
       wifi: this.wifi,
-      mail: 'not_configured', // A4
+      mail: this.mail,
       agent: this.paused ? 'paused' : this.busy ? 'working' : 'idle',
       costTodayUsd: this.o.store.usageSince(since).costUsd,
       costCapUsd: this.o.costCapUsd,
@@ -97,6 +102,12 @@ export class Shell {
 
   pushStatus(): void {
     this.broadcast({ type: 'status', status: this.status() });
+  }
+
+  setMailStatus(mail: Status['mail']): void {
+    if (mail === this.mail) return;
+    this.mail = mail;
+    this.pushStatus();
   }
 
   setTheme(theme: Theme): void {
@@ -129,6 +140,7 @@ export class Shell {
       return;
     }
     if (msg.type === 'memory') return this.decideMemory(msg.id, msg.decision);
+    if (msg.type === 'mail_ignore') return this.ignoreMail(msg.itemId, msg.mailId);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -170,6 +182,15 @@ export class Shell {
     const updated = { ...item, text, state: decision === 'save' ? 'saved' : 'skipped' } as const;
     this.o.store.saveItem(updated);
     this.broadcast({ type: 'patch', id, item: updated });
+  }
+
+  private ignoreMail(itemId: string, mailId: string): void {
+    const item = this.o.store.getItem(itemId);
+    if (item?.kind !== 'notification' || !item.mails?.some((m) => m.id === mailId)) return;
+    const updated: ChatItem = { ...item, mails: item.mails.map((m) => (m.id === mailId ? { ...m, ignored: true } : m)) };
+    this.o.store.saveItem(updated);
+    this.broadcast({ type: 'patch', id: itemId, item: updated });
+    this.o.onIgnoreMail?.(mailId);
   }
 
   private memoryCommand(
@@ -232,6 +253,7 @@ export class Shell {
       case 'resume':
         this.o.store.setSetting('paused', '0');
         say('Resumed.');
+        this.o.onResume?.();
         return this.pushStatus();
       case 'cost': {
         const u = this.o.store.usageSince(startOfDay(this.clock().getTime(), this.o.timeZone));

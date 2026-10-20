@@ -1,4 +1,4 @@
-import type { ChatItem } from '@aios/shared/protocol';
+import type { ChatItem, MailRow } from '@aios/shared/protocol';
 import Markdown from 'react-markdown';
 
 /** react-markdown renders no raw HTML by default, which matters: replies can quote email text. */
@@ -33,7 +33,57 @@ function MemoryCard({ item, onDecide }: { item: Extract<ChatItem, { kind: 'memor
   );
 }
 
-export function Message({ item, onMemoryDecision }: { item: ChatItem; onMemoryDecision: (id: string, decision: 'save' | 'skip') => void }) {
+export interface MessageActions {
+  onMemoryDecision: (id: string, decision: 'save' | 'skip') => void;
+  /** Sends a chat message as if typed; only ever with text the UI wrote, never mail content. */
+  onSend: (text: string) => void;
+  onIgnoreMail: (itemId: string, mailId: string) => void;
+}
+
+const URGENCY_COLOR = { high: 'var(--danger)', normal: 'var(--accent)', low: 'var(--muted)' } as const;
+
+/** Mail-derived text (from, subject, summary) is rendered as plain text, never Markdown or HTML. */
+function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: 'notification' }>; actions: MessageActions }) {
+  const rows = item.mails ?? [];
+  const main = rows.filter((r) => r.urgency !== 'low');
+  const low = rows.filter((r) => r.urgency === 'low');
+  const row = (r: MailRow) => (
+    <li key={r.id} data-testid="mail-row" data-urgency={r.urgency} className={`py-2 ${r.ignored ? 'opacity-40' : ''}`}>
+      <div className="flex items-baseline gap-2">
+        <span style={{ color: URGENCY_COLOR[r.urgency] }}>●</span>
+        <span className="font-medium">{r.from.replace(/\s*<[^>]*>$/, '')}</span>
+        <span style={{ color: 'var(--muted)' }}>· {r.subject}</span>
+      </div>
+      <div className="ml-5 text-[15px]">{r.summary}</div>
+      {!r.ignored && (
+        <div className="ml-5 mt-1 flex gap-2 text-sm">
+          <button type="button" data-testid="mail-read" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onSend(`Read email ${r.id}`)}>
+            Read
+          </button>
+          <button type="button" disabled title="Replies arrive in the next milestone" className="glass rounded-lg px-2.5 py-0.5 opacity-40">
+            Draft reply
+          </button>
+          <button type="button" data-testid="mail-ignore" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onIgnoreMail(item.id, r.id)}>
+            Ignore
+          </button>
+        </div>
+      )}
+    </li>
+  );
+  return (
+    <div data-kind="notification" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="font-medium">{item.text}</div>
+      {main.length > 0 && <ul className="mt-1">{main.map(row)}</ul>}
+      {low.length > 0 && (
+        <div data-testid="mail-digest" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          Low priority: {low.map((r) => `${r.from.replace(/\s*<[^>]*>$/, '')} (${r.subject})`).join(', ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Message({ item, actions }: { item: ChatItem; actions: MessageActions }) {
   switch (item.kind) {
     case 'user':
       return (
@@ -70,12 +120,8 @@ export function Message({ item, onMemoryDecision }: { item: ChatItem; onMemoryDe
       );
     }
     case 'memory':
-      return <MemoryCard item={item} onDecide={(d) => onMemoryDecision(item.id, d)} />;
+      return <MemoryCard item={item} onDecide={(d) => actions.onMemoryDecision(item.id, d)} />;
     case 'notification':
-      return (
-        <div data-kind="notification" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
-          {item.text}
-        </div>
-      );
+      return <MailNotification item={item} actions={actions} />;
   }
 }

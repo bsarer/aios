@@ -15,5 +15,5 @@
 ## Commands
 - `pnpm test` unit tests, `pnpm typecheck` strict type check.
 - `pnpm test:stack:up` starts GreenMail and seeds the fixture mailbox; `pnpm test:stack:check` lists it over IMAP; `pnpm test:stack:down` stops it.
-- `pnpm start` builds the UI and runs aios-core on 127.0.0.1:7777; `pnpm test:e2e` checks the chat end to end in Chromium with a mock model.
+- `pnpm start` builds the UI and runs aios-core on 127.0.0.1:7777; `pnpm test:e2e` checks the chat end to end in Chromium with a mock model (mail checks need the test stack up). `scripts/test/mail.int.test.ts` runs against GreenMail and is skipped when it is down.
 - Test mailbox: `john@aios.test` / `test-only-password` on IMAP 127.0.0.1:3143, SMTP 127.0.0.1:3025 (plain, local only).

@@ -6,6 +6,18 @@ import { z } from 'zod';
 
 // ── Chat items (what the UI renders) ─────────────────────────────────────────
 
+/** One triaged email in a new-mail notification. from/subject/summary come from email: show as plain text only. */
+export const MailRow = z.strictObject({
+  id: z.string(),
+  from: z.string(),
+  subject: z.string(),
+  summary: z.string(),
+  urgency: z.enum(['low', 'normal', 'high']),
+  needsReply: z.boolean(),
+  ignored: z.boolean().optional(),
+});
+export type MailRow = z.infer<typeof MailRow>;
+
 export const ChatItem = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('user'), id: z.string(), text: z.string(), at: z.number() }),
   z.strictObject({
@@ -45,8 +57,14 @@ export const ChatItem = z.discriminatedUnion('kind', [
     state: z.enum(['pending', 'saved', 'skipped']),
     at: z.number(),
   }),
-  // Reserved for A4–A5; the UI already knows how to show them.
-  z.strictObject({ kind: z.literal('notification'), id: z.string(), text: z.string(), at: z.number() }),
+  z.strictObject({
+    kind: z.literal('notification'),
+    id: z.string(),
+    /** Written by code, never by a model; mail-derived text only appears in `mails`. */
+    text: z.string(),
+    at: z.number(),
+    mails: z.array(MailRow).optional(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -72,6 +90,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('send'), text: z.string().min(1).max(20_000) }),
   z.strictObject({ type: z.literal('stop') }),
   z.strictObject({ type: z.literal('memory'), id: z.string().max(100), decision: z.enum(['save', 'skip']) }),
+  z.strictObject({ type: z.literal('mail_ignore'), itemId: z.string().max(100), mailId: z.string().max(100) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 

@@ -14,6 +14,12 @@ const MIGRATIONS = [
   // A3: full-text index over long-term memory files (rebuilt from the files, never the source of truth).
   `CREATE VIRTUAL TABLE memory_fts USING fts5(kind UNINDEXED, ref UNINDEXED, body, tokenize = 'unicode61 remove_diacritics 2');
    CREATE INDEX turns_at ON turns(at);`,
+  // A4: mail watcher state and the triage queue (plan §5).
+  `CREATE TABLE mail_state (folder TEXT PRIMARY KEY, uidvalidity TEXT NOT NULL, last_uid INTEGER NOT NULL, checked_at INTEGER NOT NULL);
+   CREATE TABLE mail_events (message_id TEXT PRIMARY KEY, mail_id TEXT NOT NULL, from_text TEXT NOT NULL, subject TEXT NOT NULL,
+                             date INTEGER, received_at INTEGER NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, triage TEXT, attempts INTEGER NOT NULL DEFAULT 0);
+   CREATE INDEX mail_events_status ON mail_events(status, received_at);
+   CREATE TABLE notification_log (at INTEGER NOT NULL);`,
 ];
 
 export interface UsageRow {

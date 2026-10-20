@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 
 /** One line per event in an append-only JSONL file (CLAUDE.md: every tool call is logged). */
 export interface AuditEntry {
-  kind: 'tool' | 'model' | 'command' | 'memory';
+  kind: 'tool' | 'model' | 'command' | 'memory' | 'mail';
   [key: string]: unknown;
 }
 

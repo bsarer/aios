@@ -8,18 +8,19 @@
   },
   "dependencies": {
     "@aios/shared": "workspace:*",
-    "zod": "^4.6.7",
-    "fastify": "^5.12.7",
-    "@fastify/websocket": "^11.3.4",
     "@fastify/static": "^10.1.6",
+    "@fastify/websocket": "^11.3.4",
     "better-sqlite3": "^13.0.3",
-    "smol-toml": "^1.9.1"
+    "fastify": "^5.12.7",
+    "imapflow": "^2.5.5",
+    "smol-toml": "^1.9.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "ws": "^8.22.0",
     "@types/ws": "^8.18.2",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "ws": "^8.22.0"
   },
   "scripts": {
     "start": "tsx src/main.ts"

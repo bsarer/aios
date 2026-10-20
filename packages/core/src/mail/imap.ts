@@ -42,6 +42,7 @@ export interface MessageSummary {
 
 export interface FullMessage extends MessageSummary {
   cc: Address[];
+  replyTo: Address[];
   inReplyTo: string | null;
   references: string[];
   text: string;
@@ -98,10 +99,11 @@ async function readStream(s: Readable, maxBytes: number): Promise<string> {
   return Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8');
 }
 
-function parseReferences(headers: Buffer | undefined): string[] {
+/** Message-IDs in one header line (References or In-Reply-To) of a fetched header block. */
+function headerIds(headers: Buffer | undefined, name: 'references' | 'in-reply-to'): string[] {
   const raw = headers?.toString('utf8') ?? '';
   const unfolded = raw.replace(/\r?\n[ \t]+/g, ' ');
-  const line = /^references:\s*(.*)$/im.exec(unfolded)?.[1] ?? '';
+  const line = new RegExp(`^${name}:\\s*(.*)$`, 'im').exec(unfolded)?.[1] ?? '';
   return line.match(/<[^<>\s]+>/g) ?? [];
 }
 
@@ -121,7 +123,7 @@ async function matchAnyField(client: ImapFlow, text: string, extra: { since?: Da
 
 /** Headers, the readable body and attachment names of one message in the selected folder. */
 export async function readFull(client: ImapFlow, folder: Folder, uid: number): Promise<FullMessage | null> {
-  const msg = await client.fetchOne(String(uid), { uid: true, envelope: true, internalDate: true, bodyStructure: true, headers: ['references'] }, { uid: true });
+  const msg = await client.fetchOne(String(uid), { uid: true, envelope: true, internalDate: true, bodyStructure: true, headers: ['references', 'in-reply-to'] }, { uid: true });
   if (!msg) return null;
   const parts = walkStructure(msg.bodyStructure);
   const download = async (part: string | undefined) => {
@@ -134,8 +136,10 @@ export async function readFull(client: ImapFlow, folder: Folder, uid: number): P
   return {
     ...summaryOf(folder, msg),
     cc: addr(msg.envelope?.cc),
-    inReplyTo: msg.envelope?.inReplyTo ?? null,
-    references: parseReferences(msg.headers),
+    replyTo: addr(msg.envelope?.replyTo),
+    // Some servers (GreenMail) leave In-Reply-To out of ENVELOPE, so read the header too.
+    inReplyTo: msg.envelope?.inReplyTo || (headerIds(msg.headers, 'in-reply-to')[0] ?? null),
+    references: headerIds(msg.headers, 'references'),
     text: text ?? '',
     html,
     attachments: parts.attachments,
@@ -243,6 +247,46 @@ export class MailClient {
       if (full) out.push(full);
     }
     return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
+  }
+
+  private special: Partial<Record<'drafts' | 'sent', string>> = {};
+
+  /** The Drafts or Sent folder: by special-use flag when the server reports one, else by name. */
+  async specialFolder(kind: 'drafts' | 'sent'): Promise<string> {
+    const known = this.special[kind];
+    if (known) return known;
+    const client = await this.connection();
+    const list = await client.list();
+    const flag = kind === 'drafts' ? '\\Drafts' : '\\Sent';
+    const name = kind === 'drafts' ? 'Drafts' : 'Sent';
+    const path = list.find((m) => m.specialUse === flag)?.path ?? list.find((m) => m.path.toLowerCase() === name.toLowerCase())?.path;
+    if (!path) await client.mailboxCreate(name);
+    return (this.special[kind] = path ?? name);
+  }
+
+  /** Append a message; returns its UID when the server reports one (UIDPLUS) or it can be found by Message-ID. */
+  async append(folder: string, raw: Buffer, flags: string[], messageId?: string): Promise<number | null> {
+    const client = await this.connection();
+    const res = await client.append(folder, raw, flags);
+    if (res && res.uid) return res.uid;
+    if (!messageId) return null;
+    const lock = await client.getMailboxLock(folder, { readOnly: true });
+    try {
+      const uids = (await client.search({ header: { 'message-id': messageId } }, { uid: true })) || [];
+      return uids.at(-1) ?? null;
+    } finally {
+      lock.release();
+    }
+  }
+
+  async deleteUid(folder: string, uid: number): Promise<void> {
+    const client = await this.connection();
+    const lock = await client.getMailboxLock(folder);
+    try {
+      await client.messageDelete(String(uid), { uid: true });
+    } finally {
+      lock.release();
+    }
   }
 
   async close(): Promise<void> {

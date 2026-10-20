@@ -50,6 +50,8 @@ export const MailConfig = z.strictObject({
   smtp: Endpoint,
   pollIntervalSeconds: z.int().min(10).default(30),
   batchWindowSeconds: z.int().min(0).default(20),
+  /** Append a copy of sent mail to Sent. Turn off for servers that do it themselves (Gmail). */
+  saveSentCopy: z.boolean().default(true),
 });
 export type MailConfig = z.infer<typeof MailConfig>;
 

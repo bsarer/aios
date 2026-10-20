@@ -65,6 +65,24 @@ export const ChatItem = z.discriminatedUnion('kind', [
     at: z.number(),
     mails: z.array(MailRow).optional(),
   }),
+  z.strictObject({
+    kind: z.literal('draft'),
+    /** Also the draft id the model sees. */
+    id: z.string(),
+    to: z.array(z.string()),
+    subject: z.string(),
+    body: z.string(),
+    /** Mail id (e.g. INBOX:37) this replies to. */
+    inReplyTo: z.string().optional(),
+    /** sha256 of exactly what is shown; Send echoes it back and only that text is sent. */
+    hash: z.string(),
+    /** Only a Send click moves 'pending' to 'sending'; editing gives a new hash. */
+    state: z.enum(['pending', 'sending', 'sent', 'discarded', 'failed']),
+    /** Written by code, e.g. a recipient that came from neither the user nor the original email. */
+    warnings: z.array(z.string()),
+    error: z.string().optional(),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -91,6 +109,15 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('stop') }),
   z.strictObject({ type: z.literal('memory'), id: z.string().max(100), decision: z.enum(['save', 'skip']) }),
   z.strictObject({ type: z.literal('mail_ignore'), itemId: z.string().max(100), mailId: z.string().max(100) }),
+  z.strictObject({ type: z.literal('draft_send'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('draft_discard'), id: z.string().max(100) }),
+  z.strictObject({
+    type: z.literal('draft_edit'),
+    id: z.string().max(100),
+    to: z.array(z.email()).min(1).max(20),
+    subject: z.string().max(500),
+    body: z.string().max(50_000),
+  }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 

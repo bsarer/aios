@@ -1,4 +1,5 @@
 import type { ChatItem, MailRow } from '@aios/shared/protocol';
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 
 /** react-markdown renders no raw HTML by default, which matters: replies can quote email text. */
@@ -38,6 +39,118 @@ export interface MessageActions {
   /** Sends a chat message as if typed; only ever with text the UI wrote, never mail content. */
   onSend: (text: string) => void;
   onIgnoreMail: (itemId: string, mailId: string) => void;
+  /** Send echoes the hash of what the card shows; the server sends only that. */
+  onDraftSend: (id: string, hash: string) => void;
+  onDraftDiscard: (id: string) => void;
+  onDraftEdit: (id: string, edit: { to: string[]; subject: string; body: string }) => void;
+}
+
+type DraftItem = Extract<ChatItem, { kind: 'draft' }>;
+
+const DRAFT_STATE_TEXT: Record<DraftItem['state'], string> = {
+  pending: '',
+  sending: 'Sending…',
+  sent: '✓ Sent',
+  discarded: 'Discarded',
+  failed: '',
+};
+
+/** The approval card (plan §7). Draft text is plain text, never Markdown or HTML. */
+function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions }) {
+  const [editing, setEditing] = useState(false);
+  const [to, setTo] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const open = item.state === 'pending' || item.state === 'failed';
+  const startEdit = () => {
+    setTo(item.to.join(', '));
+    setSubject(item.subject);
+    setBody(item.body);
+    setEditing(true);
+  };
+  const recipients = to.split(/[,;\s]+/).filter(Boolean);
+  const validTo = recipients.length > 0 && recipients.every((r) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(r));
+  const field = 'w-full rounded-lg bg-transparent px-2 py-1 outline-none';
+  const fieldStyle = { border: '1px solid var(--muted)' };
+  return (
+    <div data-kind="draft" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.warnings.length ? 'var(--warning)' : 'var(--accent)'}` }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {item.inReplyTo ? 'Reply draft' : 'Email draft'}
+      </div>
+      {editing ? (
+        <div className="mt-2 flex flex-col gap-2">
+          <label className="text-sm" style={{ color: 'var(--muted)' }}>
+            To
+            <input data-testid="draft-to" className={field} style={fieldStyle} value={to} onChange={(e) => setTo(e.target.value)} />
+          </label>
+          <label className="text-sm" style={{ color: 'var(--muted)' }}>
+            Subject
+            <input data-testid="draft-subject" className={field} style={fieldStyle} value={subject} onChange={(e) => setSubject(e.target.value)} />
+          </label>
+          <textarea data-testid="draft-body" className={`${field} min-h-40 font-[inherit]`} style={fieldStyle} value={body} onChange={(e) => setBody(e.target.value)} />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              data-testid="draft-save"
+              disabled={!validTo}
+              className="rounded-lg px-3 py-1 disabled:opacity-40"
+              style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+              onClick={() => {
+                actions.onDraftEdit(item.id, { to: recipients, subject, body });
+                setEditing(false);
+              }}
+            >
+              Save changes
+            </button>
+            <button type="button" className="glass rounded-lg px-3 py-1" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-[15px]">
+            <dt style={{ color: 'var(--muted)' }}>To</dt>
+            <dd data-testid="draft-to-text">{item.to.join(', ')}</dd>
+            <dt style={{ color: 'var(--muted)' }}>Subject</dt>
+            <dd>{item.subject}</dd>
+          </dl>
+          <div data-testid="draft-body-text" className="mt-2 whitespace-pre-wrap rounded-lg px-3 py-2" style={{ background: 'rgba(127,127,127,0.08)' }}>
+            {item.body}
+          </div>
+        </>
+      )}
+      {item.warnings.map((w) => (
+        <div key={w} data-testid="draft-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          {w}
+        </div>
+      ))}
+      {item.error && (
+        <div className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.error}
+        </div>
+      )}
+      {open && !editing ? (
+        <div className="mt-3 flex gap-2">
+          <button type="button" data-testid="draft-send" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onDraftSend(item.id, item.hash)}>
+            {item.state === 'failed' ? 'Try again' : 'Send'}
+          </button>
+          <button type="button" data-testid="draft-edit" className="glass rounded-lg px-3 py-1" onClick={startEdit}>
+            Edit
+          </button>
+          <button type="button" data-testid="draft-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onDraftDiscard(item.id)}>
+            Discard
+          </button>
+        </div>
+      ) : (
+        !open && (
+          <div data-testid="draft-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+            {DRAFT_STATE_TEXT[item.state]}
+          </div>
+        )
+      )}
+    </div>
+  );
 }
 
 const URGENCY_COLOR = { high: 'var(--danger)', normal: 'var(--accent)', low: 'var(--muted)' } as const;
@@ -60,7 +173,7 @@ function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: '
           <button type="button" data-testid="mail-read" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onSend(`Read email ${r.id}`)}>
             Read
           </button>
-          <button type="button" disabled title="Replies arrive in the next milestone" className="glass rounded-lg px-2.5 py-0.5 opacity-40">
+          <button type="button" data-testid="mail-draft-reply" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onSend(`Draft a reply to email ${r.id}`)}>
             Draft reply
           </button>
           <button type="button" data-testid="mail-ignore" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onIgnoreMail(item.id, r.id)}>
@@ -123,5 +236,7 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <MemoryCard item={item} onDecide={(d) => actions.onMemoryDecision(item.id, d)} />;
     case 'notification':
       return <MailNotification item={item} actions={actions} />;
+    case 'draft':
+      return <DraftCard item={item} actions={actions} />;
   }
 }

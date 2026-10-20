@@ -13,6 +13,9 @@ export function App() {
     onMemoryDecision: (id, decision) => send({ type: 'memory', id, decision }),
     onSend: (text) => send({ type: 'send', text }),
     onIgnoreMail: (itemId, mailId) => send({ type: 'mail_ignore', itemId, mailId }),
+    onDraftSend: (id, hash) => send({ type: 'draft_send', id, hash }),
+    onDraftDiscard: (id) => send({ type: 'draft_discard', id }),
+    onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
   };
 
   // Braced bodies: an effect may only return a cleanup function, and newer Chromium

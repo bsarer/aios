@@ -57,6 +57,9 @@ importers:
       imapflow:
         specifier: ^2.5.5
         version: 2.5.5
+      nodemailer:
+        specifier: ^10.1.7
+        version: 10.1.7
       smol-toml:
         specifier: ^1.9.1
         version: 1.9.1

@@ -7,7 +7,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDir, parseConfig } from '@aios/shared';
 import { AuditLog } from './audit.js';
+import { ApprovalBroker } from './mail/approvals.js';
+import { draftTools } from './mail/draft-tools.js';
 import { MailClient, type MailConnection } from './mail/imap.js';
+import { ImapSmtpOutbox } from './mail/outbox.js';
 import { MailPipeline } from './mail/pipeline.js';
 import { MailState } from './mail/state.js';
 import { mailTools } from './mail/tools.js';
@@ -67,6 +70,24 @@ async function main(): Promise<void> {
   };
   const mailClient = new MailClient(mailConnection);
   for (const t of mailTools(mailClient)) tools.register(t);
+  const outbox = new ImapSmtpOutbox(mailClient, {
+    host: config.mail.smtp.host,
+    port: config.mail.smtp.port,
+    tls: config.mail.smtp.tls,
+    user: config.mail.username,
+    password: mailConnection.password,
+  });
+  const approvals = new ApprovalBroker({
+    store,
+    outbox,
+    audit,
+    from: { name: config.user.name, address: config.mail.address },
+    saveSentCopy: config.mail.saveSentCopy,
+    // The shell is created next; drafts only appear once it exists.
+    show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
+    notice: (level, text) => shell?.agent.notice(level, text),
+  });
+  for (const t of draftTools({ broker: approvals, mail: mailClient, userName: config.user.name, selfAddress: config.mail.address })) tools.register(t);
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
   const nightly = new Nightly({
     memory,
@@ -91,6 +112,7 @@ async function main(): Promise<void> {
     readWifi,
     theme: await readTheme(themePath),
     memory,
+    approvals,
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),
   });
@@ -133,6 +155,7 @@ async function main(): Promise<void> {
     devOrigins: process.env.AIOS_UI_DEV_ORIGIN ? [process.env.AIOS_UI_DEV_ORIGIN] : [],
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
+  approvals.recover();
   shell.greet();
   await shell.refreshSystemStatus();
   setInterval(() => void shell.refreshSystemStatus(), 15_000).unref();

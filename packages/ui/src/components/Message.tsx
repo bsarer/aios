@@ -69,7 +69,7 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
     setEditing(true);
   };
   const recipients = to.split(/[,;\s]+/).filter(Boolean);
-  const validTo = recipients.length > 0 && recipients.every((r) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r));
+  const validTo = recipients.length > 0 && recipients.every((r) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(r));
   const field = 'w-full rounded-lg bg-transparent px-2 py-1 outline-none';
   const fieldStyle = { border: '1px solid var(--muted)' };
   return (

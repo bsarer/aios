@@ -99,10 +99,11 @@ async function readStream(s: Readable, maxBytes: number): Promise<string> {
   return Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8');
 }
 
-function parseReferences(headers: Buffer | undefined): string[] {
+/** Message-IDs in one header line (References or In-Reply-To) of a fetched header block. */
+function headerIds(headers: Buffer | undefined, name: 'references' | 'in-reply-to'): string[] {
   const raw = headers?.toString('utf8') ?? '';
   const unfolded = raw.replace(/\r?\n[ \t]+/g, ' ');
-  const line = /^references:\s*(.*)$/im.exec(unfolded)?.[1] ?? '';
+  const line = new RegExp(`^${name}:\\s*(.*)$`, 'im').exec(unfolded)?.[1] ?? '';
   return line.match(/<[^<>\s]+>/g) ?? [];
 }
 
@@ -122,7 +123,7 @@ async function matchAnyField(client: ImapFlow, text: string, extra: { since?: Da
 
 /** Headers, the readable body and attachment names of one message in the selected folder. */
 export async function readFull(client: ImapFlow, folder: Folder, uid: number): Promise<FullMessage | null> {
-  const msg = await client.fetchOne(String(uid), { uid: true, envelope: true, internalDate: true, bodyStructure: true, headers: ['references'] }, { uid: true });
+  const msg = await client.fetchOne(String(uid), { uid: true, envelope: true, internalDate: true, bodyStructure: true, headers: ['references', 'in-reply-to'] }, { uid: true });
   if (!msg) return null;
   const parts = walkStructure(msg.bodyStructure);
   const download = async (part: string | undefined) => {
@@ -136,8 +137,9 @@ export async function readFull(client: ImapFlow, folder: Folder, uid: number): P
     ...summaryOf(folder, msg),
     cc: addr(msg.envelope?.cc),
     replyTo: addr(msg.envelope?.replyTo),
-    inReplyTo: msg.envelope?.inReplyTo ?? null,
-    references: parseReferences(msg.headers),
+    // Some servers (GreenMail) leave In-Reply-To out of ENVELOPE, so read the header too.
+    inReplyTo: msg.envelope?.inReplyTo || (headerIds(msg.headers, 'in-reply-to')[0] ?? null),
+    references: headerIds(msg.headers, 'references'),
     text: text ?? '',
     html,
     attachments: parts.attachments,

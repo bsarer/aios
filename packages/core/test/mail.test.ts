@@ -357,6 +357,7 @@ describe('mail tools', () => {
         from: { name: 'Sara', address: 's@x' },
         to: [{ name: 'John', address: 'j@x' }],
         cc: [],
+        replyTo: [],
         subject: 'Hi',
         date: new Date('2026-10-19T08:00:00Z'),
         inReplyTo: null,
@@ -370,7 +371,7 @@ describe('mail tools', () => {
       return [];
     },
   };
-  const ctx = { signal: new AbortController().signal, untrustedInContext: false };
+  const ctx = { signal: new AbortController().signal, untrustedInContext: false, userText: '' };
   const [search, read, thread] = mailTools(fake);
 
   it('are read tier and marked as returning untrusted text', () => {

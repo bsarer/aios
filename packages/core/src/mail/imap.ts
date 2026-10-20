@@ -42,6 +42,7 @@ export interface MessageSummary {
 
 export interface FullMessage extends MessageSummary {
   cc: Address[];
+  replyTo: Address[];
   inReplyTo: string | null;
   references: string[];
   text: string;
@@ -134,6 +135,7 @@ export async function readFull(client: ImapFlow, folder: Folder, uid: number): P
   return {
     ...summaryOf(folder, msg),
     cc: addr(msg.envelope?.cc),
+    replyTo: addr(msg.envelope?.replyTo),
     inReplyTo: msg.envelope?.inReplyTo ?? null,
     references: parseReferences(msg.headers),
     text: text ?? '',
@@ -243,6 +245,46 @@ export class MailClient {
       if (full) out.push(full);
     }
     return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
+  }
+
+  private special: Partial<Record<'drafts' | 'sent', string>> = {};
+
+  /** The Drafts or Sent folder: by special-use flag when the server reports one, else by name. */
+  async specialFolder(kind: 'drafts' | 'sent'): Promise<string> {
+    const known = this.special[kind];
+    if (known) return known;
+    const client = await this.connection();
+    const list = await client.list();
+    const flag = kind === 'drafts' ? '\\Drafts' : '\\Sent';
+    const name = kind === 'drafts' ? 'Drafts' : 'Sent';
+    const path = list.find((m) => m.specialUse === flag)?.path ?? list.find((m) => m.path.toLowerCase() === name.toLowerCase())?.path;
+    if (!path) await client.mailboxCreate(name);
+    return (this.special[kind] = path ?? name);
+  }
+
+  /** Append a message; returns its UID when the server reports one (UIDPLUS) or it can be found by Message-ID. */
+  async append(folder: string, raw: Buffer, flags: string[], messageId?: string): Promise<number | null> {
+    const client = await this.connection();
+    const res = await client.append(folder, raw, flags);
+    if (res && res.uid) return res.uid;
+    if (!messageId) return null;
+    const lock = await client.getMailboxLock(folder, { readOnly: true });
+    try {
+      const uids = (await client.search({ header: { 'message-id': messageId } }, { uid: true })) || [];
+      return uids.at(-1) ?? null;
+    } finally {
+      lock.release();
+    }
+  }
+
+  async deleteUid(folder: string, uid: number): Promise<void> {
+    const client = await this.connection();
+    const lock = await client.getMailboxLock(folder);
+    try {
+      await client.messageDelete(String(uid), { uid: true });
+    } finally {
+      lock.release();
+    }
   }
 
   async close(): Promise<void> {

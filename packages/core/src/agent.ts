@@ -78,7 +78,7 @@ export class Agent {
       let reply = '';
       let result: ModelResult | undefined;
       try {
-        for await (const d of model.stream({ role: 'chat', messages, tools: tools.specs(), toolChoice: 'auto', signal })) {
+        for await (const d of model.stream({ role: 'chat', messages, tools: tools.specs({ untrustedInContext }), toolChoice: 'auto', signal })) {
           if (d.type === 'text') {
             if (!item) {
               item = { kind: 'assistant', id: this.newId(), text: '', at: at(), streaming: true };
@@ -111,7 +111,7 @@ export class Agent {
       for (const call of result.toolCalls) {
         const toolItem: ChatItem = { kind: 'tool', id: this.newId(), label: tools.label(call.name), state: 'running', at: at() };
         this.post(toolItem);
-        const outcome = await tools.execute(call, { signal, untrustedInContext });
+        const outcome = await tools.execute(call, { signal, untrustedInContext, userText: text });
         this.patch({ ...toolItem, state: outcome.ok ? 'done' : 'failed' });
         store.saveTurn({ role: 'tool', toolCallId: call.id, name: call.name, content: outcome.content }, at());
         if (signal.aborted) {

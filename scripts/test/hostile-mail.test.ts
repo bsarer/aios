@@ -65,6 +65,7 @@ describe('hostile mail', () => {
         from: approval.from,
         to: [],
         cc: [],
+        replyTo: [],
         subject: approval.subject,
         date: null,
         inReplyTo: null,

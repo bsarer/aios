@@ -58,6 +58,7 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
       smtp: { host: TEST_MAILBOX.host, port: TEST_MAILBOX.smtpPort, tls: false },
       pollIntervalSeconds: existing?.mail.pollIntervalSeconds ?? 30,
       batchWindowSeconds: existing?.mail.batchWindowSeconds ?? 20,
+      saveSentCopy: true,
     };
     secrets.set(MAIL_PASSWORD_REF, TEST_MAILBOX.pass);
   } else {
@@ -79,6 +80,7 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
       },
       pollIntervalSeconds: prev?.pollIntervalSeconds ?? 30,
       batchWindowSeconds: prev?.batchWindowSeconds ?? 20,
+      saveSentCopy: prev?.saveSentCopy ?? true,
     };
     await keepOrAsk(MAIL_PASSWORD_REF, 'Mail app password');
   }

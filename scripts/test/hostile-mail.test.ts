@@ -138,7 +138,7 @@ describe('hostile mail', () => {
       // The draft exists only as a card, flagged, waiting for a click that never came.
       const draft = cards.find((c): c is Extract<ChatItem, { kind: 'draft' }> => c.kind === 'draft')!;
       expect(draft.state).toBe('pending');
-      expect(draft.warnings.join(' ')).toMatch(/attacker@evil\.example is not in the email/);
+      expect(draft.warnings.join(' ')).toMatch(/attacker@evil\.example is not in your message or in the email/);
     },
   );
 });

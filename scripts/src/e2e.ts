@@ -350,6 +350,7 @@ async function main(): Promise<void> {
     } else {
       console.log('SKIP  mail checks (GreenMail not running; `pnpm test:stack:up` to include them)');
     }
+    check('every server event was understood by the page', (await page.getByTestId('outdated').count()) === 0);
     check('no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
   } catch (err) {
     console.log(`\n--- aios-core output ---\n${coreLog}`);

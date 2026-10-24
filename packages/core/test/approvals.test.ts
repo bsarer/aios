@@ -217,19 +217,21 @@ describe('approval broker', () => {
 });
 
 describe('recipient warnings', () => {
-  const ctx = (userText: string, untrustedInContext = true) => ({ userText, untrustedInContext });
+  const ctx = (userText: string) => ({ userText });
   it('flags a recipient that came from neither the user nor the email being answered', () => {
     expect(recipientWarnings(['sara@example.com', 'tom@example.com'], ctx('reply to Sara'), original, FROM.address)).toEqual([]);
     expect(recipientWarnings(['payments@evil.example'], ctx('reply to Sara'), original, FROM.address)).toEqual([
-      'payments@evil.example is not in the email being replied to or in your message. Check this address before sending.',
+      'payments@evil.example is not in your message or in the email being replied to. Check this address before sending.',
     ]);
   });
   it('trusts addresses the user typed, matched whole', () => {
     expect(recipientWarnings(['ann@example.com'], ctx('send it to ann@example.com too'), original, FROM.address)).toEqual([]);
     expect(recipientWarnings(['nn@example.com'], ctx('send it to ann@example.com'), original, FROM.address)).toHaveLength(1);
   });
-  it('says nothing when no email text was in context', () => {
-    expect(recipientWarnings(['ann@example.com'], ctx('email Ann', false), null, FROM.address)).toEqual([]);
+  it('flags a guessed address even when no email was read', () => {
+    // "reply to Sara" with no lookup: the model invented sara@example.com.
+    expect(recipientWarnings(['sara@example.com'], ctx('reply to Sara saying 2pm works'), null, FROM.address)).toHaveLength(1);
+    expect(recipientWarnings(['ann@example.com'], ctx('email ann@example.com about lunch'), null, FROM.address)).toEqual([]);
   });
 });
 

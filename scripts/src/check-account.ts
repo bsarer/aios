@@ -3,7 +3,7 @@
  * Logs in over IMAP, finds Drafts and Sent the way aios-core will, and checks the SMTP
  * login without sending anything. Meant for the dedicated throwaway test account.
  *
- *   --seed-hostile   after a confirmation, add the six hostile test emails to INBOX
+ *   --seed-hostile   after a confirmation, add the hostile test emails to INBOX
  *                    (throwaway accounts only), to try them against the real model
  */
 import { readFile } from 'node:fs/promises';
@@ -71,20 +71,21 @@ async function main(): Promise<void> {
 }
 
 async function seedHostile(imap: ImapFlow, address: string): Promise<void> {
+  const hostile = fixtures.filter((f) => f.hostile);
   const p = terminalPrompter();
   try {
-    const yes = await p.confirm(`Add the 6 hostile test emails to the INBOX of ${address}? Only do this on a throwaway test account.`, false);
+    const yes = await p.confirm(`Add the ${hostile.length} hostile test emails to the INBOX of ${address}? Only do this on a throwaway test account.`, false);
     if (!yes) return console.log('skipped');
   } finally {
     p.close();
   }
   const byKey = new Map(fixtures.map((f) => [f.key, f]));
   const now = new Date();
-  for (const mail of fixtures.filter((f) => f.hostile)) {
+  for (const mail of hostile) {
     const { raw } = await composeFixture({ ...mail, daysAgo: 0 }, byKey, now);
     await imap.append('INBOX', raw, [], now);
   }
-  ok('added 6 hostile test emails to INBOX');
+  ok(`added ${hostile.length} hostile test emails to INBOX`);
 }
 
 main().catch((err: unknown) => {

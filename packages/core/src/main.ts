@@ -25,6 +25,9 @@ import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
 import { Shell } from './shell.js';
 import { readBattery, readWifi } from './status/system.js';
+import { SystemActions } from './system/actions.js';
+import { SystemControls } from './system/controls.js';
+import { systemTools } from './system/tools.js';
 import { omarchyThemePath, readTheme, watchTheme } from './status/theme.js';
 import { Store } from './store.js';
 import { nowTool } from './tools/now.js';
@@ -63,7 +66,8 @@ async function main(): Promise<void> {
     },
   });
 
-  const tools = new ToolRegistry(audit).register(nowTool(config.user.timezone));
+  const isPaused = () => store.getSetting('paused') === '1';
+  const tools = new ToolRegistry(audit, { isPaused }).register(nowTool(config.user.timezone));
   const mailConnection: MailConnection = {
     host: config.mail.imap.host,
     port: config.mail.imap.port,
@@ -91,6 +95,16 @@ async function main(): Promise<void> {
     notice: (level, text) => shell?.agent.notice(level, text),
   });
   for (const t of draftTools({ broker: approvals, mail: mailClient, userName: config.user.name, selfAddress: config.mail.address })) tools.register(t);
+  const controls = new SystemControls();
+  const systemActions = new SystemActions({
+    store,
+    controls,
+    audit,
+    show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
+    notice: (level, text) => shell?.agent.notice(level, text),
+    isPaused,
+  });
+  for (const t of systemTools({ controls, actions: systemActions })) tools.register(t);
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
   let nightlyNoticeFor = '';
   const nightly = new Nightly({
@@ -125,6 +139,7 @@ async function main(): Promise<void> {
     theme: await readTheme(themePath),
     memory,
     approvals,
+    systemActions,
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),
   });
@@ -168,6 +183,7 @@ async function main(): Promise<void> {
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();
+  systemActions.recover();
   shell.greet();
   // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
   await keyring.require(config.models.chat.apiKeyRef).catch((err: unknown) => {

@@ -25,6 +25,10 @@ const MIGRATIONS = [
                        hash TEXT NOT NULL, state TEXT NOT NULL, warnings TEXT NOT NULL, error TEXT, message_id TEXT NOT NULL, draft_uid INTEGER,
                        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, sent_at INTEGER);
    CREATE INDEX drafts_state ON drafts(state);`,
+  // S1: system changes waiting for a click (Wi-Fi off, switching networks, pairing, forgetting).
+  `CREATE TABLE system_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, title TEXT NOT NULL, confirm TEXT NOT NULL, hash TEXT NOT NULL,
+                               state TEXT NOT NULL, result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX system_actions_state ON system_actions(state);`,
 ];
 
 export interface UsageRow {

@@ -83,6 +83,22 @@ export const ChatItem = z.discriminatedUnion('kind', [
     error: z.string().optional(),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('action'),
+    /** A change to this computer that waits for a click (S1): Wi-Fi off, switching networks, pairing, forgetting. */
+    id: z.string(),
+    /** Written by code. Network and device names in it came over the air: show as plain text only. */
+    title: z.string(),
+    /** Label of the confirm button, e.g. "Turn off". */
+    confirm: z.string(),
+    /** sha256 of the action and its arguments; the click echoes it back. */
+    hash: z.string(),
+    /** Only a confirm click moves 'pending' to 'running'. */
+    state: z.enum(['pending', 'running', 'done', 'cancelled', 'failed']),
+    /** Outcome written by code after it ran. */
+    result: z.string().optional(),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -111,6 +127,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('mail_ignore'), itemId: z.string().max(100), mailId: z.string().max(100) }),
   z.strictObject({ type: z.literal('draft_send'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('draft_discard'), id: z.string().max(100) }),
+  z.strictObject({ type: z.literal('action_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('action_cancel'), id: z.string().max(100) }),
   z.strictObject({
     type: z.literal('draft_edit'),
     id: z.string().max(100),

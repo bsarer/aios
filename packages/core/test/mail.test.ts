@@ -436,7 +436,7 @@ describe('mail tools', () => {
   });
 
   it('wrap mail in untrusted tags that the mail cannot close', async () => {
-    const out = await search!.handler({ query: 'sara' }, ctx);
+    const out = (await search!.handler({ query: 'sara' }, ctx)) as string;
     expect(out.match(/<\/untrusted>/g)).toHaveLength(1);
     expect(out).toContain('‹/untrusted›');
     const body = await read!.handler({ id: 'INBOX:3' }, ctx);

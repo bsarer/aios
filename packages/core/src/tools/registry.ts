@@ -13,11 +13,22 @@ export interface ToolContext {
   userText: string;
 }
 
+/** A handler may add fields to its audit entry, e.g. a device change's old and new value. */
+export interface ToolResult {
+  content: string;
+  audit?: Record<string, unknown>;
+}
+
 export interface RegisteredTool {
   def: ToolDefinition;
   /** Shown in the chat while the tool runs, e.g. "Checking the time…". */
   label: string;
-  handler: (args: unknown, ctx: ToolContext) => Promise<string>;
+  handler: (args: unknown, ctx: ToolContext) => Promise<string | ToolResult>;
+  /**
+   * Write tier only: show a card asking the user to confirm, and change nothing. The action
+   * itself runs from a click on that card (system/actions.ts), never from here.
+   */
+  propose?: (args: unknown, ctx: ToolContext) => Promise<string | ToolResult>;
   /** The result carries untrusted text (mail tools, A4). Anything the model does after reading it is tainted. */
   untrustedOutput?: boolean;
   /** Write tier: what the model is told when its call is refused. */
@@ -33,24 +44,42 @@ export interface ToolOutcome {
 
 const TOOL_TIMEOUT_MS = 15_000;
 
+export interface ToolRegistryOptions {
+  /** Device-tier calls are refused while paused (S1). */
+  isPaused?: () => boolean;
+  /** At most this many device-tier changes per window. Default 10 a minute (plan §4). */
+  deviceLimit?: { max: number; windowMs: number };
+  clock?: () => number;
+}
+
+const UNTRUSTED_REFUSAL =
+  'Error: this cannot run while text from an email or another outside source is in the conversation. Ask the user to request it in a new message of their own.';
+
 /**
  * Executes tool calls with argument validation, risk-tier enforcement, a timeout and an
  * audit entry for every call. Only registered tools are offered to the model.
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, RegisteredTool>();
+  private readonly deviceCalls: number[] = [];
+  private readonly clock: () => number;
 
-  constructor(private readonly audit: AuditLog) {}
+  constructor(
+    private readonly audit: AuditLog,
+    private readonly opts: ToolRegistryOptions = {},
+  ) {
+    this.clock = opts.clock ?? Date.now;
+  }
 
   register(tool: RegisteredTool): this {
     this.tools.set(tool.def.name, tool);
     return this;
   }
 
-  /** Write-tier tools are left out while email text is in context, so an email cannot even ask for one. */
+  /** Write- and device-tier tools are left out while email text is in context, so an email cannot even ask for one. */
   specs(opts: { untrustedInContext?: boolean } = {}): ToolSpec[] {
     const defs = [...this.tools.values()].map((t) => t.def);
-    return toolSpecs(opts.untrustedInContext ? defs.filter((d) => d.tier !== 'write') : defs);
+    return toolSpecs(opts.untrustedInContext ? defs.filter((d) => d.tier !== 'write' && d.tier !== 'device') : defs);
   }
 
   returnsUntrusted(name: string): boolean {
@@ -85,22 +114,53 @@ export class ToolRegistry {
       return { ok: false, content: `Error: invalid arguments: ${parsed.error.issues.map((i) => i.message).join('; ')}`, label };
     }
 
+    const tier = tool.def.tier;
+    // Changes to this computer, and requests for them, never come from a context an email is in.
+    if (ctx.untrustedInContext && (tier === 'device' || (tier === 'write' && tool.propose))) {
+      log({ decision: 'denied', reason: 'untrusted content in context', untrustedInContext: true, args: parsed.data });
+      return { ok: false, content: UNTRUSTED_REFUSAL, label };
+    }
     // Write-tier actions never run from a model call. They run only from a click on their
-    // card, through the approval broker (mail/approvals.ts), which audits them itself.
-    if (tool.def.tier === 'write') {
+    // card, through an approval broker (mail/approvals.ts, system/actions.ts), which audits
+    // them itself. A tool with `propose` may show that card; nothing else happens here.
+    if (tier === 'write' && !tool.propose) {
       log({ decision: 'denied', reason: 'write tier runs only from a user click', untrustedInContext: ctx.untrustedInContext, args: parsed.data });
       return { ok: false, content: tool.deniedMessage ?? 'Error: only the user can do this, by approving it on a card.', label };
     }
+    if (tier === 'device') {
+      if (this.opts.isPaused?.()) {
+        log({ decision: 'denied', reason: 'paused', args: parsed.data });
+        return { ok: false, content: 'Error: paused. The user types /resume to allow changes again.', label };
+      }
+      const { max, windowMs } = this.opts.deviceLimit ?? { max: 10, windowMs: 60_000 };
+      const now = this.clock();
+      while (this.deviceCalls.length && this.deviceCalls[0]! <= now - windowMs) this.deviceCalls.shift();
+      if (this.deviceCalls.length >= max) {
+        log({ decision: 'denied', reason: 'device change limit', limit: max, windowMs, args: parsed.data });
+        return { ok: false, content: `Error: that is more than ${max} changes in a minute, so I stopped. Tell the user and wait before trying again.`, label };
+      }
+      this.deviceCalls.push(now);
+    }
 
+    const run = tier === 'write' ? tool.propose! : tool.handler;
     const started = Date.now();
     try {
       const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(TOOL_TIMEOUT_MS)]);
-      const content = await tool.handler(parsed.data, { ...ctx, signal });
-      log({ decision: 'allowed', untrustedInContext: ctx.untrustedInContext, args: parsed.data, ok: true, resultBytes: Buffer.byteLength(content), ms: Date.now() - started });
+      const r = await run(parsed.data, { ...ctx, signal });
+      const { content, audit: extra } = typeof r === 'string' ? { content: r, audit: undefined } : r;
+      log({
+        decision: tier === 'write' ? 'proposed' : 'allowed',
+        untrustedInContext: ctx.untrustedInContext,
+        args: parsed.data,
+        ok: true,
+        resultBytes: Buffer.byteLength(content),
+        ms: Date.now() - started,
+        ...extra,
+      });
       return { ok: true, content, label };
     } catch (err) {
       const message = (err as Error).message;
-      log({ decision: 'allowed', args: parsed.data, ok: false, error: message, ms: Date.now() - started });
+      log({ decision: tier === 'write' ? 'proposed' : 'allowed', args: parsed.data, ok: false, error: message, ms: Date.now() - started });
       return { ok: false, content: `Error: ${message}`, label };
     }
   }

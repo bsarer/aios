@@ -17,6 +17,7 @@ import { memoryProposeTool } from './memory/tool.js';
 import type { ModelClient } from './model.js';
 import { type Store, startOfDay } from './store.js';
 import type { Battery, Wifi } from './status/system.js';
+import type { SystemActions } from './system/actions.js';
 import type { ToolRegistry } from './tools/registry.js';
 
 export interface ShellOptions {
@@ -37,6 +38,8 @@ export interface ShellOptions {
   onIgnoreMail?: (mailId: string) => void;
   /** Draft cards and the Send click (A5). Without it, draft messages are ignored. */
   approvals?: ApprovalBroker;
+  /** Cards for system changes that need a click (S1). Without it, action messages are ignored. */
+  systemActions?: SystemActions;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -151,6 +154,7 @@ export class Shell {
     if (msg.type === 'memory') return this.decideMemory(msg.id, msg.decision);
     if (msg.type === 'mail_ignore') return this.ignoreMail(msg.itemId, msg.mailId);
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
+    if (msg.type === 'action_confirm' || msg.type === 'action_cancel') return this.systemAction(msg);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -208,6 +212,22 @@ export class Shell {
     } catch (err) {
       this.agent.notice('error', `I couldn't update the draft: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Clicks on a system action card. The broker checks the hash and the state, and refuses
+   * while paused, before anything changes.
+   */
+  private async systemAction(msg: Extract<ClientMessage, { type: 'action_confirm' | 'action_cancel' }>): Promise<void> {
+    const actions = this.o.systemActions;
+    if (!actions) return;
+    if (msg.type === 'action_cancel') {
+      actions.cancel(msg.id);
+      return;
+    }
+    await actions.confirm(msg.id, msg.hash);
+    // Wi-Fi changes show in the status strip straight away rather than at the next refresh.
+    await this.refreshSystemStatus();
   }
 
   private ignoreMail(itemId: string, mailId: string): void {

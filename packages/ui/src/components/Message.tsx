@@ -43,6 +43,42 @@ export interface MessageActions {
   onDraftSend: (id: string, hash: string) => void;
   onDraftDiscard: (id: string) => void;
   onDraftEdit: (id: string, edit: { to: string[]; subject: string; body: string }) => void;
+  /** A system change (S1) runs only on this click, which echoes the card's hash. */
+  onActionConfirm: (id: string, hash: string) => void;
+  onActionCancel: (id: string) => void;
+}
+
+type ActionItem = Extract<ChatItem, { kind: 'action' }>;
+
+const ACTION_STATE_TEXT: Record<ActionItem['state'], string> = {
+  pending: '',
+  running: 'Working…',
+  done: '✓ Done',
+  cancelled: 'Cancelled. Nothing changed.',
+  failed: '',
+};
+
+/** A system change waiting for a click. The title can hold network or device names: plain text only. */
+function ActionCard({ item, actions }: { item: ActionItem; actions: MessageActions }) {
+  return (
+    <div data-kind="action" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--warning)' }}>
+      <div data-testid="action-title">{item.title}</div>
+      {item.state === 'pending' ? (
+        <div className="mt-3 flex gap-2">
+          <button type="button" data-testid="action-confirm" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onActionConfirm(item.id, item.hash)}>
+            {item.confirm}
+          </button>
+          <button type="button" data-testid="action-cancel" className="glass rounded-lg px-3 py-1" onClick={() => actions.onActionCancel(item.id)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div data-testid="action-state" className="mt-2 text-sm" style={{ color: item.state === 'failed' ? 'var(--danger)' : 'var(--muted)' }}>
+          {item.result ?? ACTION_STATE_TEXT[item.state]}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type DraftItem = Extract<ChatItem, { kind: 'draft' }>;
@@ -238,5 +274,7 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <MailNotification item={item} actions={actions} />;
     case 'draft':
       return <DraftCard item={item} actions={actions} />;
+    case 'action':
+      return <ActionCard item={item} actions={actions} />;
   }
 }

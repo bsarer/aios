@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
-/** Risk tiers are enforced by the approval broker (A5), not by prompts. */
-export type RiskTier = 'read' | 'draft' | 'write';
+/**
+ * Risk tiers are enforced in code (registry and approval brokers), not by prompts.
+ * `device` (S1): small, reversible changes to this computer within fixed limits; never
+ * offered or run while untrusted content is in context, and rate limited.
+ */
+export type RiskTier = 'read' | 'draft' | 'device' | 'write';
 
 export interface ToolDefinition<I extends z.ZodType = z.ZodType> {
   name: string;
@@ -68,6 +72,137 @@ export const ALPHA_TOOLS = [
     tier: 'write',
     description: 'Open an allowlisted app (alpha: browser only). Requires approval.',
     input: z.strictObject({ name: z.enum(['browser']), url: z.url().optional() }),
+  }),
+  // ── System controls (S1) ──
+  def({
+    name: 'system_status',
+    tier: 'read',
+    description:
+      'Current state of this computer: Wi-Fi, Bluetooth, volume, audio output, microphone, brightness, night light, do not disturb, power profile, battery, CPU and memory, theme.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'wifi_networks',
+    tier: 'read',
+    description: 'Saved Wi-Fi networks and whether each is in range. New networks are joined in Omarchy\'s Network panel (Super+Ctrl+N), not here.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'bluetooth_devices',
+    tier: 'read',
+    description: 'Paired Bluetooth devices and which are connected.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'audio_outputs',
+    tier: 'read',
+    description: 'Audio outputs (speakers, headphones, HDMI) and which one is in use.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'theme_list',
+    tier: 'read',
+    description: 'Installed Omarchy themes and the current one.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'volume_set',
+    tier: 'device',
+    description: 'Set the output volume (0-100%) and/or mute or unmute. Setting a level also unmutes.',
+    input: z
+      .strictObject({ percent: z.int().min(0).max(100).optional(), muted: z.boolean().optional() })
+      .refine((a) => a.percent !== undefined || a.muted !== undefined, 'give percent or muted'),
+  }),
+  def({
+    name: 'brightness_set',
+    tier: 'device',
+    description: 'Set the brightness of the focused display (5-100%).',
+    input: z.strictObject({ percent: z.int().min(5).max(100) }),
+  }),
+  def({
+    name: 'wifi_on',
+    tier: 'device',
+    description: 'Turn Wi-Fi on. (Turning it off is wifi_off, which needs the user to confirm.)',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'wifi_off',
+    tier: 'write',
+    description: 'Ask to turn Wi-Fi off. Shows a card; nothing changes until the user clicks Turn off.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'wifi_connect',
+    tier: 'write',
+    description: 'Ask to switch to a saved Wi-Fi network (from wifi_networks). Shows a card; nothing changes until the user clicks Connect.',
+    input: z.strictObject({ network: z.string().min(1).max(64) }),
+  }),
+  def({
+    name: 'bluetooth_power',
+    tier: 'device',
+    description: 'Turn Bluetooth on or off.',
+    input: z.strictObject({ on: z.boolean() }),
+  }),
+  def({
+    name: 'bluetooth_connection',
+    tier: 'device',
+    description: 'Connect or disconnect a paired Bluetooth device, by its name or address from bluetooth_devices.',
+    input: z.strictObject({ device: z.string().min(1).max(64), action: z.enum(['connect', 'disconnect']) }),
+  }),
+  def({
+    name: 'bluetooth_scan',
+    tier: 'device',
+    description:
+      'Look for new Bluetooth devices nearby for a few seconds and show each one to the user on a card with a Pair button. You do not see their names; the user picks.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'bluetooth_forget',
+    tier: 'write',
+    description: 'Ask to forget (unpair) a paired Bluetooth device. Shows a card; nothing changes until the user clicks Forget.',
+    input: z.strictObject({ device: z.string().min(1).max(64) }),
+  }),
+  def({
+    name: 'night_light',
+    tier: 'device',
+    description: 'Turn night light (warmer screen colours) on or off.',
+    input: z.strictObject({ on: z.boolean() }),
+  }),
+  def({
+    name: 'do_not_disturb',
+    tier: 'device',
+    description: 'Turn do not disturb (silenced desktop notifications) on or off.',
+    input: z.strictObject({ on: z.boolean() }),
+  }),
+  def({
+    name: 'audio_output_set',
+    tier: 'device',
+    description: 'Switch sound to another output, by its description from audio_outputs.',
+    input: z.strictObject({ output: z.string().min(1).max(128) }),
+  }),
+  def({
+    name: 'microphone_mute',
+    tier: 'device',
+    description: 'Mute or unmute the microphone.',
+    input: z.strictObject({ muted: z.boolean() }),
+  }),
+  def({
+    name: 'power_profile_set',
+    tier: 'device',
+    description: 'Set the power profile.',
+    input: z.strictObject({ profile: z.enum(['power-saver', 'balanced', 'performance']) }),
+  }),
+  def({
+    name: 'screen_lock',
+    tier: 'device',
+    description: 'Lock the screen now.',
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'theme_set',
+    tier: 'device',
+    description: 'Switch to another installed Omarchy theme, by its name from theme_list.',
+    input: z.strictObject({ name: z.string().min(1).max(64) }),
   }),
   def({
     name: 'now',

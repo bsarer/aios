@@ -48,7 +48,7 @@ Needs Omarchy 4. Ask in your own words: "volume to 30", "mute", "brighter", "nig
 | Wi-Fi off, switch to another saved network, pair a new Bluetooth device, forget a device | A card asks first. Nothing changes until you click **Turn off**, **Connect**, **Pair** or **Forget**; **Cancel** changes nothing. |
 
 - **Limits, enforced in code:** volume 0-100%, brightness 5-100% (never off), at most 10 changes a minute. Outputs, themes, networks and devices must be ones the computer itself lists.
-- **Email can't change your computer:** while an email is in the conversation, the chat isn't offered any of the change tools, and calls to them are refused and logged. Start a new request in your own words.
+- **Email can't change your computer:** while an email is part of the conversation the model sees, it isn't offered any of the change tools, and calls to them are refused and logged. Reading values still works. Type `/clear` to start the model's side of the conversation fresh (the chat on screen and the daily summary keep everything), then ask again; the chat tells you when that's needed.
 - **Wi-Fi passwords:** never read, shown or asked for. The chat only switches between networks this computer already saved. Join a new network in Omarchy's Network panel (`SUPER + CTRL + N`). Networks you never saved are counted, not named, because anyone nearby can name a network.
 - **Pairing:** "pair my speaker" looks for devices for a few seconds and shows each one on its own card. The model never sees their names (anyone can name a Bluetooth device), so you pick the right card. Put the device in pairing mode first.
 - **Pause:** `/pause` also stops every change, including clicks on these cards, until `/resume`.

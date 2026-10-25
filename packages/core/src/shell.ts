@@ -301,6 +301,9 @@ export class Shell {
         say('Resumed.');
         this.o.onResume?.();
         return this.pushStatus();
+      case 'clear':
+        this.o.store.setSetting('context_after_seq', String(this.o.store.lastTurnSeq()));
+        return say('Started fresh: I no longer see the earlier conversation, including any emails in it, though it stays on screen and in my daily summary. Settings can be changed again.');
       case 'cost': {
         const u = this.o.store.usageSince(startOfDay(this.clock().getTime(), this.o.timeZone));
         const capped = u.costUsd >= this.o.costCapUsd ? " The cap is reached, so I won't call the model again until tomorrow. Raise cost.dailyCapUsd in your config to change it." : '';

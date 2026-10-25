@@ -5,6 +5,7 @@ export type Command =
   | { name: 'pause' }
   | { name: 'resume' }
   | { name: 'cost' }
+  | { name: 'clear' }
   | { name: 'memory' }
   | { name: 'forget'; text: string }
   | { name: 'export' }
@@ -25,6 +26,8 @@ export function parseCommand(text: string): Command | null {
       return { name: 'resume' };
     case 'cost':
       return { name: 'cost' };
+    case 'clear':
+      return { name: 'clear' };
     case 'memory':
       return { name: 'memory' };
     case 'forget':
@@ -43,6 +46,7 @@ export const HELP_TEXT = [
   '/pause   stop the assistant from calling the model or tools',
   '/resume  start again',
   '/cost    what today has cost so far',
+  '/clear   start the conversation fresh for me (the chat on screen stays). Needed to change settings after reading an email',
   '/remember <text>  offer to remember something (you confirm with Save)',
   '/memory  show everything I remember',
   '/forget <text>  remove a remembered fact',

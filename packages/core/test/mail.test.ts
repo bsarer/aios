@@ -418,7 +418,7 @@ describe('mail tools', () => {
         references: [],
         text: 'Hello​ John',
         html: null,
-        attachments: ['a.pdf'],
+        attachments: [{ part: '2', name: 'a.pdf', type: 'application/pdf', size: 4096 }],
       };
     },
     async thread() {
@@ -442,7 +442,7 @@ describe('mail tools', () => {
     const body = await read!.handler({ id: 'INBOX:3' }, ctx);
     expect(body).toMatch(/^id: INBOX:3\n<untrusted source="email" id="INBOX:3">/);
     expect(body).toContain('Hello John');
-    expect(body).toContain('Attachments (names only): a.pdf');
+    expect(body).toContain('Attachments:\n1. a.pdf (PDF, 3 KB)');
     expect(await read!.handler({ id: 'INBOX:99' }, ctx)).toMatch(/^Error/);
     expect(await search!.handler({ query: 'x', since: 'yesterday' }, ctx)).toMatch(/^Error/);
   });
@@ -456,10 +456,10 @@ describe('mail tools', () => {
         type: 'multipart/mixed',
         childNodes: [
           { type: 'multipart/alternative', childNodes: [{ type: 'text/plain', part: '1.1' }, { type: 'text/html', part: '1.2' }] },
-          { type: 'image/png', part: '2', disposition: 'attachment', dispositionParameters: { filename: 'swim.png' } },
+          { type: 'image/png', part: '2', size: 120, disposition: 'attachment', dispositionParameters: { filename: 'swim.png' } },
         ],
       }),
-    ).toEqual({ text: '1.1', html: '1.2', attachments: ['swim.png'] });
+    ).toEqual({ text: '1.1', html: '1.2', attachments: [{ part: '2', name: 'swim.png', type: 'image/png', size: 120 }] });
   });
 });
 

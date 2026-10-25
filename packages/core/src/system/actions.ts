@@ -1,6 +1,7 @@
 /**
  * The approval broker for system changes that could cut the user off or are hard to undo
- * (S1, write tier): Wi-Fi off, switching networks, pairing and forgetting Bluetooth devices.
+ * (S1, write tier): Wi-Fi off, switching networks, pairing and forgetting Bluetooth devices;
+ * and device-tier changes asked for while an email was in the model's view.
  * A model call can only create a pending card (the tool's `propose`). The change runs from
  * confirm(), reached solely by a click on that card carrying the hash the card showed.
  *
@@ -18,7 +19,12 @@ export type SystemAction =
   | { action: 'wifi_off' }
   | { action: 'wifi_connect'; network: string }
   | { action: 'bluetooth_pair'; address: string; name: string }
-  | { action: 'bluetooth_forget'; address: string; name: string };
+  | { action: 'bluetooth_forget'; address: string; name: string }
+  /** A device-tier change asked for while an email was in view: runs only after a click. */
+  | { action: 'device'; tool: string; args: unknown; summary: string };
+
+/** Runs a device-tier tool by name; set by systemTools. Returns the text and audit fields. */
+export type DeviceRunner = (tool: string, args: unknown) => Promise<{ content: string; audit?: Record<string, unknown> }>;
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
 type ActionState = ActionItem['state'];
@@ -65,16 +71,23 @@ function card(a: SystemAction): { title: string; confirm: string } {
       return { title: `Pair with ${q(a.name)} (${a.address})? Put it in pairing mode first.`, confirm: 'Pair' };
     case 'bluetooth_forget':
       return { title: `Forget ${q(a.name)} (${a.address})? It will need pairing again to use it.`, confirm: 'Forget' };
+    case 'device':
+      return { title: `${a.summary}? This was asked for while I was reading an email, so I'm checking with you first.`, confirm: 'Do it' };
   }
 }
 
 export class SystemActions {
   private readonly clock: () => number;
   private readonly newId: () => string;
+  private deviceRunner: DeviceRunner | null = null;
 
   constructor(private readonly o: SystemActionsOptions) {
     this.clock = o.clock ?? Date.now;
     this.newId = o.newId ?? (() => `action-${randomUUID().slice(0, 8)}`);
+  }
+
+  setDeviceRunner(run: DeviceRunner): void {
+    this.deviceRunner = run;
   }
 
   private get db() {
@@ -104,7 +117,11 @@ export class SystemActions {
   /** Show a card asking for the change. Changes nothing. */
   propose(a: SystemAction): ActionItem {
     const clean: SystemAction =
-      a.action === 'wifi_off' ? a : a.action === 'wifi_connect' ? { ...a, network: cleanName(a.network) } : { ...a, name: cleanName(a.name) };
+      a.action === 'wifi_off' || a.action === 'device'
+        ? a
+        : a.action === 'wifi_connect'
+          ? { ...a, network: cleanName(a.network) }
+          : { ...a, name: cleanName(a.name) };
     const id = this.newId();
     const spec = JSON.stringify(clean);
     const hash = createHash('sha256').update(`${id}\n${spec}`).digest('hex');
@@ -124,7 +141,14 @@ export class SystemActions {
     const r = this.row(id);
     const spec = r ? (JSON.parse(r.spec) as SystemAction) : null;
     const audit = (entry: Record<string, unknown>) =>
-      this.o.audit.append({ kind: 'tool', tool: spec?.action ?? 'unknown', tier: 'write', actionId: id, via: 'click', ...entry });
+      this.o.audit.append({
+        kind: 'tool',
+        tool: spec?.action === 'device' ? spec.tool : (spec?.action ?? 'unknown'),
+        tier: spec?.action === 'device' ? 'device' : 'write',
+        actionId: id,
+        via: 'click',
+        ...entry,
+      });
     if (!r || !spec) {
       audit({ decision: 'denied', reason: 'unknown action' });
       return 'refused';
@@ -179,6 +203,12 @@ export class SystemActions {
   private async run(a: SystemAction): Promise<{ result: string; old: unknown; now: unknown }> {
     const c = this.o.controls;
     switch (a.action) {
+      case 'device': {
+        if (!this.deviceRunner) throw new Error('device changes are not set up');
+        const r = await this.deviceRunner(a.tool, a.args);
+        if (r.content.startsWith('Error:')) throw new Error(r.content.slice(7).trim().replace(/\.$/, ''));
+        return { result: r.content, old: r.audit?.old, now: r.audit?.new };
+      }
       case 'wifi_off': {
         const old = await c.wifi();
         const now = await c.setWifiRadio(false);

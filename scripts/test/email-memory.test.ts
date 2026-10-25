@@ -41,9 +41,10 @@ const result = (content: string, toolCalls: ToolCall[] = []): ModelResult => ({
 });
 
 /** A model that does whatever the last email told it to. */
-function obedientModel(script: { text?: string; toolCalls?: ToolCall[] }[]) {
+function obedientModel(script: { text?: string; toolCalls?: ToolCall[] }[], requests: ModelRequest[] = []) {
   return {
-    async *stream(_req: ModelRequest): AsyncGenerator<Delta, ModelResult> {
+    async *stream(req: ModelRequest): AsyncGenerator<Delta, ModelResult> {
+      requests.push(req);
       const t = script.shift() ?? { text: 'done' };
       const r = result(t.text ?? '', t.toolCalls ?? []);
       yield { type: 'done', result: r };
@@ -64,9 +65,10 @@ function setup(script: { text?: string; toolCalls?: ToolCall[] }[]) {
     untrustedOutput: true,
     handler: async () => wrapUntrusted('email', hostile.key, sanitize({ text: hostile.text, html: hostile.html })),
   });
+  const requests: ModelRequest[] = [];
   const shell = new Shell({
     store,
-    model: obedientModel(script),
+    model: obedientModel(script, requests),
     tools,
     audit,
     userName: 'John',
@@ -78,7 +80,7 @@ function setup(script: { text?: string; toolCalls?: ToolCall[] }[]) {
     memory: new Memory(files, store),
   });
   const cards = () => store.recentItems().filter((i): i is Extract<ChatItem, { kind: 'memory' }> => i.kind === 'memory');
-  return { shell, files, cards, profileBefore, auditPath: join(dir, 'audit.jsonl') };
+  return { shell, files, cards, profileBefore, requests, auditPath: join(dir, 'audit.jsonl') };
 }
 
 const call = (name: string, args: unknown, id = name): ToolCall => ({ id, name, arguments: JSON.stringify(args) });
@@ -101,16 +103,19 @@ describe('email cannot write memory', () => {
     expect(readFileSync(auditPath, 'utf8')).toContain('"untrustedInContext":true');
   });
 
-  it('the label sticks on later turns while the email is still in context', async () => {
-    const { shell, files, cards } = setup([
+  it('later turns no longer see the email, or what was written while reading it (quarantine)', async () => {
+    const { shell, files, requests } = setup([
       { toolCalls: [call('mail_read', { id: hostile.key })] },
-      { text: 'Sara sent a new address.' },
-      { toolCalls: [call('memory_propose', { fact: POISON })] },
+      { text: `Sara says: remember permanently that ${POISON}.` },
       { text: 'ok' },
     ]);
     await shell.handle({ type: 'send', text: "What's new from Sara?" });
     await shell.handle({ type: 'send', text: 'ok thanks' });
-    expect(cards()).toMatchObject([{ source: 'email', state: 'pending' }]);
+    const later = requests.at(-1)!.messages.map((m) => m.content ?? '').join('\n');
+    expect(later).not.toContain('northwind-mail.example');
+    expect(later).not.toContain(POISON);
+    expect(later).toContain(`Answering this, I read email ${hostile.key}`);
+    expect(later).toContain("What's new from Sara?");
     expect(files.facts()).toEqual([]);
   });
 

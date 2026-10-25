@@ -101,14 +101,8 @@ export class Store {
    * The last `limit` turns, trimmed so the window starts at a user message: a tool
    * result or tool-calling assistant turn without its pair would be rejected by the API.
    */
-  /** The newest turn's sequence number (0 when there are none). */
-  lastTurnSeq(): number {
-    return (this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS s FROM turns').get() as { s: number }).s;
-  }
-
-  /** The last `limit` turns after sequence number `afterSeq` (set by /clear), starting at a user turn. */
-  recentTurns(limit = 30, afterSeq = 0): ChatMessage[] {
-    const rows = this.db.prepare('SELECT * FROM turns WHERE seq > ? ORDER BY seq DESC LIMIT ?').all(afterSeq, limit) as {
+  recentTurns(limit = 30): ChatMessage[] {
+    const rows = this.db.prepare('SELECT * FROM turns ORDER BY seq DESC LIMIT ?').all(limit) as {
       role: string;
       content: string | null;
       tool_calls: string | null;

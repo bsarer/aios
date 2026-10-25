@@ -99,6 +99,19 @@ export const ChatItem = z.discriminatedUnion('kind', [
     result: z.string().optional(),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('attachment'),
+    /** Random; the only way to fetch the file (GET /attachments/<id>). */
+    id: z.string(),
+    /** The file name from the email: show as plain text only. */
+    name: z.string(),
+    /** What the sender says it is; the server checks the bytes again before serving it. */
+    fileKind: z.enum(['pdf', 'text', 'image']),
+    /** Which attachment of which message, for the server. */
+    mailId: z.string(),
+    n: z.int().min(1),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 

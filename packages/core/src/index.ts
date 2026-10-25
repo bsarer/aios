@@ -18,6 +18,7 @@ export * from './memory/memory.js';
 export * from './memory/nightly.js';
 export * from './memory/tool.js';
 export * from './mail/approvals.js';
+export * from './mail/attachments.js';
 export * from './mail/draft-tools.js';
 export * from './mail/errors.js';
 export * from './mail/imap.js';

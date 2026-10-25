@@ -9,12 +9,13 @@ import { configDir, parseConfig } from '@aios/shared';
 import { AuditLog } from './audit.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
+import { AttachmentFiles } from './mail/attachments.js';
 import { draftTools } from './mail/draft-tools.js';
 import { MailClient, type MailConnection } from './mail/imap.js';
 import { ImapSmtpOutbox } from './mail/outbox.js';
 import { MailPipeline } from './mail/pipeline.js';
 import { MailState } from './mail/state.js';
-import { mailTools } from './mail/tools.js';
+import { attachmentTools, mailTools } from './mail/tools.js';
 import { ImapMailSource, MailWatcher } from './mail/watcher.js';
 import { MemoryFiles } from './memory/files.js';
 import { Memory } from './memory/memory.js';
@@ -77,6 +78,9 @@ async function main(): Promise<void> {
   };
   const mailClient = new MailClient(mailConnection);
   for (const t of mailTools(mailClient)) tools.register(t);
+  // The shell is created below; cards only appear once it exists.
+  const attachmentFiles = new AttachmentFiles({ store, mail: mailClient, audit, post: (item) => shell?.agent.post(item) });
+  for (const t of attachmentTools({ mail: mailClient, files: attachmentFiles })) tools.register(t);
   const outbox = new ImapSmtpOutbox(mailClient, {
     host: config.mail.smtp.host,
     port: config.mail.smtp.port,
@@ -180,6 +184,7 @@ async function main(): Promise<void> {
     port: config.ui.port,
     uiDir: join(here, '..', '..', 'ui', 'dist'),
     devOrigins: process.env.AIOS_UI_DEV_ORIGIN ? [process.env.AIOS_UI_DEV_ORIGIN] : [],
+    attachments: attachmentFiles,
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();

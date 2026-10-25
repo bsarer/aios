@@ -60,6 +60,9 @@ importers:
       nodemailer:
         specifier: ^10.1.7
         version: 10.1.7
+      pdfjs-dist:
+        specifier: ^6.4.299
+        version: 6.4.299
       smol-toml:
         specifier: ^1.9.1
         version: 1.9.1
@@ -94,6 +97,9 @@ importers:
       '@aios/shared':
         specifier: workspace:*
         version: link:../shared
+      pdfjs-dist:
+        specifier: ^6.4.299
+        version: 6.4.299
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -1348,6 +1354,10 @@ packages:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
 
+  pdfjs-dist@6.4.299:
+    resolution: {integrity: sha512-AVl138zALtfaAPvADulE0PZThbYzCBS79nL4pOSL/6Sm/4AH5A21BD9VHt97OlCuzJuCpmeZtAtkinisF4Vb1g==}
+    engines: {node: '>=22.13.0 || >=24'}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -1756,6 +1766,9 @@ packages:
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
+
+ignoredOptionalDependencies:
+  - '@napi-rs/canvas'
 
 snapshots:
 
@@ -2902,6 +2915,8 @@ snapshots:
   pathe@2.0.3: {}
 
   pathval@2.0.1: {}
+
+  pdfjs-dist@6.4.299: {}
 
   picocolors@1.1.1: {}
 

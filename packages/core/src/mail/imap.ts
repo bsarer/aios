@@ -47,7 +47,18 @@ export interface FullMessage extends MessageSummary {
   references: string[];
   text: string;
   html: string | null;
-  attachments: string[];
+  attachments: AttachmentPart[];
+}
+
+/** One attachment as listed in the message structure. Name and type are as the sender wrote them. */
+export interface AttachmentPart {
+  /** IMAP body part number, e.g. "2" or "1.3". */
+  part: string;
+  name: string;
+  /** Declared MIME type, lower case. Only a hint: the bytes decide what it is (attachments.ts). */
+  type: string;
+  /** Size on the server, still transfer-encoded (base64 is about a third larger). */
+  size: number | null;
 }
 
 const addr = (list?: MessageAddressObject[]): Address[] => (list ?? []).map((a) => ({ name: a.name ?? '', address: a.address ?? '' }));
@@ -65,15 +76,15 @@ export function summaryOf(folder: Folder, msg: FetchMessageObject): MessageSumma
   };
 }
 
-/** Parts worth reading: the first text/plain (else text/html) leaf, and attachment names. */
-export function walkStructure(node: MessageStructureObject | undefined): { text?: string; html?: string; attachments: string[] } {
-  const out: { text?: string; html?: string; attachments: string[] } = { attachments: [] };
+/** Parts worth reading: the first text/plain (else text/html) leaf, and the attachments. */
+export function walkStructure(node: MessageStructureObject | undefined): { text?: string; html?: string; attachments: AttachmentPart[] } {
+  const out: { text?: string; html?: string; attachments: AttachmentPart[] } = { attachments: [] };
   const visit = (n: MessageStructureObject) => {
     if (n.childNodes?.length) return n.childNodes.forEach(visit);
     const name = n.dispositionParameters?.filename ?? n.parameters?.name;
     const type = n.type.toLowerCase();
     if (n.disposition === 'attachment' || (name && !type.startsWith('text/'))) {
-      out.attachments.push(name ?? type);
+      out.attachments.push({ part: n.part ?? '1', name: name ?? type, type, size: n.size ?? null });
       return;
     }
     const part = n.part ?? '1';
@@ -108,6 +119,22 @@ function headerIds(headers: Buffer | undefined, name: 'references' | 'in-reply-t
 }
 
 const BODY_LIMIT = 256 * 1024;
+
+/** Reads a whole stream into memory, or null once it passes maxBytes. */
+async function readBytes(s: Readable, maxBytes: number): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const c of s) {
+    const b = Buffer.isBuffer(c) ? c : Buffer.from(c as string);
+    size += b.length;
+    if (size > maxBytes) {
+      s.destroy();
+      return null;
+    }
+    chunks.push(b);
+  }
+  return Buffer.concat(chunks);
+}
 
 /**
  * UIDs where `text` appears in sender, recipients, subject or body. One SEARCH per
@@ -224,6 +251,25 @@ export class MailClient {
     const ref = parseMailId(id);
     if (!ref) return null;
     return this.inFolder(ref.folder, (client) => readFull(client, ref.folder, ref.uid));
+  }
+
+  /**
+   * One attachment's decoded bytes, by its position in `attachments` (1-based, as mail_read
+   * lists them). Text parts arrive converted to UTF-8. Null when there is no such attachment.
+   */
+  async attachment(id: string, n: number, maxBytes: number): Promise<{ info: AttachmentPart; bytes: Buffer | 'too_large' } | null> {
+    const ref = parseMailId(id);
+    if (!ref) return null;
+    return this.inFolder(ref.folder, async (client) => {
+      const msg = await client.fetchOne(String(ref.uid), { uid: true, bodyStructure: true }, { uid: true });
+      const info = msg ? walkStructure(msg.bodyStructure).attachments[n - 1] : undefined;
+      if (!info) return null;
+      // base64 is 4/3 of the decoded size; anything far past the cap is refused before downloading.
+      if (info.size !== null && info.size > maxBytes * 1.4 + 4096) return { info, bytes: 'too_large' };
+      const d = await client.download(String(ref.uid), info.part, { uid: true });
+      if (!d.content) return null;
+      return { info, bytes: (await readBytes(d.content, maxBytes)) ?? 'too_large' };
+    });
   }
 
   /** The thread `id` belongs to: every message sharing its root, oldest first. */

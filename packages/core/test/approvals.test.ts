@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatItem, ServerEvent } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
+import { quarantineNote } from '../src/agent.js';
 import { AuditLog } from '../src/audit.js';
 import { ApprovalBroker, type MailOutbox } from '../src/mail/approvals.js';
 import { draftTools, recipientWarnings } from '../src/mail/draft-tools.js';
@@ -283,16 +284,19 @@ describe('reply flow through the shell', () => {
     expect(c.card('draft-1').state).toBe('sent');
   });
 
-  it('does not offer write-tier tools to the model once email text is in context', async () => {
+  it('an email read in an earlier request is quarantined, and the draft still waits for a click', async () => {
     const c = chatSetup([{ toolCalls: [call('mail_create_draft', { inReplyTo: 'INBOX:7', to: ['sara@example.com'], subject: 'Re', body: 'ok' })] }, { text: 'done' }]);
     // Put an earlier email tool result in the context, as mail_read would.
     c.store.saveTurn({ role: 'user', content: 'read the email from Sara' }, 0);
     c.store.saveTurn({ role: 'assistant', content: null, toolCalls: [{ id: 'r', name: 'mail_read', arguments: '{"id":"INBOX:7"}' }] }, 1);
     c.store.saveTurn({ role: 'tool', toolCallId: 'r', name: 'mail_read', content: '<untrusted source="email" id="INBOX:7">hi</untrusted>' }, 2);
     await c.shell.handle({ type: 'send', text: 'reply to Sara saying ok' });
-    const offered = c.requests.map((r) => (r.tools ?? []).map((t) => t.name));
-    expect(offered).toHaveLength(2);
-    expect(offered.every((names) => names.includes('mail_create_draft') && !names.includes('mail_send_draft'))).toBe(true);
+    expect(c.requests).toHaveLength(2);
+    const seen = c.requests[0]!.messages.map((m) => m.content ?? '').join('\n');
+    expect(seen).not.toMatch(/<untrusted source=/);
+    expect(seen).toContain(quarantineNote([]));
+    expect(c.outbox.sent).toHaveLength(0);
+    expect(c.card('draft-1').state).toBe('pending');
     // Recipient from the email being answered: no warning on the card.
     expect(c.card('draft-1').warnings).toEqual([]);
   });

@@ -29,6 +29,11 @@ export interface RegisteredTool {
    * itself runs from a click on that card (system/actions.ts), never from here.
    */
   propose?: (args: unknown, ctx: ToolContext) => Promise<string | ToolResult>;
+  /**
+   * Device tier only: what happens instead of the change while untrusted content is in
+   * context. Shows a card to confirm; changes nothing. Without it the call is refused.
+   */
+  confirmWhenUntrusted?: (args: unknown, ctx: ToolContext) => Promise<string | ToolResult>;
   /** The result carries untrusted text (mail tools, A4). Anything the model does after reading it is tainted. */
   untrustedOutput?: boolean;
   /** Write tier: what the model is told when its call is refused. */
@@ -76,10 +81,14 @@ export class ToolRegistry {
     return this;
   }
 
-  /** Write- and device-tier tools are left out while email text is in context, so an email cannot even ask for one. */
+  /**
+   * While email text is in context, write-tier tools are left out, so an email cannot even
+   * ask for one, and so are device-tier tools unless they can turn into a confirm card.
+   */
   specs(opts: { untrustedInContext?: boolean } = {}): ToolSpec[] {
-    const defs = [...this.tools.values()].map((t) => t.def);
-    return toolSpecs(opts.untrustedInContext ? defs.filter((d) => d.tier !== 'write' && d.tier !== 'device') : defs);
+    const tools = [...this.tools.values()];
+    const offered = opts.untrustedInContext ? tools.filter((t) => t.def.tier !== 'write' && (t.def.tier !== 'device' || t.confirmWhenUntrusted)) : tools;
+    return toolSpecs(offered.map((t) => t.def));
   }
 
   returnsUntrusted(name: string): boolean {
@@ -115,8 +124,10 @@ export class ToolRegistry {
     }
 
     const tier = tool.def.tier;
-    // Changes to this computer, and requests for them, never come from a context an email is in.
-    if (ctx.untrustedInContext && (tier === 'device' || (tier === 'write' && tool.propose))) {
+    // Changes to this computer never run from a context an email is in. A device change may
+    // become a card the user confirms (below); anything else is refused.
+    const asCard = ctx.untrustedInContext && tier === 'device' && !!tool.confirmWhenUntrusted;
+    if (ctx.untrustedInContext && !asCard && (tier === 'device' || (tier === 'write' && tool.propose))) {
       log({ decision: 'denied', reason: 'untrusted content in context', untrustedInContext: true, args: parsed.data });
       return { ok: false, content: UNTRUSTED_REFUSAL, label };
     }
@@ -142,14 +153,15 @@ export class ToolRegistry {
       this.deviceCalls.push(now);
     }
 
-    const run = tier === 'write' ? tool.propose! : tool.handler;
+    const proposing = tier === 'write' || asCard;
+    const run = tier === 'write' ? tool.propose! : asCard ? tool.confirmWhenUntrusted! : tool.handler;
     const started = Date.now();
     try {
       const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(TOOL_TIMEOUT_MS)]);
       const r = await run(parsed.data, { ...ctx, signal });
       const { content, audit: extra } = typeof r === 'string' ? { content: r, audit: undefined } : r;
       log({
-        decision: tier === 'write' ? 'proposed' : 'allowed',
+        decision: proposing ? 'proposed' : 'allowed',
         untrustedInContext: ctx.untrustedInContext,
         args: parsed.data,
         ok: true,
@@ -160,7 +172,7 @@ export class ToolRegistry {
       return { ok: true, content, label };
     } catch (err) {
       const message = (err as Error).message;
-      log({ decision: tier === 'write' ? 'proposed' : 'allowed', args: parsed.data, ok: false, error: message, ms: Date.now() - started });
+      log({ decision: proposing ? 'proposed' : 'allowed', args: parsed.data, ok: false, error: message, ms: Date.now() - started });
       return { ok: false, content: `Error: ${message}`, label };
     }
   }

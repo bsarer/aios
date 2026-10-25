@@ -8,7 +8,7 @@
 import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool, ToolResult } from '../tools/registry.js';
 import type { SystemActions } from './actions.js';
-import type { PowerProfile, SystemControls } from './controls.js';
+import { type PowerProfile, type SystemControls, cleanName } from './controls.js';
 
 /** Pair cards a single scan may post. */
 export const MAX_PAIR_CARDS = 6;
@@ -17,7 +17,69 @@ const q = (s: string) => `“${s}”`;
 const onOff = (b: boolean | null | undefined) => (b === null || b === undefined ? 'unknown' : b ? 'on' : 'off');
 const pct = (n: number | null | undefined) => (n === null || n === undefined ? 'unknown' : `${n}%`);
 
+/** One plain line for a device change, written by code, for its confirm card. */
+export function describeChange(tool: string, args: Record<string, unknown>): string {
+  const name = (k: string) => q(cleanName(String(args[k] ?? '')));
+  const on = args.on === true ? 'on' : 'off';
+  switch (tool) {
+    case 'volume_set': {
+      const parts = [
+        ...(typeof args.percent === 'number' ? [`set the volume to ${args.percent}%`] : []),
+        ...(typeof args.muted === 'boolean' ? [args.muted ? 'mute the sound' : 'unmute the sound'] : []),
+      ];
+      const line = parts.join(' and ');
+      return line.charAt(0).toUpperCase() + line.slice(1);
+    }
+    case 'brightness_set':
+      return `Set the brightness to ${String(args.percent)}%`;
+    case 'wifi_on':
+      return 'Turn Wi-Fi on';
+    case 'bluetooth_power':
+      return `Turn Bluetooth ${on}`;
+    case 'bluetooth_connection':
+      return `${args.action === 'connect' ? 'Connect' : 'Disconnect'} ${name('device')}`;
+    case 'bluetooth_scan':
+      return 'Look for new Bluetooth devices to pair';
+    case 'night_light':
+      return `Turn night light ${on}`;
+    case 'do_not_disturb':
+      return `Turn do not disturb ${on}`;
+    case 'audio_output_set':
+      return `Switch sound to ${name('output')}`;
+    case 'microphone_mute':
+      return args.muted === true ? 'Mute the microphone' : 'Unmute the microphone';
+    case 'power_profile_set':
+      return `Switch to the ${String(args.profile)} power profile`;
+    case 'screen_lock':
+      return 'Lock the screen';
+    case 'theme_set':
+      return `Switch to the ${name('name')} theme`;
+    default:
+      return `Run ${tool}`;
+  }
+}
+
 export function systemTools(o: { controls: SystemControls; actions: SystemActions }): RegisteredTool[] {
+  const tools = buildTools(o);
+  const byName = new Map(tools.map((t) => [t.def.name, t]));
+  // A confirmed card runs the same handler, outside any model turn.
+  o.actions.setDeviceRunner(async (name, args) => {
+    const t = byName.get(name);
+    if (t?.def.tier !== 'device') throw new Error(`${name} is not a device change`);
+    const r = await t.handler(t.def.input.parse(args), { signal: AbortSignal.timeout(60_000), untrustedInContext: false, userText: '' });
+    return typeof r === 'string' ? { content: r } : r;
+  });
+  for (const t of tools) {
+    if (t.def.tier !== 'device') continue;
+    t.confirmWhenUntrusted = async (args) => {
+      o.actions.propose({ action: 'device', tool: t.def.name, args, summary: describeChange(t.def.name, args as Record<string, unknown>) });
+      return 'Because an email is in view, this was not done: a card now asks the user to confirm it. Tell them in one line; do not say it is done.';
+    };
+  }
+  return tools;
+}
+
+function buildTools(o: { controls: SystemControls; actions: SystemActions }): RegisteredTool[] {
   const c = o.controls;
   const tool = (name: string, label: string, handler: RegisteredTool['handler']): RegisteredTool => ({ def: toolByName(name)!, label, handler });
   const change = <T>(content: string, old: T, now: T): ToolResult => ({ content, audit: { old, new: now } });

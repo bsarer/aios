@@ -11,7 +11,7 @@
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -71,6 +71,18 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
   const readId = last.role === 'user' ? /^(?:Read email|Draft a reply to email) (\S+)$/.exec(lastUser)?.[1] : undefined;
   if (readId) {
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_r', function: { name: 'mail_read', arguments: JSON.stringify({ id: readId }) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  // S1: answer with the system tool's own result line.
+  if (last.role === 'tool' && /^Volume is now|Nothing has changed yet/.test(last.content ?? '')) {
+    const text = /Nothing has changed yet/.test(last.content ?? '') ? 'The Turn off button is on the card.' : (last.content ?? '');
+    chunk(res, { choices: [{ delta: { content: text } }] });
+    return finish(0.0004);
+  }
+  const systemCall = last.role === 'user' ? (/^set the volume to (\d+)$/i.exec(lastUser) ? ['volume_set', { percent: Number(/(\d+)$/.exec(lastUser)![1]) }] : /^turn off wi-?fi$/i.test(lastUser) ? ['wifi_off', {}] : null) : null;
+  if (systemCall) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_s', function: { name: systemCall[0], arguments: JSON.stringify(systemCall[1]) } }] } }] });
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
     return void res.end('data: [DONE]\n\n');
   }
@@ -180,6 +192,38 @@ async function main(): Promise<void> {
   // Fake keyring: the GreenMail test password for the mail account, a dummy key for the model.
   writeFileSync(join(bin, 'secret-tool'), '#!/bin/sh\n[ "$1" = lookup ] || exit 1\n[ "$5" = mail ] && printf test-only-password && exit 0\nprintf test-key\n');
   chmodSync(join(bin, 'secret-tool'), 0o755);
+  // Fake Omarchy commands for the system controls (S1), keeping their state in files.
+  const state = join(tmp, 'system-state');
+  mkdirSync(state);
+  writeFileSync(join(state, 'volume'), '55\n');
+  writeFileSync(join(state, 'radio'), 'enabled\n');
+  const fakes: Record<string, string> = {
+    'omarchy-audio-output-sink': 'echo alsa_output.speakers',
+    pactl: [
+      'case "$1" in',
+      '  get-sink-volume) echo "Volume: front-left: 1 /  $(cat "$S/volume")% / 0 dB" ;;',
+      '  get-sink-mute) echo "Mute: no" ;;',
+      '  get-default-sink) echo alsa_output.speakers ;;',
+      `  -f) echo '[{"index":50,"name":"alsa_output.speakers","description":"Speakers"}]' ;;`,
+      '  *) exit 1 ;;',
+      'esac',
+    ].join('\n'),
+    'omarchy-audio-output-volume': 'v=$(cat "$S/volume")\ncase "$1" in +*) v=$((v + ${1#+})) ;; -*) v=$((v - ${1#-})) ;; *) exit 1 ;; esac\necho $v > "$S/volume"',
+    nmcli: [
+      'case "$*" in',
+      '  "radio wifi") cat "$S/radio" ;;',
+      '  "radio wifi off") echo disabled > "$S/radio" ;;',
+      '  "radio wifi on") echo enabled > "$S/radio" ;;',
+      '  *ACTIVE,SSID*) grep -q enabled "$S/radio" && echo "yes:Home" ;;',
+      'esac',
+      'exit 0',
+    ].join('\n'),
+  };
+  for (const [name, body] of Object.entries(fakes)) {
+    writeFileSync(join(bin, name), `#!/bin/sh\nS="${state}"\n${body}\n`);
+    chmodSync(join(bin, name), 0o755);
+  }
+  const fakeState = (name: string) => readFileSync(join(state, name), 'utf8').trim();
   const port = 17_000 + Math.floor(Math.random() * 1000);
   mkdirSync(join(tmp, 'config', 'aios'), { recursive: true });
   const role = `baseUrl = "http://127.0.0.1:${mockPort}/v1"\nmodel = "mock/model"\napiKeyRef = "keyring:model-chat"\n`;
@@ -305,6 +349,30 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('fact persists across a restart', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).includes('- Sara prefers short emails')));
     await shot(page, '7-memory-after-restart');
+
+    // S1. System controls: a small change runs straight away; Wi-Fi off waits for a click.
+    await input.fill('set the volume to 30');
+    await input.press('Enter');
+    check('"set the volume to 30" changes the volume', await waitFor(async () => (await lastAssistant().innerText()).includes('Volume is now 30% (was 55%)')));
+    check('the volume really is 30', fakeState('volume') === '30', fakeState('volume'));
+    await input.fill('turn off wifi');
+    await input.press('Enter');
+    const wifiCard = page.locator('[data-kind="action"]').last();
+    check('"turn off wifi" shows a card instead', await waitFor(async () => (await wifiCard.getAttribute('data-state')) === 'pending'));
+    check('Wi-Fi still on before the click', fakeState('radio') === 'enabled');
+    await shot(page, 's1-wifi-card');
+    await wifiCard.getByTestId('action-cancel').click();
+    check('Cancel marks the card cancelled', await waitFor(async () => (await wifiCard.getAttribute('data-state')) === 'cancelled'));
+    check('Cancel leaves Wi-Fi on', fakeState('radio') === 'enabled');
+    await input.fill('turn off wifi');
+    await input.press('Enter');
+    const wifiCard2 = page.locator('[data-kind="action"]').last();
+    check('a second card appears', await waitFor(async () => (await page.locator('[data-kind="action"]').count()) === 2 && (await wifiCard2.getAttribute('data-state')) === 'pending'));
+    await wifiCard2.getByTestId('action-confirm').click();
+    check('Turn off runs it', await waitFor(async () => (await wifiCard2.getAttribute('data-state')) === 'done'));
+    check('Wi-Fi is off', fakeState('radio') === 'disabled');
+    check('status strip shows Wi-Fi off', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Wi-Fi off')));
+    await shot(page, 's1-wifi-off');
     // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
     if (await mailStackUp()) {
       check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Mail: connected'), 15_000));

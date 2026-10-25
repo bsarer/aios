@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals) and A6 (kiosk) are merged. A7 (hardening) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk) and A7 (hardening) are merged. S1 (system controls) is in review.
 
 ## Mail
 
@@ -37,10 +37,29 @@ Both are compositor key bindings, so they work even when the chat page is frozen
 
 **After `git pull`:** `pnpm kiosk:restart` rebuilds the UI and restarts the service. Don't run `pnpm start` at the same time; they share the port. After upgrading Node, run `pnpm run setup --kiosk` again: the service points at the Node binary that ran setup. `AIOS_KIOSK=0 aios-kiosk open` opens the chat in a normal browser window, and `[ui] kiosk = false` in the config keeps the service but doesn't open the chat at login.
 
+## System controls
+
+Needs Omarchy 4. Ask in your own words: "volume to 30", "mute", "brighter", "night light on", "do not disturb", "switch to my headphones", "mute the mic", "power saver", "lock the screen", "switch to the Gruvbox theme", "is Bluetooth on?", "how's the battery?". Changes go through Omarchy's own commands, so its on-screen display shows them just as the keyboard keys would.
+
+| Request | What happens |
+|---|---|
+| Status: Wi-Fi, saved networks, Bluetooth devices, volume, outputs, brightness, battery, CPU and memory, themes | Answered straight away. Nothing changes. |
+| Volume and mute, brightness, night light, do not disturb, audio output, microphone mute, power profile, screen lock, theme, Wi-Fi on, Bluetooth on or off, connect or disconnect a paired device | Done straight away (the `device` tier), then the chat says the new value. |
+| Wi-Fi off, switch to another saved network, pair a new Bluetooth device, forget a device | A card asks first. Nothing changes until you click **Turn off**, **Connect**, **Pair** or **Forget**; **Cancel** changes nothing. |
+
+- **Limits, enforced in code:** volume 0-100%, brightness 5-100% (never off), at most 10 changes a minute. Outputs, themes, networks and devices must be ones the computer itself lists.
+- **Email can't change your computer:** while an email is in the conversation, the chat isn't offered any of the change tools, and calls to them are refused and logged. Start a new request in your own words.
+- **Wi-Fi passwords:** never read, shown or asked for. The chat only switches between networks this computer already saved. Join a new network in Omarchy's Network panel (`SUPER + CTRL + N`). Networks you never saved are counted, not named, because anyone nearby can name a network.
+- **Pairing:** "pair my speaker" looks for devices for a few seconds and shows each one on its own card. The model never sees their names (anyone can name a Bluetooth device), so you pick the right card. Put the device in pairing mode first.
+- **Pause:** `/pause` also stops every change, including clicks on these cards, until `/resume`.
+- **Audit:** every change is logged with the setting's value before and after.
+- **Not included:** keep-awake, sleep, restart and shut down, system updates, turning off the touchpad, touchscreen or keyboard.
+- If a command is missing (not on Omarchy 4), the chat says which one. If the on-screen display doesn't appear when the service makes a change, the service may be missing the desktop session's environment: check that `systemctl --user show-environment` lists `WAYLAND_DISPLAY` and `HYPRLAND_INSTANCE_SIGNATURE`.
+
 ## Limits, failures and logs
 
 - **Daily cost cap:** `[cost] dailyCapUsd` (default 2). Once today's spend (midnight to midnight in your timezone) reaches it, no model call is made by chat, mail triage or the nightly summary until tomorrow. The chat says so, `/cost` shows the numbers, and new mail is still listed by sender and subject without a summary. Spend is what the provider reports per call (OpenRouter does), so a provider that reports no cost is never capped.
-- **Pause:** `/pause` stops every model call, from every part of the app, until `/resume`. It is checked in the model client itself, not only in the chat. Mail is still fetched and queued, and your own clicks on draft and memory cards still work.
+- **Pause:** `/pause` stops every model call, from every part of the app, until `/resume`. It is checked in the model client itself, not only in the chat. Mail is still fetched and queued, and your own clicks on draft and memory cards still work. System changes stop too, including clicks on their cards.
 - **When something fails, the chat says what and what to do:**
   - Model: wrong key, no credits, rate limit, timeout, provider down, no network, conversation too long.
   - API key missing or keyring locked: the chat still opens and says so. Before A7 the service crash-looped.
@@ -52,13 +71,13 @@ Both are compositor key bindings, so they work even when the chat page is frozen
 
 ## Testing
 
-- `pnpm test` runs every unit test, and `pnpm test:injection` runs only the prompt-injection suite. That suite feeds each of the six hostile test emails to a model that obeys them, through the real tools, approval broker and memory. It checks that nothing is sent, no app opens, no memory or config file changes, and every write-tier call is refused and logged.
+- `pnpm test` runs every unit test, and `pnpm test:injection` runs only the prompt-injection suite. That suite feeds each of the seven hostile test emails to a model that obeys them, through the real tools, approval brokers and memory. It checks that nothing is sent, no app opens, no memory or config file changes, no system command starts (one email asks to mute the computer and turn off Wi-Fi), and every write- and device-tier call is refused and logged. It also covers the system controls' limits, rate limit, pause and action cards.
 - CI (`.github/workflows/ci.yml`) runs the typecheck, the injection suite and the unit tests on every PR and push to main. A second job starts GreenMail and runs the mail integration tests and the browser end-to-end check. CI never uses a real account or key.
 - **Real test account:** for trying AI OS against a real mail server and model, use a dedicated throwaway mailbox, never your own.
   1. Create the mailbox (for example a new Gmail or Fastmail account), turn on two-step sign-in, and create an app password for it.
   2. Run `pnpm run setup`, answer no to the local test mailbox, and pick the provider. The app password goes straight into the keyring.
   3. Run `pnpm check:account`. It logs in over IMAP, finds Drafts and Sent, and checks the SMTP login, all without sending or changing anything.
-  4. Optional: `pnpm check:account --seed-hostile` asks first, then adds the six hostile test emails to that INBOX, so you can check that the real model ignores them too.
+  4. Optional: `pnpm check:account --seed-hostile` asks first, then adds the seven hostile test emails to that INBOX, so you can check that the real model ignores them too.
   5. Switch back to your own mailbox with `pnpm run setup` when you're done.
 
 ## Memory
@@ -80,7 +99,7 @@ Needs Node 22+, pnpm 10, Docker with compose, and `secret-tool` (libsecret) for 
 ```sh
 pnpm install
 pnpm test                 # unit tests
-pnpm test:injection       # only the prompt-injection suite (six hostile emails)
+pnpm test:injection       # only the prompt-injection suite (seven hostile emails)
 pnpm typecheck            # strict TypeScript
 pnpm test:stack:up        # start GreenMail on 127.0.0.1 and seed 40 fixture emails
 pnpm test:stack:check     # list the mailbox over IMAP
@@ -100,10 +119,10 @@ IMAP `127.0.0.1:3143`, SMTP `127.0.0.1:3025`, no TLS, user `john@aios.test`, pas
 
 ```
 packages/shared   config schema (zod) and TOML parsing
-packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, memory, audit log, model adapter, keyring, tools
+packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, memory, audit log, model adapter, keyring, tools, system controls
 packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip
 scripts           setup/uninstall CLI, mail seeder and checker, browser e2e check
-fixtures/mail.ts  40 sample emails: threads, attachments, 6 hostile samples
+fixtures/mail.ts  41 sample emails: threads, attachments, 7 hostile samples
 evals             model bake-off: tasks, runner, report
 ```
 

@@ -97,7 +97,10 @@ export type ModelErrorKind =
   | 'bad_request'
   | 'network'
   | 'malformed_output'
-  | 'aborted';
+  | 'aborted'
+  | 'paused'
+  | 'cost_cap'
+  | 'key_missing';
 
 const USER_MESSAGES: Record<ModelErrorKind, string> = {
   auth: 'The model provider rejected the API key. Run setup to update it.',
@@ -111,6 +114,9 @@ const USER_MESSAGES: Record<ModelErrorKind, string> = {
   network: 'I cannot reach the model provider. Check the network connection.',
   malformed_output: 'The model returned something I could not understand.',
   aborted: 'Stopped.',
+  paused: 'I am paused. Type /resume to continue.',
+  cost_cap: "Today's model spending has reached your daily cap, so I've stopped calling the model until tomorrow. Type /cost to see the numbers, or raise cost.dailyCapUsd in your config.",
+  key_missing: "I can't read the model API key from the keyring. If you just logged in, the keyring may still be locked; otherwise run `pnpm run setup`.",
 };
 
 export class ModelError extends Error {
@@ -139,6 +145,11 @@ export interface ModelClientOptions {
   onCall?: (record: CallRecord) => void;
   /** Total attempts per call, including the first. Default 3. */
   maxAttempts?: number;
+  /**
+   * Checked before every call, from every caller (chat, triage, nightly). Returning a kind
+   * refuses the call without contacting the provider: pause and the daily cost cap (A7).
+   */
+  gate?: (role: ModelRole) => 'paused' | 'cost_cap' | null;
 }
 
 // ── Wire schemas (provider responses are external input) ─────────────────────
@@ -201,6 +212,7 @@ export class ModelClient {
 
   /** Non-streaming call. */
   async complete(req: ModelRequest): Promise<ModelResult> {
+    this.checkGate(req.role);
     const cfg = this.opts.models[req.role];
     const started = this.now();
     try {
@@ -219,6 +231,7 @@ export class ModelClient {
 
   /** Streaming call. Retries only happen before the first delta is yielded. */
   async *stream(req: ModelRequest): AsyncGenerator<Delta, ModelResult> {
+    this.checkGate(req.role);
     const cfg = this.opts.models[req.role];
     const started = this.now();
     let attempts = 0;
@@ -283,6 +296,12 @@ export class ModelClient {
 
   // ── internals ──
 
+  /** Refusals are not recorded as calls: nothing reached the provider and nothing was spent. */
+  private checkGate(role: ModelRole): void {
+    const kind = this.opts.gate?.(role);
+    if (kind) throw new ModelError(kind, kind === 'paused' ? 'paused by the user' : 'daily cost cap reached');
+  }
+
   private async withRetries<T>(req: ModelRequest, fn: (signal: AbortSignal) => Promise<T>): Promise<{ json: T; attempts: number }> {
     const cfg = this.opts.models[req.role];
     for (let attempt = 1; ; attempt++) {
@@ -303,7 +322,12 @@ export class ModelClient {
 
   private async send(req: ModelRequest, stream: boolean, signal: AbortSignal): Promise<Response> {
     const cfg = this.opts.models[req.role];
-    const key = await this.opts.resolveKey(cfg.apiKeyRef);
+    let key: Secret;
+    try {
+      key = await this.opts.resolveKey(cfg.apiKeyRef);
+    } catch (err) {
+      throw new ModelError('key_missing', (err as Error).message.slice(0, 300));
+    }
     const body = buildBody(cfg, req, stream);
     let res: Response;
     try {

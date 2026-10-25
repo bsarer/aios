@@ -283,7 +283,8 @@ export class Shell {
         return this.pushStatus();
       case 'cost': {
         const u = this.o.store.usageSince(startOfDay(this.clock().getTime(), this.o.timeZone));
-        return say(`Today: $${u.costUsd.toFixed(4)} across ${u.calls} model calls (${u.tokens} tokens). Daily cap: $${this.o.costCapUsd.toFixed(2)}.`);
+        const capped = u.costUsd >= this.o.costCapUsd ? " The cap is reached, so I won't call the model again until tomorrow. Raise cost.dailyCapUsd in your config to change it." : '';
+        return say(`Today: $${u.costUsd.toFixed(4)} across ${u.calls} model calls (${u.tokens} tokens). Daily cap: $${this.o.costCapUsd.toFixed(2)}.${capped}`);
       }
       case 'memory':
       case 'forget':

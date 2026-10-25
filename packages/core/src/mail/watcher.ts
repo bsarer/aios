@@ -6,6 +6,7 @@
  */
 import type { ImapFlow } from 'imapflow';
 import { sanitize } from '../untrusted.js';
+import { describeMailError } from './errors.js';
 import { type Address, type MailConnection, connect, mailId, readFull } from './imap.js';
 import type { MailState, NewMail } from './state.js';
 
@@ -103,7 +104,7 @@ export class MailWatcher {
       this.poll.unref?.();
       await this.check();
     } catch (err) {
-      this.o.onStatus('error', (err as Error).message);
+      this.o.onStatus('error', describeMailError(err));
       if (!closed) {
         closed = true;
         await source.close().catch(() => undefined);

@@ -188,9 +188,9 @@ describe('approval broker', () => {
     const t = setup();
     const d = await t.broker.create(draft);
     const h = t.card(d.id).hash;
-    t.outbox.failNext = new Error('connection refused');
+    t.outbox.failNext = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3025'), { code: 'ECONNREFUSED' });
     expect(await t.broker.approveSend(d.id, h)).toBe('failed');
-    expect(t.card(d.id)).toMatchObject({ state: 'failed', error: 'Not sent: connection refused' });
+    expect(t.card(d.id)).toMatchObject({ state: 'failed', error: 'Not sent: the mail server refused the connection. Check the host and port in your config.' });
     expect(await t.broker.approveSend(d.id, h)).toBe('sent');
 
     const d2 = await t.broker.create(draft);

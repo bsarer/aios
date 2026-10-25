@@ -1,6 +1,7 @@
 export * from './agent.js';
 export * from './audit.js';
 export * from './commands.js';
+export * from './gate.js';
 export * from './model.js';
 export * from './paths.js';
 export * from './prompts.js';
@@ -18,6 +19,7 @@ export * from './memory/nightly.js';
 export * from './memory/tool.js';
 export * from './mail/approvals.js';
 export * from './mail/draft-tools.js';
+export * from './mail/errors.js';
 export * from './mail/imap.js';
 export * from './mail/message.js';
 export * from './mail/outbox.js';

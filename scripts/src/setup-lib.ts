@@ -1,4 +1,4 @@
-import { AiosConfig, MODEL_ROLES, type ModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
+import { AiosConfig, HOSTNAME, MODEL_ROLES, type ModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
 import { TEST_MAILBOX } from './mailbox.js';
 
 /** Asks the user something. `secret` answers must not be echoed. */
@@ -22,6 +22,23 @@ export interface CollectedSetup {
 }
 
 const num = (s: string) => Number.parseInt(s, 10);
+
+/** Ask until the answer is a bare host name; "imap.example.com, port 993" is caught here, not at startup. */
+async function askHost(p: Prompter, question: string, def: string): Promise<string> {
+  for (;;) {
+    const v = (await p.ask(question, { default: def })).trim();
+    if (HOSTNAME.test(v)) return v;
+    console.log(`  "${v}" is not a server name. Enter only the name, like imap.example.com; the port is asked next.`);
+  }
+}
+
+async function askPort(p: Prompter, question: string, def: number): Promise<number> {
+  for (;;) {
+    const v = (await p.ask(question, { default: String(def) })).trim();
+    if (/^\d{1,5}$/.test(v) && num(v) >= 1 && num(v) <= 65_535) return num(v);
+    console.log(`  "${v}" is not a port number. Enter a number such as ${def}.`);
+  }
+}
 
 /**
  * Walk the user through every setting, using `existing` as defaults so re-running is safe.
@@ -64,23 +81,26 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
   } else {
     const prev = existing?.mail;
     const address = await p.ask('Mail address', { default: prev?.address ?? '' });
+    const username = await p.ask('IMAP/SMTP username', { default: prev?.username ?? address });
+    const imapHost = await askHost(p, 'IMAP host', prev?.imap.host ?? '');
     mail = {
       address,
-      username: await p.ask('IMAP/SMTP username', { default: prev?.username ?? address }),
+      username,
       passwordRef: MAIL_PASSWORD_REF,
       imap: {
-        host: await p.ask('IMAP host', { default: prev?.imap.host ?? '' }),
-        port: num(await p.ask('IMAP port', { default: String(prev?.imap.port ?? 993) })),
+        host: imapHost,
+        port: await askPort(p, 'IMAP port', prev?.imap.port ?? 993),
         tls: true,
       },
       smtp: {
-        host: await p.ask('SMTP host', { default: prev?.smtp.host ?? '' }),
-        port: num(await p.ask('SMTP port', { default: String(prev?.smtp.port ?? 465) })),
+        host: await askHost(p, 'SMTP host', prev?.smtp.host ?? ''),
+        port: await askPort(p, 'SMTP port', prev?.smtp.port ?? 465),
         tls: true,
       },
       pollIntervalSeconds: prev?.pollIntervalSeconds ?? 30,
       batchWindowSeconds: prev?.batchWindowSeconds ?? 20,
-      saveSentCopy: prev?.saveSentCopy ?? true,
+      // Gmail files mail sent over SMTP in Sent by itself; a second copy would duplicate it.
+      saveSentCopy: imapHost.toLowerCase() === 'imap.gmail.com' ? false : (prev?.saveSentCopy ?? true),
     };
     await keepOrAsk(MAIL_PASSWORD_REF, 'Mail app password');
   }

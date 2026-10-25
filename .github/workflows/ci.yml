@@ -1,0 +1,57 @@
+# Runs on every PR and push to main. Never uses real accounts or keys: the model is
+# mocked and mail is the local GreenMail stack (docker-compose.test.yml).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, injection suite, unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # The six hostile emails must not cause a send, a memory write or a config change.
+      - name: Prompt-injection suite
+        run: pnpm test:injection
+      - name: All unit tests
+        run: pnpm test
+
+  mail-stack:
+    name: GreenMail integration and browser end-to-end
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      AIOS_REQUIRE_STACK: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:stack:up
+      - name: Mail integration tests
+        run: pnpm vitest run scripts/test/mail.int.test.ts
+      - name: End-to-end in Chromium (mock model)
+        run: CHROMIUM_PATH="$(command -v chromium || command -v google-chrome)" pnpm test:e2e
+      - if: always()
+        run: pnpm test:stack:down

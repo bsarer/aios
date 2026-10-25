@@ -18,6 +18,8 @@ const reachable = await new Promise<boolean>((resolve) => {
   s.once('connect', () => (s.destroy(), resolve(true)));
   s.once('error', () => resolve(false));
 });
+// CI starts the stack and sets this, so a broken stack fails the run instead of skipping it.
+if (process.env.AIOS_REQUIRE_STACK === '1' && !reachable) throw new Error('GreenMail test stack is not reachable');
 
 const conn = (port = TEST_MAILBOX.imapPort) => ({
   host: TEST_MAILBOX.host,

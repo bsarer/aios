@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory) and A4 (mail reading, watcher and triage) are merged. A5 (replies and approvals) and A6 (kiosk) are in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals) and A6 (kiosk) are merged. A7 (hardening) is in review.
 
 ## Mail
 
@@ -37,6 +37,30 @@ Both are compositor key bindings, so they work even when the chat page is frozen
 
 **After `git pull`:** `pnpm kiosk:restart` rebuilds the UI and restarts the service. Don't run `pnpm start` at the same time; they share the port. After upgrading Node, run `pnpm run setup --kiosk` again: the service points at the Node binary that ran setup. `AIOS_KIOSK=0 aios-kiosk open` opens the chat in a normal browser window, and `[ui] kiosk = false` in the config keeps the service but doesn't open the chat at login.
 
+## Limits, failures and logs
+
+- **Daily cost cap:** `[cost] dailyCapUsd` (default 2). Once today's spend (midnight to midnight in your timezone) reaches it, no model call is made by chat, mail triage or the nightly summary until tomorrow. The chat says so, `/cost` shows the numbers, and new mail is still listed by sender and subject without a summary. Spend is what the provider reports per call (OpenRouter does), so a provider that reports no cost is never capped.
+- **Pause:** `/pause` stops every model call, from every part of the app, until `/resume`. It is checked in the model client itself, not only in the chat. Mail is still fetched and queued, and your own clicks on draft and memory cards still work.
+- **When something fails, the chat says what and what to do:**
+  - Model: wrong key, no credits, rate limit, timeout, provider down, no network, conversation too long.
+  - API key missing or keyring locked: the chat still opens and says so. Before A7 the service crash-looped.
+  - Mailbox: login rejected, server not found, connection refused, timeout, bad certificate, throttling, dropped connection, password missing from the keyring. aios-core keeps retrying and says when mail is back.
+  - Sending: the draft card shows why it wasn't sent, with **Try again**.
+  - Mail summaries and the nightly memory summary: one notice each, with the reason, then quiet retries.
+  - The service itself: if the page loses aios-core for more than 5 seconds, a banner says how to see why. If the service never starts (for example an invalid config), `aios-kiosk` shows a desktop notification with the error instead of opening a full-screen error page.
+- **Logs:** the audit log (`~/.local/share/aios/audit.jsonl`: every tool call, model call, command and memory decision, never message content) rotates at 10 MB and keeps 5 old files (`audit.jsonl.1` … `.5`). The service's own output goes to the systemd journal, which rotates it: `journalctl --user -u aios-core`.
+
+## Testing
+
+- `pnpm test` runs every unit test, and `pnpm test:injection` runs only the prompt-injection suite. That suite feeds each of the six hostile test emails to a model that obeys them, through the real tools, approval broker and memory. It checks that nothing is sent, no app opens, no memory or config file changes, and every write-tier call is refused and logged.
+- CI (`.github/workflows/ci.yml`) runs the typecheck, the injection suite and the unit tests on every PR and push to main. A second job starts GreenMail and runs the mail integration tests and the browser end-to-end check. CI never uses a real account or key.
+- **Real test account:** for trying AI OS against a real mail server and model, use a dedicated throwaway mailbox, never your own.
+  1. Create the mailbox (for example a new Gmail or Fastmail account), turn on two-step sign-in, and create an app password for it.
+  2. Run `pnpm run setup`, answer no to the local test mailbox, and pick the provider. The app password goes straight into the keyring.
+  3. Run `pnpm check:account`. It logs in over IMAP, finds Drafts and Sent, and checks the SMTP login, all without sending or changing anything.
+  4. Optional: `pnpm check:account --seed-hostile` asks first, then adds the six hostile test emails to that INBOX, so you can check that the real model ignores them too.
+  5. Switch back to your own mailbox with `pnpm run setup` when you're done.
+
 ## Memory
 
 Long-term memory is plain Markdown you own, in `~/.config/aios/memory/`:
@@ -56,9 +80,11 @@ Needs Node 22+, pnpm 10, Docker with compose, and `secret-tool` (libsecret) for 
 ```sh
 pnpm install
 pnpm test                 # unit tests
+pnpm test:injection       # only the prompt-injection suite (six hostile emails)
 pnpm typecheck            # strict TypeScript
 pnpm test:stack:up        # start GreenMail on 127.0.0.1 and seed 40 fixture emails
 pnpm test:stack:check     # list the mailbox over IMAP
+pnpm check:account        # read-only login check of the mailbox in your config (Drafts, Sent, SMTP)
 pnpm run setup --dry-run  # walk through setup without touching keyring or disk
 pnpm test:stack:down
 pnpm start                # build the UI and start aios-core on http://127.0.0.1:7777 (needs `pnpm run setup`)
@@ -115,3 +141,13 @@ evals             model bake-off: tasks, runner, report
 | Package | Why | License | Maintenance |
 |---|---|---|---|
 | nodemailer (in core; already used by scripts since A0, same version) | builds the outgoing message and sends it over SMTP | MIT-0 | very active (same author as imapflow) |
+
+## Dependencies added in A7
+
+No new packages. CI uses three GitHub Actions, pinned to their current major versions:
+
+| Action | Why | License | Maintenance |
+|---|---|---|---|
+| actions/checkout@v7 | check out the repo | MIT | GitHub, very active |
+| pnpm/action-setup@v6 | install pnpm at the version in `packageManager` | MIT | pnpm team, active |
+| actions/setup-node@v7 | install Node 22 and cache the pnpm store | MIT | GitHub, very active |

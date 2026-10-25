@@ -6,6 +6,7 @@
   "scripts": {
     "seed": "tsx src/seed-mail.ts",
     "check-mail": "tsx src/check-mail.ts",
+    "check-account": "tsx src/check-account.ts",
     "setup": "tsx src/setup.ts",
     "uninstall": "tsx src/uninstall.ts",
     "e2e": "tsx src/e2e.ts"

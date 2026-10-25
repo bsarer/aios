@@ -20,6 +20,11 @@ const MIGRATIONS = [
                              date INTEGER, received_at INTEGER NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, triage TEXT, attempts INTEGER NOT NULL DEFAULT 0);
    CREATE INDEX mail_events_status ON mail_events(status, received_at);
    CREATE TABLE notification_log (at INTEGER NOT NULL);`,
+  // A5: drafts and their approval state. The hash is what a Send click must match.
+  `CREATE TABLE drafts (id TEXT PRIMARY KEY, to_json TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, in_reply_to TEXT, reply_headers TEXT,
+                       hash TEXT NOT NULL, state TEXT NOT NULL, warnings TEXT NOT NULL, error TEXT, message_id TEXT NOT NULL, draft_uid INTEGER,
+                       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, sent_at INTEGER);
+   CREATE INDEX drafts_state ON drafts(state);`,
 ];
 
 export interface UsageRow {

@@ -9,6 +9,8 @@ export interface ToolContext {
    * this call, so the call may have been steered by it. Computed by the agent, not the model.
    */
   untrustedInContext: boolean;
+  /** The user's own message that started this turn. */
+  userText: string;
 }
 
 export interface RegisteredTool {
@@ -18,6 +20,8 @@ export interface RegisteredTool {
   handler: (args: unknown, ctx: ToolContext) => Promise<string>;
   /** The result carries untrusted text (mail tools, A4). Anything the model does after reading it is tainted. */
   untrustedOutput?: boolean;
+  /** Write tier: what the model is told when its call is refused. */
+  deniedMessage?: string;
 }
 
 export interface ToolOutcome {
@@ -43,8 +47,10 @@ export class ToolRegistry {
     return this;
   }
 
-  specs(): ToolSpec[] {
-    return toolSpecs([...this.tools.values()].map((t) => t.def));
+  /** Write-tier tools are left out while email text is in context, so an email cannot even ask for one. */
+  specs(opts: { untrustedInContext?: boolean } = {}): ToolSpec[] {
+    const defs = [...this.tools.values()].map((t) => t.def);
+    return toolSpecs(opts.untrustedInContext ? defs.filter((d) => d.tier !== 'write') : defs);
   }
 
   returnsUntrusted(name: string): boolean {
@@ -79,10 +85,11 @@ export class ToolRegistry {
       return { ok: false, content: `Error: invalid arguments: ${parsed.error.issues.map((i) => i.message).join('; ')}`, label };
     }
 
-    // Write-tier actions need a user click through the approval broker (A5). Until then: never.
+    // Write-tier actions never run from a model call. They run only from a click on their
+    // card, through the approval broker (mail/approvals.ts), which audits them itself.
     if (tool.def.tier === 'write') {
-      log({ decision: 'denied', reason: 'write tier requires approval', args: parsed.data });
-      return { ok: false, content: 'Error: this action needs the user to approve it, and approvals are not available yet.', label };
+      log({ decision: 'denied', reason: 'write tier runs only from a user click', untrustedInContext: ctx.untrustedInContext, args: parsed.data });
+      return { ok: false, content: tool.deniedMessage ?? 'Error: only the user can do this, by approving it on a card.', label };
     }
 
     const started = Date.now();

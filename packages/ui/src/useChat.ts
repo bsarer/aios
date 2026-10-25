@@ -7,6 +7,8 @@ export type Connection = 'connecting' | 'open' | 'closed';
 export function useChat() {
   const [state, dispatch] = useReducer(applyEvent, initialChatState as ChatState);
   const [conn, setConn] = useState<Connection>('connecting');
+  // Set when the server sends something this build of the page can't read: aios-core was updated and the page wasn't reloaded.
+  const [outdated, setOutdated] = useState(false);
   const ws = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -24,6 +26,7 @@ export function useChat() {
       sock.onmessage = (m) => {
         const ev = ServerEvent.safeParse(JSON.parse(String(m.data)));
         if (ev.success) dispatch(ev.data);
+        else setOutdated(true);
       };
       sock.onclose = () => {
         setConn('closed');
@@ -42,5 +45,5 @@ export function useChat() {
     if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(ClientMessage.parse(msg)));
   }, []);
 
-  return { state, conn, send };
+  return { state, conn, send, outdated };
 }

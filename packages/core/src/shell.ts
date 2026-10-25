@@ -10,6 +10,7 @@ import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
 import { cleanFact } from './memory/files.js';
+import type { ApprovalBroker } from './mail/approvals.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
 import { memoryProposeTool } from './memory/tool.js';
@@ -34,6 +35,8 @@ export interface ShellOptions {
   onResume?: () => void;
   /** Called when the user clicks Ignore on a mail in a notification. */
   onIgnoreMail?: (mailId: string) => void;
+  /** Draft cards and the Send click (A5). Without it, draft messages are ignored. */
+  approvals?: ApprovalBroker;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -104,6 +107,12 @@ export class Shell {
     this.broadcast({ type: 'status', status: this.status() });
   }
 
+  /** Save and re-render an existing chat item. */
+  patchItem(item: ChatItem): void {
+    this.o.store.saveItem(item);
+    this.broadcast({ type: 'patch', id: item.id, item });
+  }
+
   setMailStatus(mail: Status['mail']): void {
     if (mail === this.mail) return;
     this.mail = mail;
@@ -141,6 +150,7 @@ export class Shell {
     }
     if (msg.type === 'memory') return this.decideMemory(msg.id, msg.decision);
     if (msg.type === 'mail_ignore') return this.ignoreMail(msg.itemId, msg.mailId);
+    if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -182,6 +192,22 @@ export class Shell {
     const updated = { ...item, text, state: decision === 'save' ? 'saved' : 'skipped' } as const;
     this.o.store.saveItem(updated);
     this.broadcast({ type: 'patch', id, item: updated });
+  }
+
+  /**
+   * Clicks on a draft card. These are the user's own actions, so they work while paused;
+   * the broker checks the card's hash and the draft's state before anything is sent.
+   */
+  private async draftAction(msg: Extract<ClientMessage, { type: 'draft_send' | 'draft_edit' | 'draft_discard' }>): Promise<void> {
+    const broker = this.o.approvals;
+    if (!broker) return;
+    try {
+      if (msg.type === 'draft_send') await broker.approveSend(msg.id, msg.hash);
+      else if (msg.type === 'draft_discard') await broker.discard(msg.id);
+      else await broker.edit(msg.id, { to: msg.to, subject: msg.subject, body: msg.body });
+    } catch (err) {
+      this.agent.notice('error', `I couldn't update the draft: ${(err as Error).message}`);
+    }
   }
 
   private ignoreMail(itemId: string, mailId: string): void {

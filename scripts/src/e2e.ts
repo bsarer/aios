@@ -4,8 +4,9 @@
  *
  * Starts an in-process OpenAI-compatible mock, runs aios-core against it with a
  * throwaway config, data dir and fake keyring, then drives Chromium through the
- * A2 acceptance checks: streaming chat, the now() tool, Esc to stop, slash
- * commands, and live status values. Never touches real accounts or keys.
+ * acceptance checks: streaming chat, the now() tool, Esc to stop, slash commands,
+ * live status values, memory cards and, with the GreenMail stack up, new-mail
+ * notifications and the reply flow. Never touches real accounts or keys.
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
@@ -52,10 +53,22 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
 
   if (last.role === 'tool' && /<untrusted source="email"/.test(last.content ?? '')) {
     const subject = /Subject: (.*)/.exec(last.content ?? '')?.[1] ?? '?';
+    const replyTo = /^Draft a reply to email (\S+)$/.exec(lastUser)?.[1];
+    if (replyTo) {
+      const sender = /From: [^<\n]*<([^>]+)>/.exec(last.content ?? '')?.[1] ?? '';
+      const args = JSON.stringify({ inReplyTo: replyTo, to: [sender], subject: `Re: ${subject}`, body: 'Thanks Sara, I will look at it today.\n\nJohn' });
+      chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_d', function: { name: 'mail_create_draft', arguments: args } }] } }] });
+      chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+      return void res.end('data: [DONE]\n\n');
+    }
     chunk(res, { choices: [{ delta: { content: `That email is about: ${subject}` } }] });
     return finish(0.0004);
   }
-  const readId = last.role === 'user' ? /^Read email (\S+)$/.exec(lastUser)?.[1] : undefined;
+  if (last.role === 'tool' && /has NOT been sent/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'The draft is ready for you to review.' } }] });
+    return finish(0.0004);
+  }
+  const readId = last.role === 'user' ? /^(?:Read email|Draft a reply to email) (\S+)$/.exec(lastUser)?.[1] : undefined;
   if (readId) {
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_r', function: { name: 'mail_read', arguments: JSON.stringify({ id: readId }) } }] } }] });
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
@@ -112,6 +125,26 @@ async function deliverTestMail(subject: string): Promise<void> {
   await c.connect();
   await c.append('INBOX', `From: Sara Kaya <sara.kaya@northwind.example>\r\nTo: ${TEST_MAILBOX.user}\r\nSubject: ${subject}\r\nMessage-ID: <e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@aios.test>\r\nDate: ${new Date().toUTCString()}\r\n\r\nPlease look at this today.`);
   await c.logout();
+}
+
+/** Plain-text bodies of messages in Sent whose subject contains `subject`. */
+async function sentMatching(subject: string): Promise<string[]> {
+  const c = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });
+  await c.connect();
+  try {
+    await c.mailboxOpen('Sent', { readOnly: true });
+    const uids = (await c.search({ subject }, { uid: true })) || [];
+    const out: string[] = [];
+    for (const uid of uids) {
+      const { content } = await c.download(String(uid), '1', { uid: true });
+      let text = '';
+      for await (const part of content ?? []) text += part;
+      out.push(text);
+    }
+    return out;
+  } finally {
+    await c.logout();
+  }
 }
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -287,9 +320,37 @@ async function main(): Promise<void> {
       await note.getByTestId('mail-read').first().click();
       check('Read opens the email through mail_read', await waitFor(async () => (await lastAssistant().innerText()).includes(`That email is about: E2E urgent ${stamp}`), 15_000));
       await shot(page, '9-mail-read');
+
+      // 9. Reply flow (A5): Draft reply → card → Edit → Send transmits exactly the shown text; Discard sends nothing.
+      await note.getByTestId('mail-draft-reply').first().click();
+      const draft = page.locator('[data-kind="draft"]').last();
+      check('Draft reply shows a pending draft card', await waitFor(async () => (await draft.getAttribute('data-state')) === 'pending', 15_000));
+      check('draft is addressed to the sender', (await draft.getByTestId('draft-to-text').innerText()) === 'sara.kaya@northwind.example');
+      check('nothing in Sent before the click', (await sentMatching(`E2E urgent ${stamp}`)).length === 0);
+      await shot(page, '10-draft-card');
+      await draft.getByTestId('draft-edit').click();
+      const edited = `Edited by John ${stamp}: I can do it today.\nBest, John`;
+      await draft.getByTestId('draft-body').fill(edited);
+      await draft.getByTestId('draft-save').click();
+      check('Edit updates the card', await waitFor(async () => (await draft.getByTestId('draft-body-text').innerText()) === edited));
+      await shot(page, '11-draft-edited');
+      await draft.getByTestId('draft-send').click();
+      check('Send marks the card sent', await waitFor(async () => (await draft.getAttribute('data-state')) === 'sent', 15_000));
+      const sent = await sentMatching(`E2E urgent ${stamp}`);
+      check('the edited text is what was sent', sent.length === 1 && sent[0]!.replace(/\r\n/g, '\n').trimEnd() === edited, JSON.stringify(sent));
+      await shot(page, '12-draft-sent');
+
+      await note.getByTestId('mail-draft-reply').first().click();
+      const second = page.locator('[data-kind="draft"]').last();
+      check('a second draft card appears', await waitFor(async () => (await page.locator('[data-kind="draft"]').count()) === 2 && (await second.getAttribute('data-state')) === 'pending', 15_000));
+      await second.getByTestId('draft-discard').click();
+      check('Discard marks the card discarded', await waitFor(async () => (await second.getAttribute('data-state')) === 'discarded'));
+      await sleep(1000);
+      check('Discard sent nothing', (await sentMatching(`E2E urgent ${stamp}`)).length === 1);
     } else {
       console.log('SKIP  mail checks (GreenMail not running; `pnpm test:stack:up` to include them)');
     }
+    check('every server event was understood by the page', (await page.getByTestId('outdated').count()) === 0);
     check('no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
   } catch (err) {
     console.log(`\n--- aios-core output ---\n${coreLog}`);

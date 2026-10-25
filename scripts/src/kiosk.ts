@@ -119,10 +119,19 @@ case "\${1:-open}" in
       exit 0
     fi
     # Give aios-core up to 30 s to come up; the page reconnects by itself after that.
-    for _ in $(seq 150); do
-      curl -fsS -o /dev/null "\${URL}healthz" && break
+    UP=0
+    for _ in $(seq "\${AIOS_KIOSK_WAIT:-150}"); do
+      curl -fsS -o /dev/null "\${URL}healthz" && { UP=1; break; }
       sleep 0.2
     done
+    if [ "$UP" = 0 ]; then
+      # Never open a full-screen error page: say why in a notification instead.
+      WHY=$(journalctl --user -u aios-core -n 40 -o cat 2>/dev/null | awk '/aios-core failed to start/{f=1; b=""} f{b=b $0 "\\n"} END{printf "%s", b}' | head -c 600)
+      MSG="\${WHY:-AI OS did not start. See: journalctl --user -u aios-core -n 20}"
+      command -v notify-send >/dev/null && notify-send -u critical "AI OS" "$MSG"
+      echo "aios-kiosk: $MSG" >&2
+      exit 1
+    fi
     BROWSER="\${AIOS_BROWSER:-}"
     for b in chromium google-chrome-stable brave; do
       [ -z "$BROWSER" ] && command -v "$b" >/dev/null && BROWSER="$b"

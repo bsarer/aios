@@ -6,6 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ChatItem, MailRow } from '@aios/shared';
+import { ModelError } from '../model.js';
 import { type TriageModel, fallbackItem, triage } from './triage.js';
 import type { MailEvent, MailState } from './state.js';
 
@@ -64,6 +65,7 @@ export class MailPipeline {
   private timer: NodeJS.Timeout | undefined;
   private busy = false;
   private failing = false;
+  private capped = false;
   private retryAt = 0;
   private readonly now: () => number;
   private readonly newId: () => string;
@@ -105,12 +107,21 @@ export class MailPipeline {
       try {
         const items = await triage(this.o.model, batch);
         batch.forEach((e, i) => this.o.state.saveTriage(e.messageId, items[i]!));
-        if (this.failing) this.o.notice('info', 'Mail summaries are working again.');
+        if (this.failing || this.capped) this.o.notice('info', 'Mail summaries are working again.');
         this.failing = false;
-      } catch {
+        this.capped = false;
+      } catch (err) {
+        if (err instanceof ModelError && err.kind === 'cost_cap') {
+          // Mail still arrives under the cap, listed by sender and subject without a summary.
+          batch.forEach((e) => this.o.state.saveTriage(e.messageId, fallbackItem(e)));
+          if (!this.capped) this.o.notice('warning', "Today's model cost cap is reached, so new mail is listed without summaries until tomorrow.");
+          this.capped = true;
+          continue;
+        }
         this.o.state.failedAttempt(batch.map((e) => e.messageId));
         this.retryAt = this.now() + RETRY_MS;
-        if (!this.failing) this.o.notice('warning', "New mail arrived but I couldn't summarise it. I'll keep trying and post it when I can.");
+        const why = err instanceof ModelError ? ` ${err.userMessage}` : '';
+        if (!this.failing) this.o.notice('warning', `New mail arrived but I couldn't summarise it.${why} I'll keep trying and post it when I can.`);
         this.failing = true;
         return;
       }

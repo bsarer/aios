@@ -347,9 +347,18 @@ async function main(): Promise<void> {
       check('Discard marks the card discarded', await waitFor(async () => (await second.getAttribute('data-state')) === 'discarded'));
       await sleep(1000);
       check('Discard sent nothing', (await sentMatching(`E2E urgent ${stamp}`)).length === 1);
+    } else if (process.env.AIOS_REQUIRE_STACK === '1') {
+      check('GreenMail test stack is reachable', false);
     } else {
       console.log('SKIP  mail checks (GreenMail not running; `pnpm test:stack:up` to include them)');
     }
+    // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
+    await stopCore();
+    await sleep(2000);
+    check('a brief outage shows no banner', (await page.getByTestId('offline').count()) === 0);
+    check('a lasting outage shows the offline banner', await waitFor(async () => (await page.getByTestId('offline').count()) === 1, 10_000));
+    await startCore();
+    check('the banner clears when the service is back', await waitFor(async () => (await page.getByTestId('offline').count()) === 0, 20_000));
     check('every server event was understood by the page', (await page.getByTestId('outdated').count()) === 0);
     check('no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
   } catch (err) {

@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatItem } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import type { Store } from '../store.js';
+import { describeMailError } from './errors.js';
 import { type OutgoingFields, type ReplyHeaders, type Sender, buildMessage, fieldsHash, newMessageId } from './message.js';
 
 /** IMAP and SMTP side effects, injected so tests can count them. */
@@ -218,7 +219,7 @@ export class ApprovalBroker {
       return 'sent';
     } catch (err) {
       const message = (err as Error).message;
-      this.transition(id, ['sending'], 'failed', { error: `Not sent: ${message}` });
+      this.transition(id, ['sending'], 'failed', { error: `Not sent: ${describeMailError(err)}.` });
       audit({ decision: 'approved', ok: false, error: message });
       this.refresh(id);
       return 'failed';

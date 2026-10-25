@@ -339,3 +339,54 @@ describe('ModelClient.structured', () => {
     expect(first.content).toContain('"urgency"');
   });
 });
+
+describe('ModelClient gate and key (A7)', () => {
+  function gated(kind: 'paused' | 'cost_cap' | null, resolveKey = async () => new Secret(API_KEY)) {
+    const cfg = RoleSchema.parse({ baseUrl, model: 'vendor/model-x', apiKeyRef: 'keyring:model-chat', timeoutMs: 2000 });
+    const calls: CallRecord[] = [];
+    const roles: string[] = [];
+    const c = new ModelClient({
+      models: { chat: cfg, triage: cfg, nightly: cfg },
+      resolveKey,
+      sleep: async () => undefined,
+      onCall: (r) => calls.push(r),
+      gate: (role) => (roles.push(role), kind),
+    });
+    return { c, calls, roles };
+  }
+
+  it.each(['paused', 'cost_cap'] as const)('%s refuses every role and call style without contacting the provider', async (kind) => {
+    const { c, calls, roles } = gated(kind);
+    for (const role of ['chat', 'triage', 'nightly'] as const) {
+      await expect(c.complete(req({ role }))).rejects.toMatchObject({ kind });
+      await expect(drain(c.stream(req({ role })))).rejects.toMatchObject({ kind });
+      await expect(c.structured(req({ role }), 'x', z.object({ a: z.string() }))).rejects.toMatchObject({ kind });
+    }
+    expect(seen).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+    expect(roles).toHaveLength(9);
+  });
+
+  it('says plainly what the cap and pause mean', () => {
+    expect(new ModelError('cost_cap', '').userMessage).toMatch(/daily cap.*until tomorrow.*\/cost/);
+    expect(new ModelError('cost_cap', '').retryable).toBe(false);
+    expect(new ModelError('paused', '').userMessage).toMatch(/\/resume/);
+  });
+
+  it('an open gate lets the call through', async () => {
+    handlers.push(json(200, reply('hello')));
+    const { c } = gated(null);
+    expect((await c.complete(req())).content).toBe('hello');
+  });
+
+  it('an unreadable key becomes a clear key_missing error, not a network error', async () => {
+    const { c, calls } = gated(null, async () => {
+      throw Object.assign(new Error('keyring:model-chat is not in the keyring; run `pnpm run setup`'), { name: 'KeyringError' });
+    });
+    const err = await c.complete(req()).catch((e: unknown) => e as ModelError);
+    expect(err).toMatchObject({ kind: 'key_missing' });
+    expect((err as ModelError).userMessage).toMatch(/keyring.*locked.*pnpm run setup/);
+    expect(seen).toHaveLength(0);
+    expect(calls[0]).toMatchObject({ ok: false, errorKind: 'key_missing' });
+  });
+});

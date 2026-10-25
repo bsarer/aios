@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
@@ -9,6 +9,18 @@ export function App() {
   const { state, conn, send, outdated } = useChat();
   const bottom = useRef<HTMLDivElement>(null);
   const working = state.status?.agent === 'working';
+  // A short blip while the service restarts shows nothing; a lasting outage says what to do.
+  // Keyed on open/not open: retries flip between closed and connecting and must not restart the timer.
+  const [offline, setOffline] = useState(false);
+  const open = conn === 'open';
+  useEffect(() => {
+    if (open) {
+      setOffline(false);
+      return;
+    }
+    const t = window.setTimeout(() => setOffline(true), 5000);
+    return () => window.clearTimeout(t);
+  }, [open]);
   const actions: MessageActions = {
     onMemoryDecision: (id, decision) => send({ type: 'memory', id, decision }),
     onSend: (text) => send({ type: 'send', text }),
@@ -36,6 +48,11 @@ export function App() {
           <button type="button" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => location.reload()}>
             Reload
           </button>
+        </div>
+      )}
+      {offline && (
+        <div data-testid="offline" className="glass mx-auto mt-2 rounded-xl px-4 py-2 text-[15px]" style={{ borderLeft: '3px solid var(--danger)' }}>
+          I can't reach the AI OS service. Retrying… If this lasts, leave the chat with Super+Shift+Escape and run <code>journalctl --user -u aios-core -n 20</code> to see why.
         </div>
       )}
       <main className="flex-1 overflow-y-auto" data-testid="chat">

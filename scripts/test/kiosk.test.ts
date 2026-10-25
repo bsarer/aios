@@ -124,7 +124,7 @@ package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
 
 describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
   /** Runs the launcher with fake hyprctl, curl, pgrep, pkill and chromium (first on PATH) that log their arguments. */
-  function launcher(o: { windowOpen: boolean; hung: boolean; env?: Record<string, string> }) {
+  function launcher(o: { windowOpen: boolean; hung: boolean; down?: boolean; env?: Record<string, string> }) {
     const dir = mkdtempSync(join(tmpdir(), 'aios-launch-'));
     const bin = join(dir, 'bin');
     mkdirSync(bin);
@@ -135,7 +135,10 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
     };
     const clients = o.windowOpen ? '[{"class":"org.aios.home","address":"0x1"}]' : '[{"class":"Alacritty"}]';
     fake('hyprctl', `[ "$1" = clients ] && echo '${clients}'; exit 0`);
-    fake('curl', 'exit 0');
+    fake('curl', o.down ? 'exit 7' : 'exit 0');
+    fake('notify-send', 'exit 0');
+    fake('journalctl', "printf '%s\\n' 'aios-core failed to start: old' 'aios-core failed to start: config is invalid:' '✖ mail.address: Invalid email'");
+    if (o.down) fake('sleep', 'exit 0');
     fake('pgrep', o.hung ? 'exit 0' : 'exit 1');
     fake('pkill', 'exit 0');
     fake('chromium', 'exit 0');
@@ -169,6 +172,17 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
   it('AIOS_KIOSK=0 opens a normal window', () => {
     const r = launcher({ windowOpen: false, hung: false, env: { AIOS_KIOSK: '0' } })('open');
     expect(r.lines.find((l) => l.startsWith('chromium '))).toContain('--new-window http://127.0.0.1:7777/');
+  });
+
+  it('when the service never comes up, says why in a notification and opens no error page', () => {
+    const r = launcher({ windowOpen: false, hung: false, down: true, env: { AIOS_KIOSK_WAIT: '3' } })('open');
+    expect(r.status).toBe(1);
+    expect(r.lines.filter((l) => l.startsWith('curl'))).toHaveLength(3);
+    expect(r.lines.some((l) => l.startsWith('chromium'))).toBe(false);
+    // Only the latest failure, with its detail lines.
+    expect(r.lines.find((l) => l.startsWith('notify-send'))).toBe('notify-send -u critical AI OS aios-core failed to start: config is invalid:');
+    expect(r.stderr).toContain('mail.address: Invalid email');
+    expect(r.stderr).not.toContain('old');
   });
 
   it('exit closes the window and kills nothing when it closes', () => {

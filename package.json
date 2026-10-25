@@ -9,9 +9,11 @@
   "scripts": {
     "typecheck": "tsc -b",
     "test": "vitest run",
+    "test:injection": "vitest run scripts/test/hostile-mail.test.ts scripts/test/email-memory.test.ts packages/core/test/untrusted.test.ts packages/core/test/approvals.test.ts packages/core/test/mail.test.ts",
     "test:stack:up": "docker compose -f docker-compose.test.yml up -d --wait && pnpm --filter @aios/scripts seed",
     "test:stack:down": "docker compose -f docker-compose.test.yml down",
     "test:stack:check": "pnpm --filter @aios/scripts check-mail",
+    "check:account": "pnpm --filter @aios/scripts check-account",
     "setup": "pnpm --filter @aios/scripts run setup",
     "bakeoff": "pnpm --filter @aios/evals run bakeoff",
     "test:e2e": "pnpm --filter @aios/ui build && pnpm --filter @aios/scripts run e2e",

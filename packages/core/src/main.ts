@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDir, parseConfig } from '@aios/shared';
 import { AuditLog } from './audit.js';
+import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
 import { draftTools } from './mail/draft-tools.js';
 import { MailClient, type MailConnection } from './mail/imap.js';
@@ -17,8 +18,8 @@ import { mailTools } from './mail/tools.js';
 import { ImapMailSource, MailWatcher } from './mail/watcher.js';
 import { MemoryFiles } from './memory/files.js';
 import { Memory } from './memory/memory.js';
-import { Nightly } from './memory/nightly.js';
-import { ModelClient } from './model.js';
+import { Nightly, localDate } from './memory/nightly.js';
+import { ModelClient, ModelError } from './model.js';
 import { dataDir } from './paths.js';
 import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
@@ -34,14 +35,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 async function main(): Promise<void> {
   const config = parseConfig(await readFile(join(configDir(), 'config.toml'), 'utf8'));
   const keyring = new Keyring();
-  await keyring.require(config.models.chat.apiKeyRef);
 
   const store = new Store(join(dataDir(), 'aios.db'));
   const audit = new AuditLog(join(dataDir(), 'audit.jsonl'));
   let shell: Shell | undefined;
   const model = new ModelClient({
     models: config.models,
+    // Resolved per call, so a keyring that unlocks after login starts working without a restart.
     resolveKey: (ref) => keyring.require(ref),
+    // Enforced here, for chat, triage and nightly alike, not left to each caller.
+    gate: modelGate({ store, timeZone: config.user.timezone, dailyCapUsd: config.cost.dailyCapUsd }),
     onCall: (r) => {
       store.recordUsage({
         at: Date.now(),
@@ -89,6 +92,7 @@ async function main(): Promise<void> {
   });
   for (const t of draftTools({ broker: approvals, mail: mailClient, userName: config.user.name, selfAddress: config.mail.address })) tools.register(t);
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
+  let nightlyNoticeFor = '';
   const nightly = new Nightly({
     memory,
     store,
@@ -96,7 +100,15 @@ async function main(): Promise<void> {
     userName: config.user.name,
     timeZone: config.user.timezone,
     runAfter: config.memory.nightlyAt,
-    onError: (err) => audit.append({ kind: 'memory', decision: 'nightly_failed', error: (err as Error).message }),
+    onError: (err) => {
+      audit.append({ kind: 'memory', decision: 'nightly_failed', error: (err as Error).message });
+      // One notice per day; it retries hourly without repeating itself.
+      const today = localDate(Date.now(), config.user.timezone);
+      if (nightlyNoticeFor === today) return;
+      nightlyNoticeFor = today;
+      const why = err instanceof ModelError ? err.userMessage : 'Something went wrong.';
+      shell?.agent.notice('warning', `I couldn't write yesterday's chat summary for memory. ${why} I'll try again later.`);
+    },
   });
   const themePath = omarchyThemePath();
   shell = new Shell({
@@ -141,7 +153,7 @@ async function main(): Promise<void> {
       shell.setMailStatus(status);
       if (status === 'error' && detail && detail !== mailProblem) {
         audit.append({ kind: 'mail', event: 'error', detail });
-        shell.agent.notice('warning', `I can't reach your mailbox (${detail}). I'll keep retrying.`);
+        shell.agent.notice('warning', `I can't reach your mailbox: ${detail}. I'll keep retrying.`);
       }
       if (status === 'connected' && mailProblem) shell.agent.notice('info', 'Connected to your mailbox again.');
       mailProblem = status === 'error' ? (detail ?? 'error') : status === 'connected' ? '' : mailProblem;
@@ -157,6 +169,11 @@ async function main(): Promise<void> {
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();
   shell.greet();
+  // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
+  await keyring.require(config.models.chat.apiKeyRef).catch((err: unknown) => {
+    audit.append({ kind: 'model', event: 'key_missing', error: (err as Error).message });
+    shell.agent.notice('error', new ModelError('key_missing', '').userMessage);
+  });
   await shell.refreshSystemStatus();
   setInterval(() => void shell.refreshSystemStatus(), 15_000).unref();
   watcher.start();

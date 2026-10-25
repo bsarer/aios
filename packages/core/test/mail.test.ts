@@ -7,7 +7,8 @@ import { MailState, type NewMail } from '../src/mail/state.js';
 import { mailTools } from '../src/mail/tools.js';
 import { triageRequest } from '../src/mail/triage.js';
 import { type MailSource, MailWatcher, type WatcherStatus } from '../src/mail/watcher.js';
-import type { ModelRequest, ModelResult } from '../src/model.js';
+import { describeMailError } from '../src/mail/errors.js';
+import { ModelError, type ModelRequest, type ModelResult } from '../src/model.js';
 import { Store } from '../src/store.js';
 
 
@@ -162,19 +163,42 @@ describe('mail watcher', () => {
   });
 });
 
+describe('mail failure messages', () => {
+  const err = (props: object, message = 'raw') => Object.assign(new Error(message), props);
+  it.each([
+    [err({ authenticationFailed: true }, 'Command failed'), /rejected the login.*pnpm run setup/],
+    [err({ code: 'EAUTH', responseCode: 535 }), /rejected the login/],
+    [err({ code: 'ENOTFOUND' }), /can't be found.*network/],
+    [err({ code: 'EAI_AGAIN' }), /can't be found/],
+    [err({ code: 'ECONNREFUSED' }), /refused the connection.*host and port/],
+    [err({ code: 'CONNECT_TIMEOUT' }), /took too long/],
+    [err({ code: 'ETIMEDOUT' }), /took too long/],
+    [err({ code: 'CERT_HAS_EXPIRED' }), /certificate/],
+    [err({ code: 'ETHROTTLE' }), /limiting/],
+    [err({ code: 'ECONNRESET' }), /dropped/],
+    [err({ name: 'KeyringError' }, 'keyring:mail is not in the keyring'), /keyring.*locked/],
+  ])('%s', (e, expected) => {
+    expect(describeMailError(e)).toMatch(expected);
+  });
+  it('falls back to the raw message, shortened', () => {
+    expect(describeMailError(new Error('x'.repeat(500)))).toHaveLength(200);
+    expect(describeMailError(undefined)).toBe('unknown error');
+  });
+});
+
 // ── Triage pipeline ─────────────────────────────────────────────────────────
 
 const triageResult: ModelResult = { content: '', toolCalls: [], finishReason: 'stop', usage: null, model: 'm', provider: null, generationId: null, latencyMs: 1, ttftMs: 1, attempts: 1 };
 
 function fakeTriage(urgency: (id: string) => TriageItem['urgency'] = () => 'normal') {
   const requests: ModelRequest[] = [];
-  let fail = false;
+  let fail: boolean | Error = false;
   return {
     requests,
-    setFail: (v: boolean) => (fail = v),
+    setFail: (v: boolean | Error) => (fail = v),
     async structured<T extends z.ZodType>(req: ModelRequest, _name: string, schema: T) {
       requests.push(req);
-      if (fail) throw new Error('model down');
+      if (fail) throw fail instanceof Error ? fail : new Error('model down');
       const ids = [...String(req.messages.at(-1)!.content).matchAll(/id="([^"]+)"/g)].map((m) => m[1]!);
       const value = schema.parse({
         items: ids.map((id) => ({ id, urgency: urgency(id), summary: `summary of ${id}`, needs_reply: false, suggested_action: 'read', category: 'work' })),
@@ -327,6 +351,36 @@ describe('triage pipeline', () => {
     await p.run();
     expect(notes()).toHaveLength(1);
     expect(notes()[0]!.mails![0]!.summary).toBe('New email: Subject 0');
+  });
+
+  it('at the cost cap, lists new mail without summaries and says why once', async () => {
+    const { p, arrive, model, posted, notes, advance } = pipelineSetup();
+    model.setFail(new ModelError('cost_cap', 'daily cost cap reached'));
+    arrive(1);
+    await until(() => notes().length === 1);
+    expect(notes()[0]!.mails![0]!.summary).toBe('New email: Subject 0');
+    arrive(1);
+    advance(1000);
+    await until(() => notes().length === 2);
+    const warnings = posted.filter((i) => i.kind === 'notice' && i.level === 'warning');
+    expect(warnings).toMatchObject([{ text: "Today's model cost cap is reached, so new mail is listed without summaries until tomorrow." }]);
+    model.setFail(false);
+    arrive(1);
+    advance(1000);
+    await until(() => notes().length === 3);
+    expect(notes()[2]!.mails![0]!.summary).toBe('summary of INBOX:3');
+    expect(posted.some((i) => i.kind === 'notice' && i.text === 'Mail summaries are working again.')).toBe(true);
+  });
+
+  it("a failed summary says why, in the model error's own words", async () => {
+    const { arrive, model, posted } = pipelineSetup();
+    model.setFail(new ModelError('credits', '402'));
+    arrive(1);
+    await until(() => posted.some((i) => i.kind === 'notice'));
+    expect(posted.find((i) => i.kind === 'notice')).toMatchObject({
+      level: 'warning',
+      text: "New mail arrived but I couldn't summarise it. The model account is out of credits. I'll keep trying and post it when I can.",
+    });
   });
 
   it('the headline never contains text from the emails', () => {

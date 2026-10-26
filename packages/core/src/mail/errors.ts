@@ -17,7 +17,7 @@ const TLS = new Set([
 ]);
 
 export function describeMailError(err: unknown): string {
-  const e = (err ?? {}) as { name?: string; code?: string; message?: string; authenticationFailed?: boolean; responseCode?: number };
+  const e = (err ?? {}) as { name?: string; code?: string; message?: string; authenticationFailed?: boolean; responseCode?: number; responseText?: string };
   if (e.name === 'KeyringError') return "the mail password isn't readable from the keyring (it may still be locked, or run `pnpm run setup`)";
   if (e.authenticationFailed || e.code === 'EAUTH' || e.code === 'ENOAUTH' || e.responseCode === 535) {
     return 'the mail server rejected the login. Check the app password with `pnpm run setup`';
@@ -29,5 +29,7 @@ export function describeMailError(err: unknown): string {
   if (e.code === 'ETHROTTLE') return 'the mail server is limiting how often we connect';
   if (e.code === 'ECONNRESET' || e.code === 'EPIPE' || e.code === 'ESOCKET') return 'the connection to the mail server dropped';
   if (e.code === 'EENVELOPE') return 'the mail server refused one of the recipients';
+  // imapflow's message for a refused command is only "Command failed"; the server's own words say why.
+  if (e.message === 'Command failed' && e.responseText) return `the mail server said: ${e.responseText}`.slice(0, 200);
   return (e.message ?? 'unknown error').slice(0, 200);
 }

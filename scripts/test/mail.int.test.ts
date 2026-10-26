@@ -80,6 +80,23 @@ describe.skipIf(!reachable)('mail on the GreenMail test stack', () => {
     expect(new Set(thread.map((m) => m.subject.replace(/^Re: /, '')))).toEqual(new Set(['Q4 budget review']));
   });
 
+  it('still searches INBOX when the server has no folder it can tell is Sent', async () => {
+    // Before, a missing "Sent" (Gmail names it "[Gmail]/Sent Mail") failed every search.
+    const admin = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });
+    await admin.connect();
+    await admin.mailboxRename('Sent', 'Outgoing');
+    const fresh = new MailClient(conn());
+    try {
+      const found = await fresh.search('budget review', { limit: 10 });
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.every((m) => m.id.startsWith('INBOX:'))).toBe(true);
+    } finally {
+      await fresh.close();
+      await admin.mailboxRename('Outgoing', 'Sent');
+      await admin.logout();
+    }
+  });
+
   it('lists attachments, and fetches one decoded, by its number (S2)', async () => {
     const [msg] = await client.search('lesson', { limit: 1 });
     const full = await client.read(msg!.id);

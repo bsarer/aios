@@ -4,8 +4,10 @@
  * callers sanitize() and wrap it before a model sees it.
  */
 import type { Readable } from 'node:stream';
-import { ImapFlow, type FetchMessageObject, type MessageAddressObject, type MessageStructureObject } from 'imapflow';
+import { ImapFlow, type FetchMessageObject, type ListResponse, type MessageAddressObject, type MessageStructureObject } from 'imapflow';
+import { describeMailError } from './errors.js';
 
+/** Folders as the model and UI name them. "Sent" is whatever the server calls it (Gmail: "[Gmail]/Sent Mail"). */
 export const FOLDERS = ['INBOX', 'Sent'] as const;
 export type Folder = (typeof FOLDERS)[number];
 
@@ -191,6 +193,17 @@ export function connect(c: MailConnection, password: string, opts: { idle: boole
 }
 
 /**
+ * The server's Drafts or Sent mailbox: the one with the special-use flag (RFC 6154, which
+ * Gmail and most providers report, whatever the folder's name or language), else one named
+ * Drafts or Sent. Null when there is none.
+ */
+export function findSpecial(list: Pick<ListResponse, 'path' | 'specialUse'>[], kind: 'drafts' | 'sent'): string | null {
+  const flag = kind === 'drafts' ? '\\Drafts' : '\\Sent';
+  const name = kind === 'drafts' ? 'drafts' : 'sent';
+  return list.find((m) => m.specialUse === flag)?.path ?? list.find((m) => m.path.toLowerCase() === name)?.path ?? null;
+}
+
+/**
  * One IMAP connection for tool calls, opened lazily and reopened after it drops.
  * Separate from the watcher's IDLE connection so tools never wait on it.
  */
@@ -213,13 +226,29 @@ export class MailClient {
     return this.connecting;
   }
 
-  private async inFolder<T>(folder: Folder, fn: (client: ImapFlow) => Promise<T>): Promise<T> {
-    const client = await this.connection();
-    const lock = await client.getMailboxLock(folder, { readOnly: true });
+  /** The mailbox behind a folder name, or null when the server has no Sent folder. */
+  private async mailboxOf(folder: Folder): Promise<string | null> {
+    if (folder === 'INBOX') return 'INBOX';
+    if (this.special.sent) return this.special.sent;
+    const path = findSpecial(await (await this.connection()).list(), 'sent');
+    if (path) this.special.sent = path;
+    return path;
+  }
+
+  /** Runs fn with the folder selected read-only. Null when the folder doesn't exist on this server. */
+  private async inFolder<T>(folder: Folder, fn: (client: ImapFlow) => Promise<T>): Promise<T | null> {
     try {
-      return await fn(client);
-    } finally {
-      lock.release();
+      const path = await this.mailboxOf(folder);
+      if (!path) return null;
+      const client = await this.connection();
+      const lock = await client.getMailboxLock(path, { readOnly: true });
+      try {
+        return await fn(client);
+      } finally {
+        lock.release();
+      }
+    } catch (err) {
+      throw new Error(describeMailError(err), { cause: err });
     }
   }
 
@@ -302,10 +331,8 @@ export class MailClient {
     const known = this.special[kind];
     if (known) return known;
     const client = await this.connection();
-    const list = await client.list();
-    const flag = kind === 'drafts' ? '\\Drafts' : '\\Sent';
     const name = kind === 'drafts' ? 'Drafts' : 'Sent';
-    const path = list.find((m) => m.specialUse === flag)?.path ?? list.find((m) => m.path.toLowerCase() === name.toLowerCase())?.path;
+    const path = findSpecial(await client.list(), kind);
     if (!path) await client.mailboxCreate(name);
     return (this.special[kind] = path ?? name);
   }

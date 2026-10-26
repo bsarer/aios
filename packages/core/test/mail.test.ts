@@ -1,7 +1,7 @@
 import type { ChatItem, TriageItem } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
-import { parseMailId, walkStructure } from '../src/mail/imap.js';
+import { findSpecial, parseMailId, walkStructure } from '../src/mail/imap.js';
 import { MailPipeline, headline, inQuietHours } from '../src/mail/pipeline.js';
 import { MailState, type NewMail } from '../src/mail/state.js';
 import { mailTools } from '../src/mail/tools.js';
@@ -177,6 +177,7 @@ describe('mail failure messages', () => {
     [err({ code: 'ETHROTTLE' }), /limiting/],
     [err({ code: 'ECONNRESET' }), /dropped/],
     [err({ name: 'KeyringError' }, 'keyring:mail is not in the keyring'), /keyring.*locked/],
+    [err({ responseText: 'Unknown Mailbox: Sent (Failure)' }, 'Command failed'), /^the mail server said: Unknown Mailbox: Sent \(Failure\)$/],
   ])('%s', (e, expected) => {
     expect(describeMailError(e)).toMatch(expected);
   });
@@ -445,6 +446,19 @@ describe('mail tools', () => {
     expect(body).toContain('Attachments:\n1. a.pdf (PDF, 3 KB)');
     expect(await read!.handler({ id: 'INBOX:99' }, ctx)).toMatch(/^Error/);
     expect(await search!.handler({ query: 'x', since: 'yesterday' }, ctx)).toMatch(/^Error/);
+  });
+
+  it('finds Sent and Drafts by their special-use flag, whatever the name, else by name', () => {
+    // Gmail in Turkish: the folders carry the flags, not English names.
+    const gmail = [
+      { path: 'INBOX', specialUse: '\\Inbox' },
+      { path: '[Gmail]/Gönderilmiş Postalar', specialUse: '\\Sent' },
+      { path: '[Gmail]/Taslaklar', specialUse: '\\Drafts' },
+    ];
+    expect(findSpecial(gmail, 'sent')).toBe('[Gmail]/Gönderilmiş Postalar');
+    expect(findSpecial(gmail, 'drafts')).toBe('[Gmail]/Taslaklar');
+    expect(findSpecial([{ path: 'INBOX' }, { path: 'Sent' }], 'sent')).toBe('Sent');
+    expect(findSpecial([{ path: 'INBOX' }], 'sent')).toBeNull();
   });
 
   it('parses ids and picks readable parts', () => {

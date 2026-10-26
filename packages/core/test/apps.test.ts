@@ -8,7 +8,7 @@ import { type DesktopApp, appFromEntry, findApp, parseDesktopEntry, scanApps, se
 import { type HyprClient, type HyprEvent, type HyprIpc, type HyprMonitor, hyprlandIpc, parseHyprEvent } from '../src/apps/hyprland.js';
 import { createLauncher } from '../src/apps/launcher.js';
 import { appTools } from '../src/apps/tools.js';
-import { ChatWindow, ORB_SIZE, dispatchesFor, halfRect, orbRect } from '../src/apps/window.js';
+import { ChatWindow, dispatchesFor, halfRect } from '../src/apps/window.js';
 import { AuditLog } from '../src/audit.js';
 import type { Delta, ModelRequest, ModelResult } from '../src/model.js';
 import { Shell } from '../src/shell.js';
@@ -123,8 +123,8 @@ describe('launcher', () => {
   });
 });
 
-const monitor = (over: Partial<HyprMonitor> = {}): HyprMonitor => ({ id: 0, width: 2880, height: 1800, x: 0, y: 0, scale: 1.5, transform: 0, focused: true, reserved: [0, 26, 0, 0], ...over });
-const chat = (over: Partial<HyprClient> = {}): HyprClient => ({ address: '0xabc123', class: 'org.aios.home', floating: false, pinned: false, fullscreen: 2, monitor: 0, ...over });
+const monitor = (over: Partial<HyprMonitor> = {}): HyprMonitor => ({ id: 0, width: 2880, height: 1800, x: 0, y: 0, scale: 1.5, transform: 0, focused: true, activeWorkspace: { id: 3 }, reserved: [0, 26, 0, 0], ...over });
+const chat = (over: Partial<HyprClient> = {}): HyprClient => ({ address: '0xabc123', class: 'org.aios.home', floating: false, pinned: false, fullscreen: 2, monitor: 0, workspace: { name: '1' }, ...over });
 
 describe('Hyprland', () => {
   it('parses the window events it needs', () => {
@@ -177,49 +177,47 @@ describe('Hyprland', () => {
 });
 
 describe('chat window geometry', () => {
-  it('puts the orb at the top centre below the bar, and half on the right, in layout pixels', () => {
+  it('puts half screen on the right, below the bar, in layout pixels', () => {
     // 2880x1800 at scale 1.5 is 1920x1200 in layout pixels; the bar takes 26 at the top.
-    expect(orbRect(monitor())).toEqual({ x: (1920 - ORB_SIZE) / 2, y: 26 + 8, w: ORB_SIZE, h: ORB_SIZE });
     expect(halfRect(monitor())).toEqual({ x: 1920 - 12 - 942, y: 38, w: 942, h: 1200 - 26 - 24 });
     // A second monitor to the right, rotated.
-    expect(orbRect(monitor({ x: 1920, transform: 1, scale: 1, width: 1920, height: 1080, reserved: [0, 0, 0, 0] }))).toMatchObject({ x: 1920 + (1080 - ORB_SIZE) / 2, y: 8 });
+    expect(halfRect(monitor({ x: 1920, transform: 1, scale: 1, width: 1920, height: 1080, reserved: [0, 0, 0, 0] }))).toMatchObject({ x: 1920 + 1080 - 12 - 522, y: 12 });
   });
 
-  it('shrinks a fullscreen chat to the orb: out of fullscreen, floating, round, sized, placed, pinned, on top, focus left alone', () => {
-    expect(dispatchesFor('orb', chat(), monitor())).toEqual([
+  it('hides a fullscreen chat on its own special workspace, unpinned', () => {
+    expect(dispatchesFor('hidden', chat(), monitor())).toEqual([
       'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset", window = "address:0xabc123" })',
-      'hl.dsp.window.float({ action = "on", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "rounding", value = "28", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "border_size", value = "0", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "no_shadow", value = "1", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "no_blur", value = "1", window = "address:0xabc123" })',
-      'hl.dsp.window.resize({ x = 56, y = 56, window = "address:0xabc123" })',
-      'hl.dsp.window.move({ x = 932, y = 34, window = "address:0xabc123" })',
-      'hl.dsp.window.pin({ action = "on", window = "address:0xabc123" })',
-      'hl.dsp.window.alter_zorder({ mode = "top", window = "address:0xabc123" })',
+      'hl.dsp.window.move({ workspace = "special:aios", follow = false, window = "address:0xabc123" })',
+    ]);
+    expect(dispatchesFor('hidden', chat({ fullscreen: 0, floating: true, pinned: true }), monitor())).toEqual([
+      'hl.dsp.window.pin({ action = "off", window = "address:0xabc123" })',
+      'hl.dsp.window.move({ workspace = "special:aios", follow = false, window = "address:0xabc123" })',
     ]);
   });
 
-  it('brings the orb back to full screen, and opens half with focus', () => {
-    const orb = chat({ floating: true, pinned: true, fullscreen: 0 });
-    expect(dispatchesFor('full', orb, monitor())).toEqual([
+  it('brings a hidden chat to the workspace in view: half screen with focus, or full screen', () => {
+    const hidden = chat({ fullscreen: 0, workspace: { name: 'special:aios' } });
+    expect(dispatchesFor('half', hidden, monitor())).toEqual([
+      'hl.dsp.window.move({ workspace = "3", follow = false, window = "address:0xabc123" })',
+      'hl.dsp.window.float({ action = "on", window = "address:0xabc123" })',
+      'hl.dsp.window.resize({ x = 942, y = 1150, window = "address:0xabc123" })',
+      'hl.dsp.window.move({ x = 966, y = 38, window = "address:0xabc123" })',
+      'hl.dsp.window.pin({ action = "on", window = "address:0xabc123" })',
+      'hl.dsp.window.alter_zorder({ mode = "top", window = "address:0xabc123" })',
+      'hl.dsp.focus({ window = "address:0xabc123" })',
+    ]);
+    expect(dispatchesFor('full', chat({ fullscreen: 0, floating: true, pinned: true, workspace: { name: '3' } }), monitor())).toEqual([
       'hl.dsp.window.pin({ action = "off", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "rounding", value = "unset", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "border_size", value = "unset", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "no_shadow", value = "unset", window = "address:0xabc123" })',
-      'hl.dsp.window.set_prop({ prop = "no_blur", value = "unset", window = "address:0xabc123" })',
       'hl.dsp.window.float({ action = "off", window = "address:0xabc123" })',
       'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "address:0xabc123" })',
       'hl.dsp.focus({ window = "address:0xabc123" })',
     ]);
-    const half = dispatchesFor('half', orb, monitor());
-    expect(half.filter((d) => /float|pin|fullscreen/.test(d))).toEqual([]);
-    expect(half.at(-1)).toBe('hl.dsp.focus({ window = "address:0xabc123" })');
-    expect(half).toContain('hl.dsp.window.resize({ x = 942, y = 1150, window = "address:0xabc123" })');
+    expect(dispatchesFor('full', hidden, monitor())[0]).toBe('hl.dsp.window.move({ workspace = "3", follow = false, window = "address:0xabc123" })');
   });
 
-  it('never builds a dispatch around an address that is not one', () => {
-    expect(() => dispatchesFor('orb', chat({ address: '0x1" }) hl.exec_cmd("x' }), monitor())).toThrow(/bad window address/);
+  it('never builds a dispatch around an address or workspace that is not one', () => {
+    expect(() => dispatchesFor('hidden', chat({ address: '0x1" }) hl.exec_cmd("x' }), monitor())).toThrow(/bad window address/);
+    expect(() => dispatchesFor('half', chat(), monitor({ activeWorkspace: { id: 1.5 } }))).toThrow(/bad workspace id/);
   });
 });
 
@@ -236,7 +234,7 @@ class FakeHypr implements HyprIpc {
     return [monitor()];
   }
   async dispatch(expr: string) {
-    if (this.refuse) throw new Error('Hyprland refused hl.dsp.window.float: nope');
+    if (this.refuse) throw new Error('Hyprland refused hl.dsp.window.move: nope');
     this.dispatched.push(expr);
     if (expr.includes('float({ action = "on"')) this.win = { ...this.win, floating: true };
     if (expr.includes('float({ action = "off"')) this.win = { ...this.win, floating: false };
@@ -244,6 +242,8 @@ class FakeHypr implements HyprIpc {
     if (expr.includes('pin({ action = "off"')) this.win = { ...this.win, pinned: false };
     if (expr.includes('action = "unset"') && expr.includes('fullscreen(')) this.win = { ...this.win, fullscreen: 0 };
     if (expr.includes('action = "set"') && expr.includes('fullscreen(')) this.win = { ...this.win, fullscreen: 2 };
+    const ws = /move\(\{ workspace = "([^"]+)"/.exec(expr)?.[1];
+    if (ws) this.win = { ...this.win, workspace: { name: ws } };
   }
   events(on: (e: HyprEvent) => void) {
     this.listener = on;
@@ -259,37 +259,39 @@ function windowRig(hypr: FakeHypr | null = new FakeHypr()) {
   const auditPath = join(dir, 'audit.jsonl');
   const modes: WindowMode[] = [];
   const notices: string[] = [];
-  const w = new ChatWindow({ hypr, audit: new AuditLog(auditPath), onMode: (m) => modes.push(m), notice: (_l, t) => notices.push(t), openWindowMs: 200 });
+  const tray: boolean[] = [];
+  const w = new ChatWindow({ hypr, audit: new AuditLog(auditPath), onMode: (m) => modes.push(m), notice: (_l, t) => notices.push(t), tray: { setVisible: (v) => void tray.push(v) }, openWindowMs: 200 });
   w.start();
   const log = () => readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
   // Lets queued window moves finish.
   const settle = async () => {
     for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
   };
-  return { w, hypr, modes, notices, log, settle };
+  return { w, hypr, modes, notices, tray, log, settle };
 }
 
 describe('chat window', () => {
-
-  it('becomes the orb when an app starts and comes back full screen when that app closes', async () => {
-    const { w, hypr, modes, log, settle } = windowRig();
+  it('hides when an app starts, with the tray circle, and comes back full screen when that app closes', async () => {
+    const { w, hypr, modes, tray, log, settle } = windowRig();
     await w.appStarting('Firefox');
-    expect(w.mode).toBe('orb');
-    expect(hypr!.win).toMatchObject({ floating: true, pinned: true, fullscreen: 0 });
+    expect(w.mode).toBe('hidden');
+    expect(hypr!.win).toMatchObject({ workspace: { name: 'special:aios' }, pinned: false, fullscreen: 0 });
+    expect(tray).toEqual([true]);
     // The chat's own window events and windows nobody started don't count.
     hypr!.emit({ name: 'openwindow', address: '0xabc123', className: 'org.aios.home' });
     hypr!.emit({ name: 'openwindow', address: '0xf00', className: 'firefox' });
     hypr!.emit({ name: 'closewindow', address: '0xdead' });
     await settle();
-    expect(w.mode).toBe('orb');
+    expect(w.mode).toBe('hidden');
     hypr!.emit({ name: 'closewindow', address: '0xf00' });
     await settle();
     expect(w.mode).toBe('full');
-    expect(hypr!.win).toMatchObject({ floating: false, pinned: false, fullscreen: 2 });
-    expect(modes).toEqual(['orb', 'full']);
+    expect(hypr!.win).toMatchObject({ workspace: { name: '3' }, floating: false, pinned: false, fullscreen: 2 });
+    expect(modes).toEqual(['hidden', 'full']);
+    expect(tray).toEqual([true, false]);
     expect(log()).toEqual([
-      expect.objectContaining({ kind: 'window', from: 'full', to: 'orb', reason: 'app_started', ok: true }),
-      expect.objectContaining({ kind: 'window', from: 'orb', to: 'full', reason: 'app_closed', app: 'Firefox', ok: true }),
+      expect.objectContaining({ kind: 'window', from: 'full', to: 'hidden', reason: 'app_started', ok: true }),
+      expect.objectContaining({ kind: 'window', from: 'hidden', to: 'full', reason: 'app_closed', app: 'Firefox', ok: true }),
     ]);
   });
 
@@ -303,33 +305,43 @@ describe('chat window', () => {
     hypr!.emit({ name: 'openwindow', address: '0x3', className: 'kitty' });
     hypr!.emit({ name: 'closewindow', address: '0x1' });
     await settle();
-    expect(w.mode).toBe('orb');
+    expect(w.mode).toBe('hidden');
     hypr!.emit({ name: 'closewindow', address: '0x2' });
     await settle();
     expect(w.mode).toBe('full');
   });
 
-  it('goes half screen when the orb is clicked, back to the orb, and full screen on request', async () => {
-    const { w, hypr, modes } = windowRig();
+  it('a click on the tray circle shows the chat at half screen and the next one hides it; Hide and Full screen work too', async () => {
+    const { w, hypr, modes, tray, log } = windowRig();
+    await w.trayClicked();
+    expect(modes).toEqual([]);
     await w.appStarting('Firefox');
-    await w.request('half');
+    await w.trayClicked();
+    expect(w.mode).toBe('half');
+    expect(hypr!.win).toMatchObject({ workspace: { name: '3' }, floating: true, pinned: true });
     expect(hypr!.dispatched.at(-1)).toBe('hl.dsp.focus({ window = "address:0xabc123" })');
-    await w.request('orb');
+    await w.trayClicked();
+    expect(w.mode).toBe('hidden');
+    await w.trayClicked();
+    await w.request('hidden');
     await w.request('full');
-    expect(modes).toEqual(['orb', 'half', 'orb', 'full']);
+    expect(modes).toEqual(['hidden', 'half', 'hidden', 'half', 'hidden', 'full']);
+    // The circle stays while the chat is half screen, so it can hide it again.
+    expect(tray).toEqual([true, true, true, true, true, false]);
+    expect(log().map((l) => l.reason)).toEqual(['app_started', 'tray', 'tray', 'tray', 'user', 'user']);
   });
 
   it('comes back full screen when the app closes while the chat is half screen', async () => {
     const { w, hypr, settle } = windowRig();
     await w.appStarting('Firefox');
     hypr!.emit({ name: 'openwindow', address: '0x9', className: 'firefox' });
-    await w.request('half');
+    await w.trayClicked();
     hypr!.emit({ name: 'closewindow', address: '0x9' });
     await settle();
     expect(w.mode).toBe('full');
   });
 
-  it('comes back when the start failed, and stays the orb when an app opened no new window', async () => {
+  it('comes back when the start failed, and stays hidden when an app opened no new window', async () => {
     const { w, hypr, settle } = windowRig();
     await w.appStarting('Broken');
     await w.appFailed('Broken');
@@ -340,25 +352,28 @@ describe('chat window', () => {
     hypr!.emit({ name: 'openwindow', address: '0x5', className: 'kitty' });
     hypr!.emit({ name: 'closewindow', address: '0x5' });
     await settle();
-    expect(w.mode).toBe('orb');
+    expect(w.mode).toBe('hidden');
   });
 
-  it('still shows the orb and says so when Hyprland refuses', async () => {
+  it('still shows the tray circle and says so when Hyprland refuses', async () => {
     const hypr = new FakeHypr();
     hypr.refuse = true;
-    const { w, modes, notices, log } = windowRig(hypr);
+    const { w, modes, tray, notices, log } = windowRig(hypr);
     await w.appStarting('Firefox');
-    expect(modes).toEqual(['orb']);
-    expect(notices).toEqual(["I couldn't move the chat window: Hyprland refused hl.dsp.window.float: nope"]);
-    expect(log()[0]).toMatchObject({ ok: false, error: 'Hyprland refused hl.dsp.window.float: nope' });
+    expect(modes).toEqual(['hidden']);
+    expect(tray).toEqual([true]);
+    expect(notices).toEqual(["I couldn't move the chat window: Hyprland refused hl.dsp.window.move: nope"]);
+    expect(log()[0]).toMatchObject({ ok: false, error: 'Hyprland refused hl.dsp.window.move: nope' });
   });
 
   it('stays full screen outside Hyprland, where nothing can move', async () => {
-    const { w, modes } = windowRig(null);
+    const { w, modes, tray } = windowRig(null);
     await w.appStarting('Firefox');
+    await w.trayClicked();
     await w.request('half');
     expect(w.mode).toBe('full');
     expect(modes).toEqual([]);
+    expect(tray).toEqual([]);
   });
 });
 
@@ -385,7 +400,7 @@ describe('app tools', () => {
         if (o.failLaunch) throw new Error('gtk-launch could not start it (exit code 1)');
         launched.push(id);
       },
-      window: { appStarting: async (n) => void steps.push(`orb for ${n}`), appFailed: async (n) => void steps.push(`back from ${n}`) },
+      window: { appStarting: async (n) => void steps.push(`hide for ${n}`), appFailed: async (n) => void steps.push(`back from ${n}`) },
     });
     const shown: ChatItem[] = [];
     const run: Run = async () => ({ stdout: '', code: 0 });
@@ -412,8 +427,8 @@ describe('app tools', () => {
     const { call, launched, steps, log } = rig();
     const r = await call('open_app', { app: 'Firefox' });
     expect(r.ok).toBe(true);
-    expect(r.content).toMatch(/^Started Firefox\. The chat is now the red orb/);
-    expect(steps).toEqual(['orb for Firefox', 'launch firefox.desktop']);
+    expect(r.content).toMatch(/^Started Firefox\. The chat is now out of the way, with a red circle in the bar's tray/);
+    expect(steps).toEqual(['hide for Firefox', 'launch firefox.desktop']);
     expect(launched).toEqual(['firefox.desktop']);
     expect(log().at(-1)).toMatchObject({ kind: 'tool', tool: 'open_app', tier: 'device', decision: 'allowed', ok: true, app: 'firefox.desktop', name: 'Firefox' });
   });
@@ -422,7 +437,7 @@ describe('app tools', () => {
     const { call, steps } = rig({ failLaunch: true });
     const r = await call('open_app', { app: 'firefox' });
     expect(r).toMatchObject({ ok: false, content: "Error: Firefox didn't start: gtk-launch could not start it (exit code 1)" });
-    expect(steps).toEqual(['orb for Firefox', 'launch firefox.desktop', 'back from Firefox']);
+    expect(steps).toEqual(['hide for Firefox', 'launch firefox.desktop', 'back from Firefox']);
   });
 
   it('starts nothing for an unknown or ambiguous app, and takes no command, file or link', async () => {
@@ -462,9 +477,9 @@ describe('app tools', () => {
 });
 
 describe('shell and the chat window', () => {
-  it('tells a new UI where the window is, and passes clicks on the orb to the window', async () => {
+  it('tells a new UI where the window is, and passes Hide, Full screen and Esc to the window', async () => {
     const requests: WindowMode[] = [];
-    let mode: WindowMode = 'orb';
+    let mode: WindowMode = 'hidden';
     const model = {
       async *stream(_req: ModelRequest): AsyncGenerator<Delta, ModelResult> {
         throw new Error('not used');
@@ -491,7 +506,7 @@ describe('shell and the chat window', () => {
     });
     const events: ServerEvent[] = [];
     shell.subscribe((e) => events.push(e));
-    expect(events[0]).toMatchObject({ type: 'hello', window: 'orb' });
+    expect(events[0]).toMatchObject({ type: 'hello', window: 'hidden' });
     store.setSetting('paused', '1');
     // The user's own click, so it works while paused.
     await shell.handle({ type: 'window', mode: 'half' });

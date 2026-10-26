@@ -52,7 +52,7 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
           throw new Error(`${found.name} didn't start: ${(err as Error).message}`);
         }
         return {
-          content: `Started ${found.name}. The chat is now the red orb at the top of the screen; it comes back full screen when ${found.name} is closed, and the user can click the orb to talk to you meanwhile. Say it in one short line.`,
+          content: `Started ${found.name}. The chat is now out of the way, with a red circle in the bar's tray; it comes back full screen when ${found.name} is closed, and the user can click the circle to talk to you meanwhile. Say it in one short line.`,
           audit: { app: found.id, name: found.name },
         };
       },

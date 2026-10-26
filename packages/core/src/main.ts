@@ -10,6 +10,7 @@ import { hyprlandIpc } from './apps/hyprland.js';
 import { createLauncher } from './apps/launcher.js';
 import { scanApps } from './apps/desktop.js';
 import { appTools } from './apps/tools.js';
+import { TrayIcon } from './apps/tray.js';
 import { ChatWindow } from './apps/window.js';
 import { AuditLog } from './audit.js';
 import { modelGate } from './gate.js';
@@ -115,9 +116,15 @@ async function main(): Promise<void> {
     notice: (level, text) => shell?.agent.notice(level, text),
     isPaused,
   });
+  // Clicks on the tray circle reach the window below; the circle shows whenever the chat isn't full screen.
+  const tray = new TrayIcon({
+    onActivate: () => void chatWindow.trayClicked(),
+    onError: (what) => audit.append({ kind: 'window', event: 'tray_error', error: what }),
+  });
   const chatWindow = new ChatWindow({
     hypr: hyprlandIpc(),
     audit,
+    tray,
     // The shell is created below; the UI hears about moves once it exists.
     onMode: (mode) => shell?.broadcast({ type: 'window', mode }),
     notice: (level, text) => shell?.agent.notice(level, text),
@@ -214,6 +221,7 @@ async function main(): Promise<void> {
   setInterval(() => void shell.refreshSystemStatus(), 15_000).unref();
   watcher.start();
   chatWindow.start();
+  if (!(await tray.start())) audit.append({ kind: 'window', event: 'tray_off', reason: 'no session bus' });
   // Catch-up after pause, quiet hours, rate limits and failed triage; a no-op when nothing is queued.
   setInterval(() => void pipeline.run(), 30_000).unref();
   // Paused means no model calls, so the nightly summary waits too.
@@ -225,6 +233,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     pipeline.stop();
     chatWindow.stop();
+    tray.stop();
     await watcher.stop();
     await mailClient.close();
     await app.close();

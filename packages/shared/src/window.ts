@@ -1,8 +1,8 @@
 /** The chat window (S3) and how it sits on screen. */
 import { z } from 'zod';
 
-/** full: the whole screen. orb: a small red circle at the top while an app is open. half: the right half, over the app. */
-export const WindowMode = z.enum(['full', 'orb', 'half']);
+/** full: the whole screen. hidden: out of sight while an app is open, with a red circle in the bar's tray. half: the right half, over the app. */
+export const WindowMode = z.enum(['full', 'hidden', 'half']);
 export type WindowMode = z.infer<typeof WindowMode>;
 
 /** The chat's Wayland app_id, set by the kiosk launcher with --class. */

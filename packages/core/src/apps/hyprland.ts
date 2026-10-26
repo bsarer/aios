@@ -23,6 +23,7 @@ export const HyprClient = z.looseObject({
   /** 0 none, 1 maximized, 2 fullscreen. */
   fullscreen: z.number(),
   monitor: z.number(),
+  workspace: z.looseObject({ name: z.string() }),
 });
 export type HyprClient = z.infer<typeof HyprClient>;
 
@@ -35,6 +36,7 @@ export const HyprMonitor = z.looseObject({
   scale: z.number().positive(),
   transform: z.number(),
   focused: z.boolean(),
+  activeWorkspace: z.looseObject({ id: z.number() }),
   /** Space taken by bars: left, top, right, bottom. */
   reserved: z.tuple([z.number(), z.number(), z.number(), z.number()]),
 });

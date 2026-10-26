@@ -150,7 +150,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
     subject: z.string().max(500),
     body: z.string().max(50_000),
   }),
-  /** S3: the orb was clicked (half), or a button asked for the orb or full screen. */
+  /** S3: Hide, Full screen or Esc at half screen. */
   z.strictObject({ type: z.literal('window'), mode: WindowMode }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
@@ -162,7 +162,7 @@ export const ServerEvent = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
   z.strictObject({ type: z.literal('status'), status: Status }),
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
-  /** S3: where the chat window now is; the UI draws the orb or the chat to match. */
+  /** S3: where the chat window now is; the UI shows the half-screen buttons to match. */
   z.strictObject({ type: z.literal('window'), mode: WindowMode }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;

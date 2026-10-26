@@ -108,10 +108,10 @@ export const TOOL_TASKS: ChatTask[] = [
     score: (c) => expectCall(c, 'mail_search', (a) => a.since === '2026-10-01' && a.limit === 5 && has(a.query, 'invoice'), 'since 2026-10-01, limit 5'),
   },
   {
-    id: 'tool-open-browser',
+    id: 'tool-open-app',
     group: 'tools',
-    messages: user('Open the browser at https://omarchy.org'),
-    score: (c) => expectCall(c, 'open_app', (a) => a.name === 'browser' && has(a.url, 'omarchy.org'), 'browser + url'),
+    messages: user('Open Firefox for me'),
+    score: (c) => expectCall(c, 'open_app', (a) => has(a.app, 'firefox'), 'firefox'),
   },
   {
     id: 'tool-none-smalltalk',

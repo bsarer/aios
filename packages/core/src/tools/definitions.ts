@@ -92,11 +92,19 @@ export const ALPHA_TOOLS = [
       target: z.enum(['facts', 'profile']).optional().describe('"profile" for standing instructions and preferences; default "facts"'),
     }),
   }),
+  // ── Apps (S3) ──
+  def({
+    name: 'apps_list',
+    tier: 'read',
+    description: 'Apps installed on this computer (from their desktop entries), with the id open_app takes. Give a query to narrow it, e.g. "browser" or "music".',
+    input: z.strictObject({ query: z.string().max(100).optional().describe('Words matched against name, description, keywords and category') }),
+  }),
   def({
     name: 'open_app',
-    tier: 'write',
-    description: 'Open an allowlisted app (alpha: browser only). Requires approval.',
-    input: z.strictObject({ name: z.enum(['browser']), url: z.url().optional() }),
+    tier: 'device',
+    description:
+      'Start an installed app, by its id from apps_list or its exact name. It opens in its own window; the chat shrinks to a red orb at the top of the screen and comes back when the app is closed. Apps start without files, links or options.',
+    input: z.strictObject({ app: z.string().min(1).max(200).describe('App id from apps_list, e.g. "firefox", or its exact name') }),
   }),
   // ── System controls (S1) ──
   def({

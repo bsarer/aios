@@ -54,13 +54,16 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
       return 'Lock the screen';
     case 'theme_set':
       return `Switch to the ${name('name')} theme`;
+    case 'open_app':
+      return `Open ${name('app')}`;
     default:
       return `Run ${tool}`;
   }
 }
 
-export function systemTools(o: { controls: SystemControls; actions: SystemActions }): RegisteredTool[] {
-  const tools = buildTools(o);
+/** `extra`: other device-tier tools (S3's open_app) that share the confirm card and its runner. */
+export function systemTools(o: { controls: SystemControls; actions: SystemActions; extra?: RegisteredTool[] }): RegisteredTool[] {
+  const tools = [...buildTools(o), ...(o.extra ?? [])];
   const byName = new Map(tools.map((t) => [t.def.name, t]));
   // A confirmed card runs the same handler, outside any model turn.
   o.actions.setDeviceRunner(async (name, args) => {

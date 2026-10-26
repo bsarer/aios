@@ -29,7 +29,7 @@ Needs Omarchy 4 (Hyprland 0.55+, configured in Lua). `pnpm run setup` (or `pnpm 
 | Keys | What it does |
 |---|---|
 | `SUPER + SHIFT + ESCAPE` | Close the chat and show the desktop. If the chat doesn't close within half a second (hung), it is killed. |
-| `SUPER + SHIFT + H` | Open the chat again, or focus it (while it is the orb, click the orb to bring it back). |
+| `SUPER + SHIFT + H` | Open the chat again, or focus it (while an app is open, click the red circle in the bar's tray to bring it back). |
 
 Both are compositor key bindings, so they work even when the chat page is frozen. Omarchy's own `SUPER + Q` also closes the window.
 
@@ -64,8 +64,9 @@ Needs Omarchy 4. Ask "what apps do I have?", "is there a music app?" or "open Fi
 
 - **Which apps:** the ones in Omarchy's app launcher, read from their desktop entries (`~/.local/share/applications`, then `/usr/share/applications` and the rest of `$XDG_DATA_DIRS`), including Omarchy's web apps and TUIs. Entries marked hidden, meant for another desktop, or whose program is missing are left out.
 - **Starting one** works like Omarchy's own launcher: `uwsm-app -- gtk-launch <app>`, so the app runs on its own and outlives the chat. Only an app from that list can be started, by name: no command, file, link or option ever reaches it. Opening an app is a `device` change, so it runs straight away from your message, counts toward the 10 changes a minute, stops while paused, and becomes a **Do it** card when asked for while an email is in view. Every start is audited.
-- **The orb:** when an app starts, the chat shrinks to a red orb at the top centre of the screen, on top of every workspace. A white dot on it means something new came in. Click it and the chat comes back on the right half of the screen; **Back to the orb** or Esc shrinks it again, **Full screen** brings it all back. When the last app the chat started is closed, the chat returns full screen by itself. Windows you open yourself don't count. An app that was already running and only raised its window leaves the orb in place.
-- Core moves the window through Hyprland (`hyprctl dispatch`, and Hyprland's event socket to see windows open and close), and every move is audited. Outside Hyprland the chat simply stays full screen: if apps start but the chat never becomes the orb, check that `systemctl --user show-environment` lists `HYPRLAND_INSTANCE_SIGNATURE`. If Hyprland refuses a move, the chat says so and still shows the orb.
+- **The red circle:** when an app starts, the chat steps out of the way (it moves to a hidden workspace of its own) and a red circle appears in the bar's tray, next to the other tray icons. Click it and the chat comes back on the right half of the screen, on top of the app; click it again, press Esc or **Hide** to put it away, or **Full screen** to bring it all back. When the last app the chat started is closed, the chat returns full screen by itself and the circle goes. Windows you open yourself don't count. An app that was already running and only raised its window leaves the chat hidden; the circle brings it back.
+- **Pin the circle once:** Omarchy's bar puts new tray icons behind the tray's arrow. To keep the circle on the bar itself, open the tray's list of icons and pin **AI OS**. The bar remembers it.
+- Core moves the window through Hyprland (`hyprctl dispatch`, and Hyprland's event socket to see windows open and close), and every move is audited. The circle is a standard tray icon (a StatusNotifierItem on the session bus, the same thing other apps use); clicking it only shows or hides the chat. Outside Hyprland the chat simply stays full screen: if apps start but the chat never steps aside, check that `systemctl --user show-environment` lists `HYPRLAND_INSTANCE_SIGNATURE`. Without a session bus there is no circle (the audit log says `tray_off`), and **SUPER + SHIFT + H** brings the chat back. If Hyprland refuses a move, the chat says so and the circle still shows.
 
 ## Limits, failures and logs
 
@@ -131,7 +132,7 @@ IMAP `127.0.0.1:3143`, SMTP `127.0.0.1:3025`, no TLS, user `john@aios.test`, pas
 ```
 packages/shared   config schema (zod) and TOML parsing
 packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, memory, audit log, model adapter, keyring, tools, system controls, apps and the chat window
-packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip, attachment viewer, orb
+packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip, attachment viewer, half-screen controls
 scripts           setup/uninstall CLI, mail seeder and checker, browser e2e check
 fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 evals             model bake-off: tasks, runner, report
@@ -139,7 +140,11 @@ evals             model bake-off: tasks, runner, report
 
 ## Dependencies added in S3
 
-None. Apps start through `uwsm-app` and `gtk-launch`, and the window moves through `hyprctl`; all three come with Omarchy 4.
+Apps start through `uwsm-app` and `gtk-launch`, and the window moves through `hyprctl`; all three come with Omarchy 4.
+
+| Package | Why | License | Maintenance |
+|---|---|---|---|
+| @homebridge/dbus-native (core) | Talks to the session bus so the red circle can sit in the bar's tray (StatusNotifierItem). Pure JavaScript, no native build. Chosen over dbus-next, whose last release was in 2021. | MIT | active (the Homebridge team; 0.7.9, August 2026) |
 
 ## Dependencies added in A0
 

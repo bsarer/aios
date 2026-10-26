@@ -136,6 +136,15 @@ export class MailState {
     this.db.prepare("UPDATE mail_events SET status = 'ignored' WHERE mail_id = ?").run(mailId);
   }
 
+  /** Mail already triaged, newest first: what the recent new-mail notifications showed. */
+  recent(limit = 10): MailEvent[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM mail_events WHERE status IN ('triaged', 'notified', 'ignored') ORDER BY received_at DESC, rowid DESC LIMIT ?")
+        .all(limit) as Row[]
+    ).map(toEvent);
+  }
+
   notificationsSince(since: number): number {
     return (this.db.prepare('SELECT COUNT(*) n FROM notification_log WHERE at >= ?').get(since) as { n: number }).n;
   }

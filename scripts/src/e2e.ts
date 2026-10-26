@@ -41,9 +41,9 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
   const last = body.messages.at(-1)!;
   const lastUser = [...body.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   if (body.response_format) {
-    // Triage: one item per wrapped message; the first is urgent.
+    // Triage: one item per wrapped message; the first is urgent, the rest low priority.
     const ids = [...(last.content ?? '').matchAll(/id="([^"]+)"/g)].map((m) => m[1]!);
-    const items = ids.map((id, i) => ({ id, urgency: i === 0 ? 'high' : 'normal', summary: `Mock summary ${i + 1}`, needs_reply: i === 0, suggested_action: 'read', category: 'work' }));
+    const items = ids.map((id, i) => ({ id, urgency: i === 0 ? 'high' : 'low', summary: `Mock summary ${i + 1}`, needs_reply: i === 0, suggested_action: 'read', category: 'work' }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return void res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 60, cost: 0.0002 } }));
   }
@@ -53,6 +53,17 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     res.end('data: [DONE]\n\n');
   };
 
+  // Notifications: "why was that low-priority email low?" goes through mail_recent.
+  if (last.role === 'user' && /low.priority email/i.test(lastUser)) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_n', function: { name: 'mail_recent', arguments: '{}' } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /from recent notifications/.test(last.content ?? '')) {
+    const low = /Subject: (.*)\nReceived: .*\nPriority: low/.exec(last.content ?? '')?.[1] ?? 'none';
+    chunk(res, { choices: [{ delta: { content: `The low-priority one is: ${low}` } }] });
+    return finish(0.0004);
+  }
   // S2: attachments. Show posts a card; read answers with a line of the attachment's text.
   const attachmentCall = last.role === 'user' ? /^(open|what does) attachment (\d+) of email (\S+)(?: say)?$/i.exec(lastUser) : null;
   if (attachmentCall) {
@@ -433,7 +444,11 @@ async function main(): Promise<void> {
       await deliverTestMail(`E2E normal ${stamp}`);
       const note = page.locator('[data-kind="notification"]').last();
       check('new mail posts one notification', await waitFor(async () => (await note.count()) > 0 && (await note.getByTestId('mail-row').count()) === 2, 40_000));
-      check('notification headline counts urgent mail', (await note.innerText()).includes('2 new emails. 1 looks urgent.'));
+      check('notification headline counts urgent mail', (await note.innerText()).includes('2 new emails. 1 looks urgent. 1 low-priority.'));
+      check('low-priority mail keeps its buttons', (await note.getByTestId('mail-digest').getByTestId('mail-read').count()) === 1);
+      await input.fill('why was that low-priority email low?');
+      await input.press('Enter');
+      check('the chat finds the low-priority email from the notification', await waitFor(async () => (await lastAssistant().innerText()).includes(`The low-priority one is: E2E normal ${stamp}`), 15_000));
       await shot(page, '8-mail-notification');
       await note.getByTestId('mail-ignore').last().click();
       check('Ignore greys out the row', await waitFor(async () => (await note.getByTestId('mail-ignore').count()) === 1));

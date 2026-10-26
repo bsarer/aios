@@ -41,6 +41,13 @@ export const ALPHA_TOOLS = [
     input: z.strictObject({ id: z.string() }),
   }),
   def({
+    name: 'mail_recent',
+    tier: 'read',
+    description:
+      'The emails from recent new-mail notifications, newest first, with the priority triage gave each (high, normal, low), its category and summary. Use when the user refers to an email from a notification, e.g. "that low-priority email" or "the receipt that just came in".',
+    input: z.strictObject({ limit: z.int().min(1).max(30).optional() }),
+  }),
+  def({
     name: 'mail_attachment_read',
     tier: 'read',
     description: 'Read the text of one attachment of a message (a PDF or text file), numbered as mail_read lists them. Images cannot be read.',

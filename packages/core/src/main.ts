@@ -15,7 +15,7 @@ import { MailClient, type MailConnection } from './mail/imap.js';
 import { ImapSmtpOutbox } from './mail/outbox.js';
 import { MailPipeline } from './mail/pipeline.js';
 import { MailState } from './mail/state.js';
-import { attachmentTools, mailTools } from './mail/tools.js';
+import { attachmentTools, mailTools, recentMailTool } from './mail/tools.js';
 import { ImapMailSource, MailWatcher } from './mail/watcher.js';
 import { MemoryFiles } from './memory/files.js';
 import { Memory } from './memory/memory.js';
@@ -78,6 +78,8 @@ async function main(): Promise<void> {
   };
   const mailClient = new MailClient(mailConnection);
   for (const t of mailTools(mailClient)) tools.register(t);
+  const mailState = new MailState(store);
+  tools.register(recentMailTool(mailState));
   // The shell is created below; cards only appear once it exists.
   const attachmentFiles = new AttachmentFiles({ store, mail: mailClient, audit, post: (item) => shell?.agent.post(item) });
   for (const t of attachmentTools({ mail: mailClient, files: attachmentFiles })) tools.register(t);
@@ -147,7 +149,6 @@ async function main(): Promise<void> {
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),
   });
-  const mailState = new MailState(store);
   const pipeline = new MailPipeline({
     state: mailState,
     model,

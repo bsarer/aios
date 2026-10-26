@@ -8,6 +8,7 @@ import type { RegisteredTool } from '../tools/registry.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
 import { type AttachmentFiles, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_CHARS, declaredKind, extractPdfText, listAttachments, sizeText, sniff } from './attachments.js';
 import type { Address, FullMessage, MailClient, MessageSummary } from './imap.js';
+import type { MailState } from './state.js';
 
 const who = (a: Address | null) => (a ? (a.name ? `${a.name} <${a.address}>` : a.address) : 'unknown');
 const when = (d: Date | null) => d?.toISOString().replace(/:\d\d\.\d+Z$/, 'Z') ?? 'unknown date';
@@ -67,6 +68,36 @@ export function mailTools(mail: Pick<MailClient, 'search' | 'read' | 'thread'>):
       },
     },
   ];
+}
+
+/**
+ * The mail behind recent notifications, so "that low-priority email" can be found. Sender,
+ * subject and the triage summary all come from email (the summary was written by a model
+ * reading it), so the whole result is untrusted.
+ */
+export function recentMailTool(state: Pick<MailState, 'recent'>): RegisteredTool {
+  return {
+    def: toolByName('mail_recent')!,
+    label: 'Checking recent mail…',
+    untrustedOutput: true,
+    async handler(args) {
+      const { limit } = args as { limit?: number };
+      const events = state.recent(limit ?? 10);
+      if (!events.length) return 'No recent new-mail notifications.';
+      const block = (e: (typeof events)[number]) => {
+        const t = e.triage;
+        const lines = [
+          `From: ${e.from}`,
+          `Subject: ${e.subject}`,
+          `Received: ${when(new Date(e.receivedAt))}`,
+          ...(t ? [`Priority: ${t.urgency}`, `Category: ${t.category}`, `Suggested action: ${t.suggested_action}`, `Needs reply: ${t.needs_reply ? 'yes' : 'no'}`, `Summary: ${t.summary}`] : []),
+          ...(e.status === 'ignored' ? ['The user clicked Ignore on it.'] : []),
+        ];
+        return `id: ${e.mailId}\n${wrapUntrusted('email', e.mailId, clean(lines.join('\n'), 1500))}`;
+      };
+      return `${events.length} email(s) from recent notifications, newest first. Priority comes from the triage model's reading of each email. Use the id with mail_read or the attachment tools.\n\n${events.map(block).join('\n\n')}`;
+    },
+  };
 }
 
 /**

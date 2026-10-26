@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type ChatItem, type ClientMessage, type ServerEvent, type Status, type Theme } from '@aios/shared';
+import { type ChatItem, type ClientMessage, type ServerEvent, type Status, type Theme, type WindowMode } from '@aios/shared';
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
@@ -40,6 +40,8 @@ export interface ShellOptions {
   approvals?: ApprovalBroker;
   /** Cards for system changes that need a click (S1). Without it, action messages are ignored. */
   systemActions?: SystemActions;
+  /** Where the chat window sits (S3). Without it, window messages are ignored and the chat stays full screen. */
+  chatWindow?: { readonly mode: WindowMode; request: (mode: WindowMode) => Promise<void> };
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -85,7 +87,7 @@ export class Shell {
 
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
-    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme });
+    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme, window: this.o.chatWindow?.mode ?? 'full' });
     return () => this.listeners.delete(l);
   }
 
@@ -155,6 +157,8 @@ export class Shell {
     if (msg.type === 'mail_ignore') return this.ignoreMail(msg.itemId, msg.mailId);
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel') return this.systemAction(msg);
+    // The user's own click, so it works while paused; it only moves the chat window.
+    if (msg.type === 'window') return this.o.chatWindow?.request(msg.mode);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {

@@ -31,6 +31,8 @@ export const SYSTEM_COMMANDS = [
   'omarchy-theme-list',
   'omarchy-theme-current',
   'omarchy-theme-set',
+  // S3: the chat window's place on screen (apps/hyprland.ts).
+  'hyprctl',
 ] as const;
 export type SystemCommand = (typeof SYSTEM_COMMANDS)[number];
 

@@ -13,13 +13,10 @@
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { CHAT_APP_CLASS, CHAT_CLASS_PATTERN } from '@aios/shared';
 
-export const APP_CLASS = 'org.aios.home';
-/**
- * Window class to match. `--class` sets the Wayland app_id in current Chromium; older
- * builds name --app windows like chrome-127.0.0.1__-Default instead, so match both.
- */
-export const CLASS_PATTERN = '^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$';
+export const APP_CLASS = CHAT_APP_CLASS;
+export const CLASS_PATTERN = CHAT_CLASS_PATTERN;
 export const EXIT_KEYS = 'SUPER + SHIFT + ESCAPE';
 export const OPEN_KEYS = 'SUPER + SHIFT + H';
 

@@ -33,3 +33,8 @@ export * from './system/actions.js';
 export * from './system/controls.js';
 export * from './system/run.js';
 export * from './system/tools.js';
+export * from './apps/desktop.js';
+export * from './apps/hyprland.js';
+export * from './apps/launcher.js';
+export * from './apps/tools.js';
+export * from './apps/window.js';

@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening) and S1 (system controls) are merged. S2 (email attachments) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls) and S2 (email attachments) are merged. S3 (starting apps) is in review.
 
 ## Mail
 
@@ -29,7 +29,7 @@ Needs Omarchy 4 (Hyprland 0.55+, configured in Lua). `pnpm run setup` (or `pnpm 
 | Keys | What it does |
 |---|---|
 | `SUPER + SHIFT + ESCAPE` | Close the chat and show the desktop. If the chat doesn't close within half a second (hung), it is killed. |
-| `SUPER + SHIFT + H` | Open the chat again, or focus it. |
+| `SUPER + SHIFT + H` | Open the chat again, or focus it (while it is the orb, click the orb to bring it back). |
 
 Both are compositor key bindings, so they work even when the chat page is frozen. Omarchy's own `SUPER + Q` also closes the window.
 
@@ -58,6 +58,15 @@ Needs Omarchy 4. Ask in your own words: "volume to 30", "mute", "brighter", "nig
 - **Not included:** keep-awake, sleep, restart and shut down, system updates, turning off the touchpad, touchscreen or keyboard.
 - If a command is missing (not on Omarchy 4), the chat says which one. If the on-screen display doesn't appear when the service makes a change, the service may be missing the desktop session's environment: check that `systemctl --user show-environment` lists `WAYLAND_DISPLAY` and `HYPRLAND_INSTANCE_SIGNATURE`.
 
+## Apps
+
+Needs Omarchy 4. Ask "what apps do I have?", "is there a music app?" or "open Firefox".
+
+- **Which apps:** the ones in Omarchy's app launcher, read from their desktop entries (`~/.local/share/applications`, then `/usr/share/applications` and the rest of `$XDG_DATA_DIRS`), including Omarchy's web apps and TUIs. Entries marked hidden, meant for another desktop, or whose program is missing are left out.
+- **Starting one** works like Omarchy's own launcher: `uwsm-app -- gtk-launch <app>`, so the app runs on its own and outlives the chat. Only an app from that list can be started, by name: no command, file, link or option ever reaches it. Opening an app is a `device` change, so it runs straight away from your message, counts toward the 10 changes a minute, stops while paused, and becomes a **Do it** card when asked for while an email is in view. Every start is audited.
+- **The orb:** when an app starts, the chat shrinks to a red orb at the top centre of the screen, on top of every workspace. A white dot on it means something new came in. Click it and the chat comes back on the right half of the screen; **Back to the orb** or Esc shrinks it again, **Full screen** brings it all back. When the last app the chat started is closed, the chat returns full screen by itself. Windows you open yourself don't count. An app that was already running and only raised its window leaves the orb in place.
+- Core moves the window through Hyprland (`hyprctl dispatch`, and Hyprland's event socket to see windows open and close), and every move is audited. Outside Hyprland the chat simply stays full screen: if apps start but the chat never becomes the orb, check that `systemctl --user show-environment` lists `HYPRLAND_INSTANCE_SIGNATURE`. If Hyprland refuses a move, the chat says so and still shows the orb.
+
 ## Limits, failures and logs
 
 - **Daily cost cap:** `[cost] dailyCapUsd` (default 2). Once today's spend (midnight to midnight in your timezone) reaches it, no model call is made by chat, mail triage or the nightly summary until tomorrow. The chat says so, `/cost` shows the numbers, and new mail is still listed by sender and subject without a summary. Spend is what the provider reports per call (OpenRouter does), so a provider that reports no cost is never capped.
@@ -73,7 +82,7 @@ Needs Omarchy 4. Ask in your own words: "volume to 30", "mute", "brighter", "nig
 
 ## Testing
 
-- `pnpm test` runs every unit test, and `pnpm test:injection` runs only the prompt-injection suite. That suite feeds each of the eight hostile test emails to a model that obeys them, through the real tools, approval brokers and memory. It checks that nothing is sent, no app opens, no memory or config file changes, no system command starts (one email asks to mute the computer and turn off Wi-Fi; another hides its instructions in a PDF and a text attachment), and every write- and device-tier call is refused and logged. It also covers the system controls' limits, rate limit, pause and action cards.
+- `pnpm test` runs every unit test, and `pnpm test:injection` runs only the prompt-injection suite. That suite feeds each of the eight hostile test emails to a model that obeys them, through the real tools, approval brokers and memory. It checks that nothing is sent, no app opens, no memory or config file changes, no system command starts (one email asks to mute the computer and turn off Wi-Fi; another hides its instructions in a PDF and a text attachment), and every write- and device-tier call is refused or turned into a card that waits for a click, and logged. It also covers the system controls' and app starts' limits, rate limit, pause and action cards.
 - CI (`.github/workflows/ci.yml`) runs the typecheck, the injection suite and the unit tests on every PR and push to main. A second job starts GreenMail and runs the mail integration tests and the browser end-to-end check. CI never uses a real account or key.
 - **Real test account:** for trying AI OS against a real mail server and model, use a dedicated throwaway mailbox, never your own.
   1. Create the mailbox (for example a new Gmail or Fastmail account), turn on two-step sign-in, and create an app password for it.
@@ -121,12 +130,16 @@ IMAP `127.0.0.1:3143`, SMTP `127.0.0.1:3025`, no TLS, user `john@aios.test`, pas
 
 ```
 packages/shared   config schema (zod) and TOML parsing
-packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, memory, audit log, model adapter, keyring, tools, system controls
-packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip, attachment viewer
+packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, memory, audit log, model adapter, keyring, tools, system controls, apps and the chat window
+packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip, attachment viewer, orb
 scripts           setup/uninstall CLI, mail seeder and checker, browser e2e check
 fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in S3
+
+None. Apps start through `uwsm-app` and `gtk-launch`, and the window moves through `hyprctl`; all three come with Omarchy 4.
 
 ## Dependencies added in A0
 

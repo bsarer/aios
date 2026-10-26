@@ -6,6 +6,11 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDir, parseConfig } from '@aios/shared';
+import { hyprlandIpc } from './apps/hyprland.js';
+import { createLauncher } from './apps/launcher.js';
+import { scanApps } from './apps/desktop.js';
+import { appTools } from './apps/tools.js';
+import { ChatWindow } from './apps/window.js';
 import { AuditLog } from './audit.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
@@ -110,7 +115,15 @@ async function main(): Promise<void> {
     notice: (level, text) => shell?.agent.notice(level, text),
     isPaused,
   });
-  for (const t of systemTools({ controls, actions: systemActions })) tools.register(t);
+  const chatWindow = new ChatWindow({
+    hypr: hyprlandIpc(),
+    audit,
+    // The shell is created below; the UI hears about moves once it exists.
+    onMode: (mode) => shell?.broadcast({ type: 'window', mode }),
+    notice: (level, text) => shell?.agent.notice(level, text),
+  });
+  const apps = appTools({ scan: () => scanApps(), launch: createLauncher(), window: chatWindow });
+  for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
   let nightlyNoticeFor = '';
   const nightly = new Nightly({
@@ -146,6 +159,7 @@ async function main(): Promise<void> {
     memory,
     approvals,
     systemActions,
+    chatWindow,
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),
   });
@@ -199,6 +213,7 @@ async function main(): Promise<void> {
   await shell.refreshSystemStatus();
   setInterval(() => void shell.refreshSystemStatus(), 15_000).unref();
   watcher.start();
+  chatWindow.start();
   // Catch-up after pause, quiet hours, rate limits and failed triage; a no-op when nothing is queued.
   setInterval(() => void pipeline.run(), 30_000).unref();
   // Paused means no model calls, so the nightly summary waits too.
@@ -209,6 +224,7 @@ async function main(): Promise<void> {
 
   const shutdown = async () => {
     pipeline.stop();
+    chatWindow.stop();
     await watcher.stop();
     await mailClient.close();
     await app.close();

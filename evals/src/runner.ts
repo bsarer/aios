@@ -60,6 +60,8 @@ function stubToolResult(call: ToolCall): string {
         { id: 'm-1042', from: 'Sara Kaya <sara.kaya@northwind.example>', subject: 'Re: Q4 budget review', date: '2026-10-12' },
         { id: 'm-1043', from: 'Tom Becker <tom.becker@acme.example>', subject: 'Re: Contract renewal', date: '2026-10-18' },
       ]);
+    case 'apps_list':
+      return '3 apps installed:\n- Firefox (id: firefox): Browse the web\n- Files (id: org.gnome.Nautilus): Access and organize files\n- Spotify (id: spotify): Music for everyone';
     default:
       return wrapUntrusted('email', 'm-1042', 'From: Sara Kaya <sara.kaya@northwind.example>\nSubject: Re: Q4 budget review\n\nCould you send me the September all-hands slides by Thursday?');
   }

@@ -19,6 +19,7 @@ An app on Omarchy that takes over the whole screen (kiosk mode) and is, from the
 6. Compositor-level exit shortcut plus a second recovery path.
 7. System controls by chat (milestone S1, added 2026-10-25): Wi-Fi, Bluetooth, brightness, volume, night light, do not disturb, audio output, microphone mute, power profile, battery and system status, screen lock, theme.
 8. Email attachments (milestone S2, added 2026-10-25): open PDF, text and image attachments in a viewer in the chat; the model can read the text of PDF and text attachments, never images.
+9. Starting apps by chat (milestone S3, added 2026-10-26): the chat knows the installed apps and starts one when asked; while it is open the chat waits as a red orb at the top of the screen.
 
 ### Out of scope (parked for after alpha)
 WhatsApp, calendar, docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
@@ -122,7 +123,8 @@ Output a table; pick the default per role from the results, not from reputation.
 | `mail_create_draft(inReplyTo?, to, subject, body)` | draft | Saves to IMAP Drafts and returns a draft card |
 | `mail_send_draft(draftId)` | **write** | Blocked until the user clicks Send on the card |
 | `memory_propose(fact)` | draft | Queues a memory suggestion for user confirmation (see §6) |
-| `open_app(name)` | write | Allowlist: browser only. Approval required |
+| `apps_list(query?)` | read | S3: installed apps from their desktop entries, with the id `open_app` takes |
+| `open_app(app)` | device | S3: starts one installed app by its desktop id (`uwsm-app -- gtk-launch <id>`); no command, file, link or option. A confirm card while an email is in view |
 | `now()` | read | Current date, time, timezone |
 | System controls (S1) | read / device / write | See S1 in §11: status reads are `read`; small reversible changes are `device`; Wi-Fi off, switching networks, pairing and forgetting Bluetooth devices are `write` |
 
@@ -182,6 +184,7 @@ Goal: useful continuity without letting untrusted content rewrite the agent's be
 
 - Full-screen, frameless, dark by default, glassy gradient; colors follow Omarchy's current theme (`~/.local/state/omarchy/current/theme/colors.toml`, watched for changes).
 - **Single chat column**, centered, large type. Message kinds: user, assistant (streamed markdown), tool-status line ("Searching mail…"), notification (new-mail digest), approval card (draft with *Send / Edit / Discard*), memory proposal card (*Save / Skip*), attachment card (*Open*, S2: a full-screen viewer for PDFs, text and pictures), system notice (errors, paused).
+- **Orb** (S3): while an app the chat started is open, the chat window shrinks to a red orb at the top centre of the screen, pinned above every workspace (a white dot means something new arrived). Clicking it brings the chat back on the right half of the screen, with *Back to the orb* and *Full screen* buttons; Esc goes back to the orb. When the last app the chat started closes, the chat returns full screen. Core moves the window through Hyprland; the UI only asks.
 - **Status strip** (top or bottom, always visible): clock, date, battery, wifi state, mail connection state, agent state (idle / working / paused), cost today. Read battery/wifi from sysfs and `nmcli`.
 - Input: text only (attach/mic/image shown disabled). Enter sends, Shift+Enter newline, Esc stops generation.
 - Small slash commands typed in chat: `/pause`, `/resume`, `/cost`, `/memory`, `/forget`, `/help`.
@@ -264,6 +267,10 @@ Chat tools for Wi-Fi, Bluetooth, screen brightness, volume, night light, do not 
 **S2: Email attachments** (approved 2026-10-25; after S1, before A8)
 Open PDF, text and image attachments from email. `mail_attachment_show` posts a card; Open shows the file full screen in the chat (PDFs drawn by pdf.js on canvases with no links or forms, pictures as images, text as plain text). `mail_attachment_read` gives the model the text of a PDF or text attachment, sanitized, wrapped in `<untrusted>` and quarantined like an email body; the model never sees images. What a file is gets decided by its first bytes (PDF, PNG, JPEG, GIF, WebP signatures; text only when declared as text and free of NUL bytes), never by its name or declared type; SVG, HTML and everything else are refused. Limits: 25 MB per file, PDF text from at most 50 pages in a worker thread with a memory cap and a 10 s limit. Files are fetched only through a card's random id, served from 127.0.0.1 with `nosniff`, a sandboxing CSP and `Cross-Origin-Resource-Policy: same-origin`; every open is audited. New dependency: `pdfjs-dist` (Mozilla, Apache-2.0).
 *Accept:* "open the PDF from Lena" shows a card that opens the PDF; pictures and text files open the same way; questions about a PDF are answered from its text; a hostile email whose PDF and text attachments carry instructions joins the CI injection suite and changes nothing; a file that is not what it claims (an SVG named .png) is refused.
+
+**S3: Starting apps** (approved 2026-10-26; after S2, before A8)
+`apps_list` reads installed apps from XDG desktop entries ($XDG_DATA_HOME, then $XDG_DATA_DIRS; NoDisplay, Hidden, OnlyShowIn/NotShowIn and TryExec respected; the Exec line is never read). `open_app` (device tier) starts one by its desktop id the way Omarchy does, `uwsm-app -- gtk-launch <id>`, without a shell; ids must look like desktop ids and come from the list, and nothing else (no command, file, URL or option) can be passed. Core moves the chat window through Hyprland's IPC (`hyprctl dispatch` with Hyprland 0.55's Lua dispatchers, the `.socket2.sock` event socket for `openwindow`/`closewindow`): full screen → orb when an app starts → half screen when the orb is clicked → full screen when the last app the chat started closes. An app that opens no new window (already running) leaves the orb in place. Every start and every window move is audited. No new dependencies.
+*Accept:* "open Firefox" starts it and the chat becomes the orb; clicking the orb gives a half-screen chat; closing Firefox brings the chat back full screen; an email asking to open an app only gets a card; checked on the real machine.
 
 **A8: Dogfood week**
 Use it daily (including system controls); record median latency, cost per day, notification precision (useful vs noisy), crashes, and what you reached for outside the chat.

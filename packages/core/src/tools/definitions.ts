@@ -103,7 +103,7 @@ export const ALPHA_TOOLS = [
     name: 'open_app',
     tier: 'device',
     description:
-      'Start an installed app, by its id from apps_list or its exact name. It opens in its own window; the chat shrinks to a red orb at the top of the screen and comes back when the app is closed. Apps start without files, links or options.',
+      'Start an installed app, by its id from apps_list or its exact name. It opens in its own window; the chat steps aside, with a red circle in the bar tray, and comes back when the app is closed. Apps start without files, links or options.',
     input: z.strictObject({ app: z.string().min(1).max(200).describe('App id from apps_list, e.g. "firefox", or its exact name') }),
   }),
   // ── System controls (S1) ──

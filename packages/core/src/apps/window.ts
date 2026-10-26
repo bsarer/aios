@@ -1,25 +1,27 @@
 /**
- * Where the chat window sits (S3). Core drives it through Hyprland, so the UI only asks:
+ * Where the chat window is (S3). Core drives it through Hyprland, so the UI only asks:
  *
- *   full ──an app starts──▶ orb ──orb clicked──▶ half ──"back to orb" / Esc──▶ orb
- *     ▲                      │                    │
- *     └─the last app the chat started has closed──┴──────── "full screen" ──▶ full
+ *   full ──an app starts──▶ hidden ──tray circle clicked──▶ half ──circle / Hide / Esc──▶ hidden
+ *     ▲                      │                               │
+ *     └─the last app the chat started has closed─────────────┴──── "Full screen" ──▶ full
  *
- * The orb is the chat window itself, shrunk to a small circle pinned at the top centre
- * of the screen, above every workspace. Half is the right half of the screen, pinned and
- * floating over the app. Full is the kiosk's own fullscreen.
+ * Hidden puts the chat window on its own special workspace, out of sight, and a red
+ * circle shows in the bar's tray (tray.ts) for as long as the chat isn't full screen.
+ * Half is the right half of the screen, floating and pinned over the app. Full is the
+ * kiosk's own fullscreen.
  *
  * Which apps "the chat started" is decided by Hyprland's openwindow events: the first
  * new window after a start belongs to it. When the last of those closes, the chat comes
  * back full screen. An app that opens no new window (one that was already running and
- * only raised itself) leaves the chat as the orb.
+ * only raised itself) leaves the chat hidden, with the circle in the tray.
  */
 import { type WindowMode, CHAT_CLASS_PATTERN } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import type { HyprClient, HyprEvent, HyprIpc, HyprMonitor } from './hyprland.js';
 
 const CHAT_CLASS = new RegExp(CHAT_CLASS_PATTERN);
-export const ORB_SIZE = 56;
+/** Where the hidden chat waits. Only this code ever shows it again. */
+export const HIDDEN_WORKSPACE = 'special:aios';
 const GAP = 12;
 /** How long after a start its first window still counts as that app's. */
 const OPEN_WINDOW_MS = 20_000;
@@ -30,6 +32,8 @@ export interface ChatWindowOptions {
   audit: AuditLog;
   onMode: (mode: WindowMode) => void;
   notice: (level: 'info' | 'warning' | 'error', text: string) => void;
+  /** The tray circle; shown whenever the chat isn't full screen. */
+  tray?: { setVisible: (visible: boolean) => void };
   openWindowMs?: number;
 }
 
@@ -49,11 +53,6 @@ export function usableArea(m: HyprMonitor): Rect {
   return { x: m.x + left, y: m.y + top, w: w - left - right, h: h - top - bottom };
 }
 
-export function orbRect(m: HyprMonitor): Rect {
-  const a = usableArea(m);
-  return { x: a.x + Math.round((a.w - ORB_SIZE) / 2), y: a.y + 8, w: ORB_SIZE, h: ORB_SIZE };
-}
-
 export function halfRect(m: HyprMonitor): Rect {
   const a = usableArea(m);
   const w = Math.round(a.w / 2) - Math.round(GAP * 1.5);
@@ -63,31 +62,39 @@ export function halfRect(m: HyprMonitor): Rect {
 /** The Lua dispatches that put the chat window in a mode, in order. Pure, for tests. */
 export function dispatchesFor(mode: WindowMode, win: HyprClient, mon: HyprMonitor): string[] {
   if (!/^0x[0-9a-f]+$/.test(win.address)) throw new Error('bad window address');
+  if (!Number.isInteger(mon.activeWorkspace.id)) throw new Error('bad workspace id');
   const w = `window = "address:${win.address}"`;
-  const prop = (p: string, v: string | number) => `hl.dsp.window.set_prop({ prop = "${p}", value = "${v}", ${w} })`;
   const out: string[] = [];
+  const unfullscreen = () => {
+    if (win.fullscreen > 0) out.push(`hl.dsp.window.fullscreen({ mode = "${win.fullscreen === 1 ? 'maximized' : 'fullscreen'}", action = "unset", ${w} })`);
+  };
+  // Back from hiding: onto the workspace the user is looking at.
+  const fetch = () => {
+    if (win.workspace.name.startsWith('special:')) out.push(`hl.dsp.window.move({ workspace = "${mon.activeWorkspace.id}", follow = false, ${w} })`);
+  };
+  if (mode === 'hidden') {
+    unfullscreen();
+    // A pinned window shows on every workspace, so it is unpinned before it is put away.
+    if (win.pinned) out.push(`hl.dsp.window.pin({ action = "off", ${w} })`);
+    out.push(`hl.dsp.window.move({ workspace = "${HIDDEN_WORKSPACE}", follow = false, ${w} })`);
+    return out;
+  }
+  fetch();
   if (mode === 'full') {
     if (win.pinned) out.push(`hl.dsp.window.pin({ action = "off", ${w} })`);
-    for (const p of ['rounding', 'border_size', 'no_shadow', 'no_blur']) out.push(prop(p, 'unset'));
     if (win.floating) out.push(`hl.dsp.window.float({ action = "off", ${w} })`);
     out.push(`hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", ${w} })`);
     out.push(`hl.dsp.focus({ ${w} })`);
     return out;
   }
-  const r = mode === 'orb' ? orbRect(mon) : halfRect(mon);
-  if (win.fullscreen > 0) out.push(`hl.dsp.window.fullscreen({ mode = "${win.fullscreen === 1 ? 'maximized' : 'fullscreen'}", action = "unset", ${w} })`);
+  const r = halfRect(mon);
+  unfullscreen();
   if (!win.floating) out.push(`hl.dsp.window.float({ action = "on", ${w} })`);
-  if (mode === 'orb') {
-    out.push(prop('rounding', ORB_SIZE / 2), prop('border_size', 0), prop('no_shadow', 1), prop('no_blur', 1));
-  } else {
-    for (const p of ['rounding', 'border_size', 'no_shadow', 'no_blur']) out.push(prop(p, 'unset'));
-  }
   out.push(`hl.dsp.window.resize({ x = ${r.w}, y = ${r.h}, ${w} })`);
   out.push(`hl.dsp.window.move({ x = ${r.x}, y = ${r.y}, ${w} })`);
   if (!win.pinned) out.push(`hl.dsp.window.pin({ action = "on", ${w} })`);
   out.push(`hl.dsp.window.alter_zorder({ mode = "top", ${w} })`);
-  // The orb leaves focus with the app; half is for typing.
-  if (mode === 'half') out.push(`hl.dsp.focus({ ${w} })`);
+  out.push(`hl.dsp.focus({ ${w} })`);
   return out;
 }
 
@@ -117,9 +124,15 @@ export class ChatWindow {
     this.pending = [];
   }
 
-  /** The UI asked (orb clicked, back to orb, full screen). */
+  /** The UI asked (Hide, Full screen, Esc). */
   request(mode: WindowMode): Promise<void> {
     return this.set(mode, 'user');
+  }
+
+  /** The tray circle was clicked: show the hidden chat at half screen, or hide it again. */
+  trayClicked(): Promise<void> {
+    if (this.current === 'full') return Promise.resolve();
+    return this.set(this.current === 'hidden' ? 'half' : 'hidden', 'tray');
   }
 
   /** Called just before an app starts: the chat steps aside first, so the app opens in its place. */
@@ -129,7 +142,7 @@ export class ChatWindow {
     }, this.o.openWindowMs ?? OPEN_WINDOW_MS);
     timer.unref();
     this.pending.push({ name, timer });
-    await this.set('orb', 'app_started');
+    await this.set('hidden', 'app_started');
   }
 
   /** The start failed: nothing will open, so the chat comes back unless another app is open. */
@@ -170,25 +183,33 @@ export class ChatWindow {
     const from = this.current;
     let error: string | undefined;
     try {
-      await this.move(mode);
+      if (!(await this.move(mode))) {
+        // Opened in a normal browser tab: nothing to move or bring back, so the chat stays as it is.
+        this.o.audit.append({ kind: 'window', from, to: mode, reason, ...(app ? { app } : {}), ok: false, error: 'no chat window' });
+        this.o.notice('warning', "I couldn't step aside: the chat isn't open in its own window. Press SUPER + SHIFT + H to open it that way.");
+        return;
+      }
     } catch (err) {
       error = (err as Error).message.slice(0, 300);
     }
-    // The UI follows even when Hyprland refused, so the orb is always there to click.
+    // The state follows even when Hyprland refused, so the tray circle is there to click.
     this.current = mode;
+    this.o.tray?.setVisible(mode !== 'full');
     this.o.audit.append({ kind: 'window', from, to: mode, reason, ...(app ? { app } : {}), ok: !error, ...(error ? { error } : {}) });
     this.o.onMode(mode);
     if (error) this.o.notice('warning', `I couldn't move the chat window: ${error}`);
   }
 
-  private async move(mode: WindowMode): Promise<void> {
+  /** False when the chat has no window of its own to move. */
+  private async move(mode: WindowMode): Promise<boolean> {
     const hypr = this.o.hypr!;
     const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
     const win = clients.find((c) => CHAT_CLASS.test(c.class));
-    // Opened in a normal browser (development): nothing to move.
-    if (!win) return;
-    const mon = monitors.find((m) => m.id === win.monitor) ?? monitors.find((m) => m.focused) ?? monitors[0];
+    if (!win) return false;
+    // The monitor the user is on: a hidden chat comes back where they are looking.
+    const mon = monitors.find((m) => m.focused) ?? monitors.find((m) => m.id === win.monitor) ?? monitors[0];
     if (!mon) throw new Error('Hyprland reports no monitor');
     for (const expr of dispatchesFor(mode, win, mon)) await hypr.dispatch(expr);
+    return true;
   }
 }

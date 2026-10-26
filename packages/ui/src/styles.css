@@ -60,22 +60,3 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 0.9s linear infinite; }
 
-/* S3: the chat as a red orb at the top of the screen while an app is open. */
-.orb {
-  background: radial-gradient(circle at 35% 30%, #ff8a8a, #e0262f 55%, #8f0d14);
-  box-shadow: inset 0 -4px 10px rgb(0 0 0 / 0.35);
-  cursor: pointer;
-}
-.orb:focus-visible { outline: 3px solid #fff; outline-offset: -6px; }
-.orb-working { animation: orb-pulse 1.4s ease-in-out infinite; }
-@keyframes orb-pulse { 50% { filter: brightness(1.35); } }
-.orb-dot {
-  position: absolute;
-  top: 18%;
-  right: 18%;
-  width: 22%;
-  height: 22%;
-  border-radius: 9999px;
-  background: #fff;
-}
-@media (prefers-reduced-motion: reduce) { .orb-working { animation: none; } }

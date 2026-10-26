@@ -38,3 +38,4 @@ export * from './apps/hyprland.js';
 export * from './apps/launcher.js';
 export * from './apps/tools.js';
 export * from './apps/window.js';
+export * from './apps/tray.js';

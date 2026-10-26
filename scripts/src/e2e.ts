@@ -14,6 +14,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -294,15 +295,20 @@ async function main(): Promise<void> {
       'exit 0',
     ].join('\n'),
   };
-  // S3: a pretend Hyprland. hyprctl reports one fullscreen chat window and one 1920x1200 monitor
-  // with a 26 px bar, and records every dispatch; gtk-launch records the app it was asked to start.
+  // S3: a pretend Hyprland. hyprctl reports one fullscreen chat window, on the workspace it was
+  // last moved to, and one 1920x1200 monitor with a 26 px bar, and records every dispatch;
+  // gtk-launch records the app it was asked to start.
   writeFileSync(join(state, 'dispatches'), '');
   writeFileSync(join(state, 'launched'), '');
+  writeFileSync(join(state, 'ws'), '1');
   fakes.hyprctl = [
     'case "$1 $2" in',
-    `  "-j clients") echo '[{"address":"0xc4a7","class":"org.aios.home","floating":false,"pinned":false,"fullscreen":2,"monitor":0}]' ;;`,
-    `  "-j monitors") echo '[{"id":0,"width":1920,"height":1200,"x":0,"y":0,"scale":1,"transform":0,"focused":true,"reserved":[0,26,0,0]}]' ;;`,
-    '  dispatch*) printf "%s\\n" "$2" >> "$S/dispatches"; echo ok ;;',
+    `  "-j clients") echo "[{\\"address\\":\\"0xc4a7\\",\\"class\\":\\"org.aios.home\\",\\"floating\\":false,\\"pinned\\":false,\\"fullscreen\\":2,\\"monitor\\":0,\\"workspace\\":{\\"name\\":\\"$(cat "$S/ws")\\"}}]" ;;`,
+    `  "-j monitors") echo '[{"id":0,"width":1920,"height":1200,"x":0,"y":0,"scale":1,"transform":0,"focused":true,"reserved":[0,26,0,0],"activeWorkspace":{"id":1}}]' ;;`,
+    '  dispatch*)',
+    '    printf "%s\\n" "$2" >> "$S/dispatches"',
+    `    case "$2" in *'workspace = "special:aios"'*) echo special:aios > "$S/ws" ;; *'workspace = "'*) echo 1 > "$S/ws" ;; esac`,
+    '    echo ok ;;',
     '  *) exit 1 ;;',
     'esac',
   ].join('\n');
@@ -324,6 +330,9 @@ async function main(): Promise<void> {
   const hyprEmit = (line: string) => {
     for (const sock of hyprSockets) sock.write(`${line}\n`);
   };
+  // S3: a pretend bar on a private session bus. It owns the tray watcher name, notes the item
+  // that registers and whether it is showing, and clicks it the way the bar does (Activate).
+  const bar = await pretendBar(join(tmp, 'bus'));
   const dispatches = () => readFileSync(join(state, 'dispatches'), 'utf8').trim().split('\n').filter(Boolean);
   for (const [name, body] of Object.entries(fakes)) {
     writeFileSync(join(bin, name), `#!/bin/sh\nS="${state}"\n${body}\n`);
@@ -364,6 +373,7 @@ async function main(): Promise<void> {
         XDG_DATA_DIRS: join(tmp, 'share'),
         XDG_RUNTIME_DIR: join(tmp, 'run'),
         HYPRLAND_INSTANCE_SIGNATURE: 'e2e',
+        ...(bar ? { DBUS_SESSION_BUS_ADDRESS: bar.address } : {}),
         XDG_CURRENT_DESKTOP: 'Hyprland',
         HOME: tmp,
         NO_PROXY: '127.0.0.1,localhost',
@@ -492,38 +502,48 @@ async function main(): Promise<void> {
     check('status strip shows Wi-Fi off', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Wi-Fi off')));
     await shot(page, 's1-wifi-off');
 
-    // S3: apps. The chat lists installed apps, starts one, and steps aside as the orb until it closes.
+    // S3: apps. The chat lists installed apps, starts one, and steps aside, with a red circle in
+    // the bar's tray, until it closes.
+    check('the tray circle registers with the bar, not showing yet', bar ? await waitFor(async () => bar.item !== null && (await bar.status()) === 'Passive') : true, bar ? '' : 'skipped: no dbus-daemon');
     await input.fill('what apps do I have?');
     await input.press('Enter');
     check('the chat lists installed apps', await waitFor(async () => /Firefox \(id: firefox\): Browse the web/.test(await lastAssistant().innerText())));
     check('hidden apps are not listed', !(await lastAssistant().innerText()).includes('Hidden helper'));
     await input.fill('open firefox');
     await input.press('Enter');
-    const orb = page.getByTestId('orb');
+    const controls = page.getByTestId('window-controls');
+    const hideDispatch = 'hl.dsp.window.move({ workspace = "special:aios", follow = false, window = "address:0xc4a7" })';
+    const hides = () => dispatches().filter((d) => d === hideDispatch).length;
     check('"open firefox" starts it through gtk-launch', await waitFor(async () => fakeState('launched') === 'firefox.desktop'), fakeState('launched'));
-    check('the chat becomes the orb', await waitFor(async () => (await orb.count()) === 1));
-    check('Hyprland was asked to shrink, pin and place it', ['hl.dsp.window.pin({ action = "on", window = "address:0xc4a7" })', 'hl.dsp.window.move({ x = 932, y = 34, window = "address:0xc4a7" })'].every((d) => dispatches().includes(d)), dispatches().join(' | '));
-    await page.setViewportSize({ width: 56, height: 56 });
-    await shot(page, 's3-orb');
-    await page.setViewportSize({ width: 1280, height: 800 });
+    check('Hyprland was asked to hide the chat', await waitFor(async () => hides() === 1), dispatches().join(' | '));
+    if (bar) check('the red circle shows in the tray', await waitFor(async () => (await bar.status()) === 'Active'));
     // Firefox's window opens; a window the user opens themselves doesn't count.
     hyprEmit('openwindow>>f1,1,firefox,Mozilla Firefox');
     hyprEmit('openwindow>>k1,1,kitty,Terminal');
-    await orb.click();
-    check('clicking the orb brings the chat back at half screen', await waitFor(async () => (await page.getByTestId('window-controls').count()) === 1 && (await chat.innerText()).includes('Firefox is open.')));
-    check('Hyprland was asked for the right half, with focus', ['hl.dsp.window.resize({ x = 942, y = 1150, window = "address:0xc4a7" })', 'hl.dsp.focus({ window = "address:0xc4a7" })'].every((d) => dispatches().includes(d)));
-    await shot(page, 's3-half');
-    await page.keyboard.press('Escape');
-    check('Esc at half screen goes back to the orb', await waitFor(async () => (await orb.count()) === 1));
-    await orb.click();
-    await page.getByTestId('window-orb').click();
-    check('"Back to the orb" does too', await waitFor(async () => (await orb.count()) === 1));
+    if (bar) {
+      const clickTray = () => bar.click();
+      await clickTray();
+      check('clicking the circle brings the chat back at half screen', await waitFor(async () => (await controls.count()) === 1 && (await chat.innerText()).includes('Firefox is open.')));
+      check('Hyprland was asked for the right half on the workspace in view, with focus', ['hl.dsp.window.move({ workspace = "1", follow = false, window = "address:0xc4a7" })', 'hl.dsp.window.resize({ x = 942, y = 1150, window = "address:0xc4a7" })', 'hl.dsp.focus({ window = "address:0xc4a7" })'].every((d) => dispatches().includes(d)), dispatches().join(' | '));
+      await shot(page, 's3-half');
+      await clickTray();
+      check('clicking it again hides the chat', await waitFor(async () => (await controls.count()) === 0 && hides() === 2));
+      await clickTray();
+      await waitFor(async () => (await controls.count()) === 1);
+      await page.keyboard.press('Escape');
+      check('Esc at half screen hides it', await waitFor(async () => (await controls.count()) === 0 && hides() === 3));
+      await clickTray();
+      await waitFor(async () => (await controls.count()) === 1);
+      await page.getByTestId('window-hide').click();
+      check('"Hide" does too', await waitFor(async () => (await controls.count()) === 0 && hides() === 4));
+      check('the circle stays while Firefox is open', (await bar.status()) === 'Active');
+    }
     hyprEmit('closewindow>>k1');
     await sleep(500);
-    check("closing the user's own window changes nothing", (await orb.count()) === 1);
+    check("closing the user's own window changes nothing", (await controls.count()) === 0 && !dispatches().at(-1)!.includes('fullscreen'));
     hyprEmit('closewindow>>f1');
-    check('closing Firefox brings the chat back full screen', await waitFor(async () => (await orb.count()) === 0 && (await page.getByTestId('window-controls').count()) === 0 && (await input.count()) === 1));
-    check('Hyprland was asked for fullscreen', dispatches().at(-2) === 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "address:0xc4a7" })', dispatches().at(-2));
+    check('closing Firefox brings the chat back full screen', await waitFor(async () => dispatches().at(-2) === 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "address:0xc4a7" })' && (await input.count()) === 1), dispatches().at(-2));
+    if (bar) check('and the circle goes away', await waitFor(async () => (await bar.status()) === 'Passive'));
     await shot(page, 's3-back');
     // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
     if (await mailStackUp()) {
@@ -625,10 +645,58 @@ async function main(): Promise<void> {
     await stopCore();
     mock.close();
     hyprEvents.close();
+    bar?.stop();
   }
   if (failures) console.log(`\n--- aios-core output ---\n${coreLog}`);
   console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
   process.exit(failures ? 1 : 0);
+}
+
+interface PretendBar {
+  address: string;
+  /** The tray item's bus name once it registered. */
+  item: string | null;
+  status(): Promise<string>;
+  click(): Promise<void>;
+  stop(): void;
+}
+
+/** A private dbus-daemon and a pretend Omarchy bar holding the tray watcher name; null without dbus-daemon. */
+async function pretendBar(socket: string): Promise<PretendBar | null> {
+  const address = `unix:path=${socket}`;
+  const daemon = spawn('dbus-daemon', ['--session', '--nofork', `--address=${address}`, '--print-address'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const up = await new Promise<boolean>((r) => {
+    daemon.once('error', () => r(false));
+    daemon.stdout!.once('data', () => r(true));
+  });
+  if (!up) return null;
+  // any: dbus-native comes untyped through @aios/core, which owns the dependency; only this pretend bar uses it here.
+  const dbus = createRequire(join(root, 'packages', 'core', 'package.json'))('@homebridge/dbus-native') as any;
+  const bus = dbus.sessionBus({ busAddress: address });
+  await new Promise<void>((r) => bus.requestName('org.kde.StatusNotifierWatcher', 4, () => r()));
+  const bar: PretendBar = {
+    address,
+    item: null,
+    status: () =>
+      new Promise((resolve) =>
+        bus.invoke(
+          { destination: bar.item, path: '/StatusNotifierItem', interface: 'org.freedesktop.DBus.Properties', member: 'Get', signature: 'ss', body: ['org.kde.StatusNotifierItem', 'Status'] },
+          (err: unknown, v: [unknown, string[]]) => resolve(err ? 'error' : String(v[1][0])),
+        ),
+      ),
+    click: () => new Promise((resolve) => bus.invoke({ destination: bar.item, path: '/StatusNotifierItem', interface: 'org.kde.StatusNotifierItem', member: 'Activate', signature: 'ii', body: [960, 13] }, () => resolve())),
+    stop: () => {
+      bus.connection.end();
+      daemon.kill();
+    },
+  };
+  bus.exportInterface({ RegisterStatusNotifierItem: (name: string) => void (bar.item = name) }, '/StatusNotifierWatcher', {
+    name: 'org.kde.StatusNotifierWatcher',
+    methods: { RegisterStatusNotifierItem: ['s', ''] },
+    properties: {},
+    signals: {},
+  });
+  return bar;
 }
 
 main().catch((err: unknown) => {

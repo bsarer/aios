@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { Message, type MessageActions } from './components/Message';
-import { Orb } from './components/Orb';
 import { StatusStrip } from './components/StatusStrip';
 import { applyTheme } from './theme';
 import { useChat } from './useChat';
@@ -42,33 +41,24 @@ export function App() {
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [state.items, state.window]);
 
-  // S3: how many items there were when the chat became the orb, so the orb can say something new came in.
-  const [seen, setSeen] = useState(0);
-  const itemCount = state.items.length;
   const mode = state.window;
-  useEffect(() => {
-    if (mode === 'orb') setSeen(itemCount);
-    // Only on entering the orb (itemCount is left out on purpose): what comes after is what it reports.
-  }, [mode]);
-  // Esc at half screen puts the chat back to the orb, unless it is stopping a reply (Composer).
+  // Esc at half screen hides the chat again, unless it is stopping a reply (Composer).
   useEffect(() => {
     if (mode !== 'half') return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && !working) send({ type: 'window', mode: 'orb' });
+      if (e.key === 'Escape' && !e.defaultPrevented && !working) send({ type: 'window', mode: 'hidden' });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mode, working, send]);
-
-  if (mode === 'orb') return <Orb working={working} unseen={itemCount > seen} onOpen={() => send({ type: 'window', mode: 'half' })} />;
 
   return (
     <div className="flex h-full flex-col">
       <StatusStrip status={state.status} conn={conn} />
       {mode === 'half' && (
         <div className="mx-auto mt-2 flex gap-2" data-testid="window-controls">
-          <button type="button" data-testid="window-orb" className="glass rounded-lg px-3 py-1 text-[14px]" onClick={() => send({ type: 'window', mode: 'orb' })}>
-            Back to the orb
+          <button type="button" data-testid="window-hide" className="glass rounded-lg px-3 py-1 text-[14px]" onClick={() => send({ type: 'window', mode: 'hidden' })}>
+            Hide
           </button>
           <button type="button" data-testid="window-full" className="glass rounded-lg px-3 py-1 text-[14px]" onClick={() => send({ type: 'window', mode: 'full' })}>
             Full screen

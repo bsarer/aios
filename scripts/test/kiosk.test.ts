@@ -6,9 +6,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { REQUIRE_LINE, addRequire, hyprlandModule, installKiosk, kioskPaths, launcherScript, removeRequire, uninstallKiosk, unitFile } from '../src/kiosk.js';
+import { REQUIRE_LINE, addRequire, hyprlandModule, installKiosk, kioskPaths, launcherScript, pinTrayIcon, removeRequire, trayIconPinned, uninstallKiosk, unitFile } from '../src/kiosk.js';
 
 const has = (cmd: string) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
 
@@ -23,9 +23,25 @@ require("hypr.bindings")
 -- o.window("qemu", { workspace = "5" })
 `;
 
+/** Shaped like Omarchy 4's config/omarchy/shell.json (October 2026), trimmed. */
+const OMARCHY_SHELL_JSON = {
+  version: 1,
+  bar: {
+    position: 'top',
+    layout: {
+      left: [{ id: 'omarchy.menu' }, { id: 'omarchy.workspaces' }],
+      center: [{ id: 'omarchy.clock', format: 'dddd HH:mm' }],
+      right: [{ id: 'omarchy.tray' }, { id: 'omarchy.network' }, { id: 'omarchy.power' }],
+    },
+  },
+  idle: { lock: 300 },
+  plugins: [],
+};
+
 function home(withLua = true) {
   const dir = mkdtempSync(join(tmpdir(), 'aios-kiosk-'));
-  const env = { HOME: dir };
+  // OMARCHY_PATH points inside the test dir, so no real Omarchy install is read.
+  const env = { HOME: dir, OMARCHY_PATH: join(dir, 'omarchy') };
   const p = kioskPaths(env);
   mkdirSync(p.hyprDir, { recursive: true });
   if (withLua) writeFileSync(p.hyprlandLua, OMARCHY_HYPRLAND_LUA);
@@ -34,7 +50,7 @@ function home(withLua = true) {
   return { dir, p, calls, run };
 }
 
-const opts = { node: process.execPath, coreDir: '/opt/aios/packages/core', port: 7777, autostart: true, hyprland: true };
+const opts = { node: process.execPath, coreDir: '/opt/aios/packages/core', port: 7777, autostart: true, hyprland: true, pinTray: true };
 
 describe('install and uninstall', () => {
   it('installs the service, launcher and Hyprland module, adds one line, and is idempotent', async () => {
@@ -207,5 +223,53 @@ describe.skipIf(!has('systemd-analyze'))('systemd unit', () => {
     const r = spawnSync('systemd-analyze', ['--user', 'verify', '--man=no', unit], { env: { ...process.env, XDG_RUNTIME_DIR: dir }, encoding: 'utf8' });
     const ours = `${r.stdout}${r.stderr}`.split('\n').filter((l) => l.includes('aios-core'));
     expect(ours).toEqual([]);
+  });
+});
+
+describe("the tray circle pinned in Omarchy's bar", () => {
+  it('adds the AI OS id to the tray entry and keeps everything else', () => {
+    const pinned = pinTrayIcon(OMARCHY_SHELL_JSON, true)!;
+    expect(pinned).toEqual({ ...OMARCHY_SHELL_JSON, bar: { ...OMARCHY_SHELL_JSON.bar, layout: { ...OMARCHY_SHELL_JSON.bar.layout, right: [{ id: 'omarchy.tray', pinned: ['aios'] }, { id: 'omarchy.network' }, { id: 'omarchy.power' }] } } });
+    expect(trayIconPinned(pinned)).toBe(true);
+    expect(pinTrayIcon(pinned, true)).toBeNull();
+    expect(pinTrayIcon(pinned, false)).toEqual({ ...OMARCHY_SHELL_JSON, bar: { ...OMARCHY_SHELL_JSON.bar, layout: { ...OMARCHY_SHELL_JSON.bar.layout, right: [{ id: 'omarchy.tray', pinned: [] }, { id: 'omarchy.network' }, { id: 'omarchy.power' }] } } });
+  });
+
+  it("keeps the user's own pins, takes a bare tray id, and leaves odd files alone", () => {
+    const own = { version: 1, bar: { layout: { right: [{ id: 'omarchy.tray', pinned: ['nm-applet'], hidden: ['steam'] }] } } };
+    expect(pinTrayIcon(own, true)).toEqual({ version: 1, bar: { layout: { right: [{ id: 'omarchy.tray', pinned: ['nm-applet', 'aios'], hidden: ['steam'] }] } } });
+    expect(pinTrayIcon({ version: 1, bar: { layout: { right: ['omarchy.tray'] } } }, true)).toEqual({ version: 1, bar: { layout: { right: [{ id: 'omarchy.tray', pinned: ['aios'] }] } } });
+    for (const odd of [undefined, 'text', [], { version: 2, bar: { layout: {} } }, { bar: { layout: { right: [{ id: 'omarchy.clock' }] } } }]) expect(pinTrayIcon(odd, true)).toBeNull();
+  });
+
+  it("install pins it in the user's shell.json with a backup, once; uninstall unpins it", async () => {
+    const h = home();
+    mkdirSync(dirname(h.p.shellJson), { recursive: true });
+    const original = `${JSON.stringify(OMARCHY_SHELL_JSON, null, 2)}\n`;
+    writeFileSync(h.p.shellJson, original);
+    const first = await installKiosk(h.p, opts, h.run);
+    expect(first.written).toContain(h.p.shellJson);
+    expect(readFileSync(`${h.p.shellJson}.aios-backup`, 'utf8')).toBe(original);
+    expect(trayIconPinned(JSON.parse(readFileSync(h.p.shellJson, 'utf8')))).toBe(true);
+    expect((await installKiosk(h.p, opts, h.run)).written).toEqual([]);
+    const removed = await uninstallKiosk(h.p, h.run);
+    expect(removed).toContain(`AI OS circle pinned in ${h.p.shellJson}`);
+    expect(trayIconPinned(JSON.parse(readFileSync(h.p.shellJson, 'utf8')))).toBe(false);
+  });
+
+  it("starts the user's shell.json from Omarchy's defaults when there is none, and says so when there is no bar", async () => {
+    const h = home();
+    const defaults = h.p.shellDefaults[0]!;
+    expect(defaults).toBe(join(h.dir, 'omarchy', 'config', 'omarchy', 'shell.json'));
+    const none = await installKiosk(h.p, opts, h.run);
+    expect(none.notes.join('\n')).toMatch(/No Omarchy bar settings found; pin AI OS by hand/);
+    mkdirSync(dirname(defaults), { recursive: true });
+    writeFileSync(defaults, JSON.stringify(OMARCHY_SHELL_JSON));
+    expect((await installKiosk(h.p, { ...opts, pinTray: false }, h.run)).written).toEqual([]);
+    expect(existsSync(h.p.shellJson)).toBe(false);
+    const report = await installKiosk(h.p, opts, h.run);
+    expect(report.written).toEqual([h.p.shellJson]);
+    expect(JSON.parse(readFileSync(h.p.shellJson, 'utf8'))).toEqual(pinTrayIcon(OMARCHY_SHELL_JSON, true));
+    expect(JSON.parse(readFileSync(defaults, 'utf8'))).toEqual(OMARCHY_SHELL_JSON);
   });
 });

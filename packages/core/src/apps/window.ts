@@ -183,7 +183,12 @@ export class ChatWindow {
     const from = this.current;
     let error: string | undefined;
     try {
-      await this.move(mode);
+      if (!(await this.move(mode))) {
+        // Opened in a normal browser tab: nothing to move or bring back, so the chat stays as it is.
+        this.o.audit.append({ kind: 'window', from, to: mode, reason, ...(app ? { app } : {}), ok: false, error: 'no chat window' });
+        this.o.notice('warning', "I couldn't step aside: the chat isn't open in its own window. Press SUPER + SHIFT + H to open it that way.");
+        return;
+      }
     } catch (err) {
       error = (err as Error).message.slice(0, 300);
     }
@@ -195,15 +200,16 @@ export class ChatWindow {
     if (error) this.o.notice('warning', `I couldn't move the chat window: ${error}`);
   }
 
-  private async move(mode: WindowMode): Promise<void> {
+  /** False when the chat has no window of its own to move. */
+  private async move(mode: WindowMode): Promise<boolean> {
     const hypr = this.o.hypr!;
     const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
     const win = clients.find((c) => CHAT_CLASS.test(c.class));
-    // Opened in a normal browser (development): nothing to move.
-    if (!win) return;
+    if (!win) return false;
     // The monitor the user is on: a hidden chat comes back where they are looking.
     const mon = monitors.find((m) => m.focused) ?? monitors.find((m) => m.id === win.monitor) ?? monitors[0];
     if (!mon) throw new Error('Hyprland reports no monitor');
     for (const expr of dispatchesFor(mode, win, mon)) await hypr.dispatch(expr);
+    return true;
   }
 }

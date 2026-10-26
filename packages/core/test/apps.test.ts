@@ -366,6 +366,21 @@ describe('chat window', () => {
     expect(log()[0]).toMatchObject({ ok: false, error: 'Hyprland refused hl.dsp.window.move: nope' });
   });
 
+  it('stays full screen and says why when the chat is in a normal browser tab', async () => {
+    const hypr = new FakeHypr();
+    hypr.win = chat({ class: 'chromium' });
+    const { w, modes, tray, notices, log, settle } = windowRig(hypr);
+    await w.appStarting('Chromium');
+    hypr.emit({ name: 'openwindow', address: '0x7', className: 'chromium' });
+    await w.trayClicked();
+    hypr.emit({ name: 'closewindow', address: '0x7' });
+    await settle();
+    expect(w.mode).toBe('full');
+    expect([modes, tray, hypr.dispatched]).toEqual([[], [], []]);
+    expect(notices).toEqual(["I couldn't step aside: the chat isn't open in its own window. Press SUPER + SHIFT + H to open it that way."]);
+    expect(log()).toEqual([expect.objectContaining({ to: 'hidden', reason: 'app_started', ok: false, error: 'no chat window' })]);
+  });
+
   it('stays full screen outside Hyprland, where nothing can move', async () => {
     const { w, modes, tray } = windowRig(null);
     await w.appStarting('Firefox');

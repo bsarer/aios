@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { findSpecial, parseMailId, walkStructure } from '../src/mail/imap.js';
 import { MailPipeline, headline, inQuietHours } from '../src/mail/pipeline.js';
 import { MailState, type NewMail } from '../src/mail/state.js';
-import { mailTools } from '../src/mail/tools.js';
+import { mailTools, recentMailTool } from '../src/mail/tools.js';
 import { triageRequest } from '../src/mail/triage.js';
 import { type MailSource, MailWatcher, type WatcherStatus } from '../src/mail/watcher.js';
 import { describeMailError } from '../src/mail/errors.js';
@@ -257,6 +257,25 @@ describe('triage pipeline', () => {
     expect(model.requests).toHaveLength(1);
     expect(notes()[0]!.text).toBe('3 new emails.');
     expect(notes()[0]!.mails).toHaveLength(3);
+  });
+
+  it('mail_recent finds notified mail by its priority, newest first, as untrusted text', async () => {
+    const { arrive, notes, state, advance } = pipelineSetup({ urgency: (id) => (id === 'INBOX:2' ? 'low' : 'normal') });
+    arrive(2);
+    await until(() => notes().length === 1);
+    advance(1000);
+    arrive(1); // still pending triage: not listed yet
+    const tool = recentMailTool(state);
+    expect(tool.def.tier).toBe('read');
+    expect(tool.untrustedOutput).toBe(true);
+    const out = (await tool.handler({}, { signal: new AbortController().signal, untrustedInContext: false, userText: '' })) as string;
+    expect(out).toMatch(/^2 email\(s\) from recent notifications, newest first/);
+    expect(out.indexOf('id: INBOX:2')).toBeLessThan(out.indexOf('id: INBOX:1'));
+    expect(out).toContain('id: INBOX:2\n<untrusted source="email" id="INBOX:2">\nFrom: Sender 1 <s1@x.example>\nSubject: Subject 1');
+    expect(out).toMatch(/id="INBOX:2">[^]*Priority: low\nCategory: work[^]*Summary: summary of INBOX:2\n<\/untrusted>/);
+    expect(out).not.toContain('INBOX:3');
+    state.markIgnored('INBOX:1');
+    expect(await tool.handler({ limit: 1 }, { signal: new AbortController().signal, untrustedInContext: false, userText: '' })).not.toContain('INBOX:1');
   });
 
   it('never gives the triage worker tools', async () => {

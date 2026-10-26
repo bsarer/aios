@@ -250,8 +250,10 @@ function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: '
       <div className="font-medium">{item.text}</div>
       {main.length > 0 && <ul className="mt-1">{main.map(row)}</ul>}
       {low.length > 0 && (
-        <div data-testid="mail-digest" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
-          Low priority: {low.map((r) => `${r.from.replace(/\s*<[^>]*>$/, '')} (${r.subject})`).join(', ')}
+        // Low priority mail keeps its buttons, so each one can still be read, answered or opened.
+        <div data-testid="mail-digest" className="mt-2 text-sm">
+          <div style={{ color: 'var(--muted)' }}>Low priority</div>
+          <ul>{low.map(row)}</ul>
         </div>
       )}
     </div>

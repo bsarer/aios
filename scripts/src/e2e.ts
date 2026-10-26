@@ -6,7 +6,7 @@
  * throwaway config, data dir and fake keyring, then drives Chromium through the
  * acceptance checks: streaming chat, the now() tool, Esc to stop, slash commands,
  * live status values, memory cards and, with the GreenMail stack up, new-mail
- * notifications and the reply flow. Never touches real accounts or keys.
+ * notifications, the reply flow and opening attachments. Never touches real accounts or keys.
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { connect as netConnect } from 'node:net';
 import { ImapFlow } from 'imapflow';
 import { type Page, chromium } from 'playwright-core';
+import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
+import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -51,6 +53,24 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     res.end('data: [DONE]\n\n');
   };
 
+  // S2: attachments. Show posts a card; read answers with a line of the attachment's text.
+  const attachmentCall = last.role === 'user' ? /^(open|what does) attachment (\d+) of email (\S+)(?: say)?$/i.exec(lastUser) : null;
+  if (attachmentCall) {
+    const name = attachmentCall[1]!.toLowerCase() === 'open' ? 'mail_attachment_show' : 'mail_attachment_read';
+    const args = JSON.stringify({ id: attachmentCall[3], attachment: Number(attachmentCall[2]) });
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_a', function: { name, arguments: args } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /^A card for attachment/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'It is on the card; click Open.' } }] });
+    return finish(0.0004);
+  }
+  if (last.role === 'tool' && /<untrusted source="email"[^>]*>\nAttachment: /.test(last.content ?? '')) {
+    const line = (last.content ?? '').split('\n').find((l) => /Lakeside/.test(l)) ?? 'nothing I recognise';
+    chunk(res, { choices: [{ delta: { content: `The attachment says: ${line}` } }] });
+    return finish(0.0004);
+  }
   if (last.role === 'tool' && /<untrusted source="email"/.test(last.content ?? '')) {
     const subject = /Subject: (.*)/.exec(last.content ?? '')?.[1] ?? '?';
     const replyTo = /^Draft a reply to email (\S+)$/.exec(lastUser)?.[1];
@@ -137,6 +157,38 @@ async function deliverTestMail(subject: string): Promise<void> {
   await c.connect();
   await c.append('INBOX', `From: Sara Kaya <sara.kaya@northwind.example>\r\nTo: ${TEST_MAILBOX.user}\r\nSubject: ${subject}\r\nMessage-ID: <e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@aios.test>\r\nDate: ${new Date().toUTCString()}\r\n\r\nPlease look at this today.`);
   await c.logout();
+}
+
+const PNG_2PX = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8DAwPAfhP7//w8AH+4F+3uLQwgAAAAASUVORK5CYII=';
+
+/** A message with a PDF, a picture and a text file; returns its mail id (INBOX:<uid>). */
+async function deliverAttachmentMail(subject: string): Promise<string> {
+  const mail: FixtureMail = {
+    key: `e2e-att-${Date.now()}`,
+    folder: 'INBOX',
+    from: { name: 'Lena Fischer', address: 'lena@eventspace.example' },
+    to: [john],
+    subject,
+    daysAgo: 0,
+    seen: false,
+    text: 'Venue list, a photo and my notes are attached.',
+    attachments: [
+      { filename: 'venues.pdf', contentType: 'application/pdf', content: makePdf(['Offsite venues', '1. Lakeside Lodge: 2,900 EUR']) },
+      { filename: 'room.png', contentType: 'image/png', content: PNG_2PX, encoding: 'base64' },
+      { filename: 'notes.txt', contentType: 'text/plain', content: 'Bring the projector.\nLunch at 12:30.' },
+    ],
+  };
+  const { raw } = await composeFixture(mail, new Map(), new Date());
+  const c = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });
+  await c.connect();
+  try {
+    await c.append('INBOX', raw);
+    await c.mailboxOpen('INBOX', { readOnly: true });
+    const uids = (await c.search({ subject }, { uid: true })) || [];
+    return `INBOX:${uids.at(-1)}`;
+  } finally {
+    await c.logout();
+  }
 }
 
 /** Plain-text bodies of messages in Sent whose subject contains `subject`. */
@@ -415,6 +467,38 @@ async function main(): Promise<void> {
       check('Discard marks the card discarded', await waitFor(async () => (await second.getAttribute('data-state')) === 'discarded'));
       await sleep(1000);
       check('Discard sent nothing', (await sentMatching(`E2E urgent ${stamp}`)).length === 1);
+
+      // 10. Attachments (S2): a card per attachment, each opening in the viewer; the model reads the PDF's text.
+      const attId = await deliverAttachmentMail(`E2E attachments ${stamp}`);
+      const kinds = [
+        [1, 'pdf', 'PDF'],
+        [2, 'image', 'picture'],
+        [3, 'text', 'text file'],
+      ] as const;
+      for (const [n, kind, word] of kinds) {
+        await input.fill(`open attachment ${n} of email ${attId}`);
+        await input.press('Enter');
+        const card = page.locator('[data-kind="attachment"]').last();
+        check(`"open attachment" shows a card for the ${word}`, await waitFor(async () => (await page.locator('[data-kind="attachment"]').count()) === n, 15_000));
+        await card.getByTestId('attachment-open').click();
+        const viewer = page.getByTestId('attachment-viewer');
+        check(`Open shows the ${word} in the viewer`, await waitFor(async () => (await viewer.getAttribute('data-state')) === kind, 15_000), (await viewer.getAttribute('data-state')) ?? '');
+        if (kind === 'pdf') {
+          check('the PDF is drawn', await waitFor(async () => (await page.locator('[data-testid="attachment-pages"] canvas').count()) === 1, 15_000));
+          await sleep(500);
+          check('drawing it raised no error', (await viewer.getAttribute('data-state')) === 'pdf' && (await page.getByTestId('attachment-error').count()) === 0);
+          const box = await viewer.boundingBox();
+          check('the viewer fills the window', box !== null && box.x === 0 && box.y === 0 && box.width === page.viewportSize()!.width, JSON.stringify(box));
+        }
+        if (kind === 'image') check('the picture loads', await waitFor(async () => (await page.getByTestId('attachment-image').evaluate((img) => (img as unknown as { naturalWidth: number }).naturalWidth)) === 2));
+        if (kind === 'text') check('the text is shown as text', (await page.getByTestId('attachment-text').innerText()).includes('Lunch at 12:30.'));
+        await shot(page, `13-attachment-${kind}`);
+        await page.keyboard.press('Escape');
+        check('Esc closes the viewer', await waitFor(async () => (await viewer.count()) === 0));
+      }
+      await input.fill(`what does attachment 1 of email ${attId} say`);
+      await input.press('Enter');
+      check('the model reads the PDF text', await waitFor(async () => (await lastAssistant().innerText()).includes('Lakeside Lodge: 2,900 EUR'), 15_000));
     } else if (process.env.AIOS_REQUIRE_STACK === '1') {
       check('GreenMail test stack is reachable', false);
     } else {

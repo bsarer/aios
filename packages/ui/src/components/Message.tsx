@@ -1,6 +1,7 @@
 import type { ChatItem, MailRow } from '@aios/shared/protocol';
 import { useState } from 'react';
 import Markdown from 'react-markdown';
+import { AttachmentViewer } from './AttachmentViewer';
 
 /** react-markdown renders no raw HTML by default, which matters: replies can quote email text. */
 function MemoryCard({ item, onDecide }: { item: Extract<ChatItem, { kind: 'memory' }>; onDecide: (decision: 'save' | 'skip') => void }) {
@@ -189,6 +190,31 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
   );
 }
 
+type AttachmentItem = Extract<ChatItem, { kind: 'attachment' }>;
+
+const FILE_KIND_TEXT: Record<AttachmentItem['fileKind'], string> = { pdf: 'PDF', text: 'Text file', image: 'Picture' };
+
+/** An email attachment the user can open (S2). The name came from the email: plain text only. */
+function AttachmentCard({ item }: { item: AttachmentItem }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div data-kind="attachment" className="glass flex items-center gap-3 rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="min-w-0 flex-1">
+        <div data-testid="attachment-name" className="break-all">
+          {item.name}
+        </div>
+        <div className="text-sm" style={{ color: 'var(--muted)' }}>
+          {FILE_KIND_TEXT[item.fileKind]} from an email
+        </div>
+      </div>
+      <button type="button" data-testid="attachment-open" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(true)}>
+        Open
+      </button>
+      {open && <AttachmentViewer item={item} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
 const URGENCY_COLOR = { high: 'var(--danger)', normal: 'var(--accent)', low: 'var(--muted)' } as const;
 
 /** Mail-derived text (from, subject, summary) is rendered as plain text, never Markdown or HTML. */
@@ -276,5 +302,7 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <DraftCard item={item} actions={actions} />;
     case 'action':
       return <ActionCard item={item} actions={actions} />;
+    case 'attachment':
+      return <AttachmentCard item={item} />;
   }
 }

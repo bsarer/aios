@@ -6,6 +6,7 @@
 import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool } from '../tools/registry.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
+import { type AttachmentFiles, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_CHARS, declaredKind, extractPdfText, listAttachments, sizeText, sniff } from './attachments.js';
 import type { Address, FullMessage, MailClient, MessageSummary } from './imap.js';
 
 const who = (a: Address | null) => (a ? (a.name ? `${a.name} <${a.address}>` : a.address) : 'unknown');
@@ -23,10 +24,10 @@ function messageBlock(m: FullMessage, maxChars: number): string {
     ...(m.cc.length ? [`Cc: ${m.cc.map(who).join(', ')}`] : []),
     `Date: ${when(m.date)}`,
     `Subject: ${m.subject}`,
-    ...(m.attachments.length ? [`Attachments (names only): ${m.attachments.join(', ')}`] : []),
   ].join('\n');
+  const attachments = m.attachments.length ? `\n\nAttachments:\n${listAttachments(m.attachments)}` : '';
   const body = sanitize({ text: m.text || undefined, html: m.html ?? undefined }, { maxChars });
-  return wrapUntrusted('email', m.id, `${clean(head, 1500)}\n\n${body}`);
+  return wrapUntrusted('email', m.id, `${clean(head + attachments, 3000)}\n\n${body}`);
 }
 
 export function mailTools(mail: Pick<MailClient, 'search' | 'read' | 'thread'>): RegisteredTool[] {
@@ -63,6 +64,61 @@ export function mailTools(mail: Pick<MailClient, 'search' | 'read' | 'thread'>):
         const msgs = await mail.thread(id);
         if (!msgs.length) return `Error: no message with id ${id}.`;
         return `${msgs.length} message(s), oldest first.\n\n${msgs.map((m) => `id: ${m.id}\n${messageBlock(m, 1500)}`).join('\n\n')}`;
+      },
+    },
+  ];
+}
+
+/**
+ * Attachments (S2). mail_attachment_read hands the model a PDF's or text file's text, as
+ * untrusted email content; mail_attachment_show only posts a card the user can open, so its
+ * result carries no email text at all.
+ */
+export function attachmentTools(o: { mail: Pick<MailClient, 'read' | 'attachment'>; files: Pick<AttachmentFiles, 'show'> }): RegisteredTool[] {
+  return [
+    {
+      def: toolByName('mail_attachment_read')!,
+      label: 'Reading the attachment…',
+      untrustedOutput: true,
+      async handler(args, ctx) {
+        const { id, attachment: n } = args as { id: string; attachment: number };
+        const got = await o.mail.attachment(id, n, MAX_ATTACHMENT_BYTES);
+        if (!got) return `Error: message ${id} has no attachment ${n}. mail_read lists its attachments.`;
+        if (got.bytes === 'too_large') return `Error: attachment ${n} is larger than ${sizeText(MAX_ATTACHMENT_BYTES)}, too large to read.`;
+        const s = sniff(got.bytes, declaredKind(got.info));
+        if (!s) return `Error: attachment ${n} is not a PDF, text file or image, so it can't be opened.`;
+        const audit = { fileKind: s.kind, bytes: got.bytes.length };
+        if (s.kind === 'image') {
+          return { content: `Attachment ${n} of ${id} is an image. You cannot see images; call mail_attachment_show so the user can open it.`, audit };
+        }
+        let text: string;
+        let note = '';
+        if (s.kind === 'pdf') {
+          const pdf = await extractPdfText(got.bytes, { signal: ctx.signal });
+          if (!pdf.text.trim()) {
+            return { content: `Attachment ${n} of ${id} is a PDF with no text to read (it may be scanned pages). Call mail_attachment_show so the user can open it.`, audit };
+          }
+          text = pdf.text;
+          if (pdf.readPages < pdf.pages) note = ` Only the first ${pdf.readPages} of ${pdf.pages} pages were read.`;
+        } else {
+          text = got.bytes.toString('utf8');
+        }
+        const body = clean(`Attachment: ${got.info.name}\n\n${text}`, MAX_ATTACHMENT_CHARS);
+        return { content: `id: ${id}, attachment ${n}.${note}\n${wrapUntrusted('email', id, body)}`, audit };
+      },
+    },
+    {
+      def: toolByName('mail_attachment_show')!,
+      label: 'Getting the attachment…',
+      async handler(args) {
+        const { id, attachment: n } = args as { id: string; attachment: number };
+        const m = await o.mail.read(id);
+        if (!m) return `Error: no message with id ${id}.`;
+        const info = m.attachments[n - 1];
+        if (!info) return `Error: message ${id} has no attachment ${n}. mail_read lists its attachments.`;
+        const card = o.files.show(id, n, info);
+        if (!card) return `Error: attachment ${n} is not a PDF, text file or image, so it can't be opened here.`;
+        return { content: `A card for attachment ${n} is in the chat; the user opens it with its Open button.`, audit: { fileKind: card.fileKind, itemId: card.id } };
       },
     },
   ];

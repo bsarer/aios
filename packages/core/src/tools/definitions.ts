@@ -31,7 +31,7 @@ export const ALPHA_TOOLS = [
   def({
     name: 'mail_read',
     tier: 'read',
-    description: 'Read one message: headers, plain-text body and attachment names.',
+    description: 'Read one message: headers, plain-text body and a numbered list of its attachments.',
     input: z.strictObject({ id: z.string() }),
   }),
   def({
@@ -39,6 +39,24 @@ export const ALPHA_TOOLS = [
     tier: 'read',
     description: 'Read the whole thread a message belongs to.',
     input: z.strictObject({ id: z.string() }),
+  }),
+  def({
+    name: 'mail_attachment_read',
+    tier: 'read',
+    description: 'Read the text of one attachment of a message (a PDF or text file), numbered as mail_read lists them. Images cannot be read.',
+    input: z.strictObject({
+      id: z.string().describe('Message id, e.g. INBOX:37'),
+      attachment: z.int().min(1).max(50).describe('Attachment number from mail_read, starting at 1'),
+    }),
+  }),
+  def({
+    name: 'mail_attachment_show',
+    tier: 'read',
+    description: 'Show one attachment of a message (a PDF, text file or image) to the user as a card with an Open button, so they can look at it. Use when the user wants to open, see or view an attachment.',
+    input: z.strictObject({
+      id: z.string().describe('Message id, e.g. INBOX:37'),
+      attachment: z.int().min(1).max(50).describe('Attachment number from mail_read, starting at 1'),
+    }),
   }),
   def({
     name: 'mail_create_draft',

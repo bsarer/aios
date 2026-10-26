@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { type Socket, connect as tcpConnect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApprovalBroker, AuditLog, ImapMailSource, ImapSmtpOutbox, MailClient, MailState, MailWatcher, Store, type WatcherStatus } from '@aios/core';
+import { ApprovalBroker, AuditLog, ImapMailSource, ImapSmtpOutbox, MAX_ATTACHMENT_BYTES, MailClient, MailState, MailWatcher, Store, type WatcherStatus, extractPdfText, sniff } from '@aios/core';
 import type { ChatItem } from '@aios/shared';
 import { ImapFlow } from 'imapflow';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -80,10 +80,18 @@ describe.skipIf(!reachable)('mail on the GreenMail test stack', () => {
     expect(new Set(thread.map((m) => m.subject.replace(/^Re: /, '')))).toEqual(new Set(['Q4 budget review']));
   });
 
-  it('reads attachment names but not their content', async () => {
+  it('lists attachments, and fetches one decoded, by its number (S2)', async () => {
     const [msg] = await client.search('lesson', { limit: 1 });
     const full = await client.read(msg!.id);
-    expect(full?.attachments).toContain('swim.png');
+    expect(full?.attachments.map((a) => a.name)).toContain('swim.png');
+    const venues = (await client.search('Offsite venue options', { limit: 10 })).find((m) => m.subject === 'Offsite venue options for November');
+    const got = await client.attachment(venues!.id, 1, MAX_ATTACHMENT_BYTES);
+    expect(got?.info.name).toBe('venues.pdf');
+    expect(got?.bytes).toBeInstanceOf(Buffer);
+    expect(sniff(got!.bytes as Buffer, 'pdf')?.kind).toBe('pdf');
+    expect((await extractPdfText(got!.bytes as Buffer)).text).toContain('Lakeside Lodge');
+    expect(await client.attachment(venues!.id, 2, MAX_ATTACHMENT_BYTES)).toBeNull();
+    expect((await client.attachment(venues!.id, 1, 100))?.bytes).toBe('too_large');
   });
 
   it('notices new mail within seconds and survives dropped connections with no duplicates or losses', async () => {

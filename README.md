@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk) and A7 (hardening) are merged. S1 (system controls) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening) and S1 (system controls) are merged. S2 (email attachments) is in review.
 
 ## Mail
 
@@ -14,6 +14,8 @@ A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claud
 - **Holding mail back:** while paused, during `[notifications] quietHours`, or over `maxPerHour` (default 6), mail is held and posted later as one "While you were away" catch-up. When the model is down, it retries every minute. After 5 failed attempts the mail is posted with a plain summary instead of being dropped.
 - **Replying:** "reply to Sara saying Thursday works" (or **Draft reply** on a notification) saves a draft to your Drafts folder and shows it as a card with **Send**, **Edit** and **Discard**. Nothing is sent until you click Send. The click carries a hash of exactly what the card shows, and only that text is sent, once, over SMTP. Editing gives the draft a new hash, so an earlier approval no longer matches. Discard deletes the draft and sends nothing. After sending, a copy goes to Sent (set `[mail] saveSentCopy = false` for servers that file sent mail themselves, such as Gmail).
 - **No sending without you:** the model cannot send. Its `mail_send_draft` calls are refused in code and logged, and while email text is in its context it is not even offered write-tier tools. A draft whose recipient came from neither your message nor the email being answered is flagged on its card. If the app stops mid-send, the draft is marked "check your Sent folder" and is never resent on its own.
+- **Attachments:** "open the PDF from Lena" shows a card with **Open**, which shows the file full screen in the chat (Esc or **Close** goes back). PDFs, text files (`.txt`, `.csv`, `.md`) and pictures (PNG, JPEG, GIF, WebP) open, up to 25 MB each. Questions like "what does the contract say?" are answered from a PDF's or text file's text, which reaches the model the same way as an email body: sanitized, wrapped in `<untrusted>` tags and hidden again from your next message on. The model never sees pictures.
+- **What a file really is** is decided by its first bytes, not its name: an SVG or web page named `photo.png` is refused, and so is anything else. PDFs are drawn as plain pictures of their pages, so nothing in them can be clicked or run. Files are served only to this chat (a random id per card, `127.0.0.1` only, a sandboxing content policy, no other site can embed them), and every open is audited. Scanned PDFs have no text to read: open them to look.
 - **Chat context:** new-mail summaries are not added to the model's chat context. They come from email, and would put untrusted text in front of every turn. The model looks mail up with the tools instead.
 
 ## Desktop (kiosk)
@@ -71,13 +73,13 @@ Needs Omarchy 4. Ask in your own words: "volume to 30", "mute", "brighter", "nig
 
 ## Testing
 
-- `pnpm test` runs every unit test, and `pnpm test:injection` runs only the prompt-injection suite. That suite feeds each of the seven hostile test emails to a model that obeys them, through the real tools, approval brokers and memory. It checks that nothing is sent, no app opens, no memory or config file changes, no system command starts (one email asks to mute the computer and turn off Wi-Fi), and every write- and device-tier call is refused and logged. It also covers the system controls' limits, rate limit, pause and action cards.
+- `pnpm test` runs every unit test, and `pnpm test:injection` runs only the prompt-injection suite. That suite feeds each of the eight hostile test emails to a model that obeys them, through the real tools, approval brokers and memory. It checks that nothing is sent, no app opens, no memory or config file changes, no system command starts (one email asks to mute the computer and turn off Wi-Fi; another hides its instructions in a PDF and a text attachment), and every write- and device-tier call is refused and logged. It also covers the system controls' limits, rate limit, pause and action cards.
 - CI (`.github/workflows/ci.yml`) runs the typecheck, the injection suite and the unit tests on every PR and push to main. A second job starts GreenMail and runs the mail integration tests and the browser end-to-end check. CI never uses a real account or key.
 - **Real test account:** for trying AI OS against a real mail server and model, use a dedicated throwaway mailbox, never your own.
   1. Create the mailbox (for example a new Gmail or Fastmail account), turn on two-step sign-in, and create an app password for it.
   2. Run `pnpm run setup`, answer no to the local test mailbox, and pick the provider. The app password goes straight into the keyring.
   3. Run `pnpm check:account`. It logs in over IMAP, finds Drafts and Sent, and checks the SMTP login, all without sending or changing anything.
-  4. Optional: `pnpm check:account --seed-hostile` asks first, then adds the seven hostile test emails to that INBOX, so you can check that the real model ignores them too.
+  4. Optional: `pnpm check:account --seed-hostile` asks first, then adds the eight hostile test emails to that INBOX, so you can check that the real model ignores them too.
   5. Switch back to your own mailbox with `pnpm run setup` when you're done.
 
 ## Memory
@@ -94,12 +96,12 @@ Each chat request fits a token budget (`[memory] contextTokens`, default 8000): 
 
 ## Quick start
 
-Needs Node 22+, pnpm 10, Docker with compose, and `secret-tool` (libsecret) for `setup`.
+Needs Node 22.13+, pnpm 10, Docker with compose, and `secret-tool` (libsecret) for `setup`.
 
 ```sh
 pnpm install
 pnpm test                 # unit tests
-pnpm test:injection       # only the prompt-injection suite (seven hostile emails)
+pnpm test:injection       # only the prompt-injection suite (eight hostile emails)
 pnpm typecheck            # strict TypeScript
 pnpm test:stack:up        # start GreenMail on 127.0.0.1 and seed 40 fixture emails
 pnpm test:stack:check     # list the mailbox over IMAP
@@ -120,9 +122,9 @@ IMAP `127.0.0.1:3143`, SMTP `127.0.0.1:3025`, no TLS, user `john@aios.test`, pas
 ```
 packages/shared   config schema (zod) and TOML parsing
 packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, memory, audit log, model adapter, keyring, tools, system controls
-packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip
+packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip, attachment viewer
 scripts           setup/uninstall CLI, mail seeder and checker, browser e2e check
-fixtures/mail.ts  41 sample emails: threads, attachments, 7 hostile samples
+fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 evals             model bake-off: tasks, runner, report
 ```
 
@@ -170,3 +172,9 @@ No new packages. CI uses three GitHub Actions, pinned to their current major ver
 | actions/checkout@v7 | check out the repo | MIT | GitHub, very active |
 | pnpm/action-setup@v6 | install pnpm at the version in `packageManager` | MIT | pnpm team, active |
 | actions/setup-node@v7 | install Node 22 and cache the pnpm store | MIT | GitHub, very active |
+
+## Dependencies added in S2
+
+| Package | Why | License | Maintenance |
+|---|---|---|---|
+| pdfjs-dist (core and ui) | Mozilla's PDF.js: reads a PDF attachment's text in core (in a worker thread with a memory cap and time limit) and draws its pages in the UI. Never runs scripts embedded in a PDF. Its optional native `@napi-rs/canvas` (only for drawing in Node) is turned off in `pnpm-workspace.yaml`. Needs Node 22.13+. | Apache-2.0 | very active (Mozilla, release every month or so) |

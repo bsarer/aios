@@ -13,12 +13,13 @@
  * Anything on the session bus can call Activate; all it does is show the chat.
  */
 import { createRequire } from 'node:module';
+import { TRAY_ITEM_ID } from '@aios/shared';
 
 const ITEM_PATH = '/StatusNotifierItem';
 const ITEM_IFACE = 'org.kde.StatusNotifierItem';
 const WATCHER = 'org.kde.StatusNotifierWatcher';
 const DBUS = 'org.freedesktop.DBus';
-export const TRAY_ID = 'aios';
+export const TRAY_ID = TRAY_ITEM_ID;
 
 /** The little of @homebridge/dbus-native used here; its own typings don't cover the session bus. */
 interface DbusBus {

@@ -12,3 +12,6 @@ export const CHAT_APP_CLASS = 'org.aios.home';
  * chrome-127.0.0.1__-Default instead of using --class, so match both.
  */
 export const CHAT_CLASS_PATTERN = '^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$';
+
+/** The tray icon's Id (StatusNotifierItem Id), which Omarchy's bar pins by. */
+export const TRAY_ITEM_ID = 'aios';

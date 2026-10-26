@@ -62,9 +62,10 @@ async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean): Promise<
   }
   if (!(await p.confirm('Run AI OS as a service that starts at login (systemd --user), with the full-screen chat?', true))) return;
   const hyprland = await p.confirm(`Add one line to ${paths.hyprlandLua} to load the kiosk window rule and keys? (a backup is kept)`, true);
+  const pinTray = await p.confirm(`Pin the AI OS circle in the bar's tray, so it shows on the bar while an app is open? (edits ${paths.shellJson}, a backup is kept)`, true);
   console.log('building the UI…');
   await run('pnpm', ['--filter', '@aios/ui', 'build']);
-  const report = await installKiosk(paths, { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland }, run);
+  const report = await installKiosk(paths, { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, pinTray }, run);
   for (const f of report.written) console.log(`wrote ${f}`);
   for (const n of report.notes) console.log(n);
   if (await p.confirm('Start (or restart) the service now? Stop any `pnpm start` first, they use the same port.', true)) {

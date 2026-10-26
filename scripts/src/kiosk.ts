@@ -7,13 +7,16 @@
  * (~/.config/hypr/hyprland.lua; user modules are require("hypr.<name>")). Checked
  * against Omarchy's quattro branch and Hyprland's Lua bindings, October 2026.
  *
+ * Also pins the chat's tray circle (S3) in Omarchy's bar, ~/.config/omarchy/shell.json.
+ *
  * Everything here is pure text or file edits on paths passed in, so it is testable
  * without a desktop. install/uninstall are idempotent and undo each other.
  */
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { CHAT_APP_CLASS, CHAT_CLASS_PATTERN } from '@aios/shared';
+import { CHAT_APP_CLASS, CHAT_CLASS_PATTERN, TRAY_ITEM_ID } from '@aios/shared';
+import { z } from 'zod';
 
 export const APP_CLASS = CHAT_APP_CLASS;
 export const CLASS_PATTERN = CHAT_CLASS_PATTERN;
@@ -32,6 +35,9 @@ export interface KioskPaths {
   unitDir: string;
   unit: string;
   profileDir: string;
+  /** Omarchy's shell config: the user's copy, and the defaults it starts from. */
+  shellJson: string;
+  shellDefaults: string[];
 }
 
 export function kioskPaths(env: NodeJS.ProcessEnv = process.env): KioskPaths {
@@ -48,6 +54,8 @@ export function kioskPaths(env: NodeJS.ProcessEnv = process.env): KioskPaths {
     unitDir,
     unit: join(unitDir, 'aios-core.service'),
     profileDir: join(data, 'aios', 'chromium'),
+    shellJson: join(config, 'omarchy', 'shell.json'),
+    shellDefaults: [...(env.OMARCHY_PATH ? [env.OMARCHY_PATH] : []), join(data, 'omarchy'), '/usr/share/omarchy'].map((d) => join(d, 'config', 'omarchy', 'shell.json')),
   };
 }
 
@@ -194,6 +202,88 @@ export function removeRequire(content: string): string {
   return content.replace(REQUIRE_LINE, '');
 }
 
+/**
+ * Omarchy 4's bar (shell/shell.qml, plugins/bar/widgets/Tray.qml, checked October 2026):
+ * a user shell.json with version 1 replaces the defaults entirely; the tray widget is the
+ * layout entry "omarchy.tray", and the tray icons whose Id is in its `pinned` list sit on
+ * the bar instead of behind the tray's arrow. The bar watches the file.
+ */
+const TRAY_WIDGET = 'omarchy.tray';
+const LayoutEntry = z.union([z.string(), z.looseObject({ id: z.string(), pinned: z.array(z.string()).optional() })]);
+const ShellConfig = z.looseObject({
+  version: z.literal(1).optional(),
+  bar: z.looseObject({ layout: z.record(z.string(), z.array(z.unknown())) }),
+});
+
+/** The tray widget's layout entries, as [section, index, entry]. */
+function trayEntries(config: z.infer<typeof ShellConfig>): [unknown[], number, { id: string; pinned?: string[] | undefined }][] {
+  const out: [unknown[], number, { id: string; pinned?: string[] | undefined }][] = [];
+  for (const section of Object.values(config.bar.layout)) {
+    section.forEach((raw, i) => {
+      const entry = LayoutEntry.safeParse(raw);
+      if (!entry.success) return;
+      const e = typeof entry.data === 'string' ? { id: entry.data } : entry.data;
+      if (e.id === TRAY_WIDGET) out.push([section, i, e]);
+    });
+  }
+  return out;
+}
+
+/** Whether the bar in this shell.json has the circle pinned. */
+export function trayIconPinned(config: unknown): boolean {
+  const parsed = ShellConfig.safeParse(config);
+  return parsed.success && trayEntries(parsed.data).some(([, , e]) => e.pinned?.includes(TRAY_ITEM_ID) ?? false);
+}
+
+/**
+ * shell.json with the tray circle pinned (or unpinned), keeping everything else as it
+ * was; null when there is nothing to change or no tray to pin it in.
+ */
+export function pinTrayIcon(config: unknown, pin: boolean): Record<string, unknown> | null {
+  const parsed = ShellConfig.safeParse(config);
+  if (!parsed.success) return null;
+  const next = structuredClone(parsed.data);
+  let changed = false;
+  for (const [section, i, e] of trayEntries(next)) {
+    const pinned = e.pinned ?? [];
+    if (pin === pinned.includes(TRAY_ITEM_ID)) continue;
+    section[i] = { ...e, pinned: pin ? [...pinned, TRAY_ITEM_ID] : pinned.filter((id) => id !== TRAY_ITEM_ID) };
+    changed = true;
+  }
+  return changed ? { ...next, version: 1 } : null;
+}
+
+async function readJson(path: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pins the circle in the user's shell.json, starting it from Omarchy's defaults when there is none. */
+async function pinInBar(p: KioskPaths, report: InstallReport): Promise<void> {
+  const own = existsSync(p.shellJson);
+  const source = own ? p.shellJson : p.shellDefaults.find((f) => existsSync(f));
+  const manual = "pin AI OS by hand: open the tray's arrow while an app the chat started is open";
+  if (!source) {
+    report.notes.push(`No Omarchy bar settings found; ${manual}.`);
+    return;
+  }
+  const before = await readJson(source);
+  if (own && trayIconPinned(before)) return;
+  const after = pinTrayIcon(before, true);
+  if (!after) {
+    report.notes.push(`Couldn't find the tray in ${source}; ${manual}.`);
+    return;
+  }
+  await mkdir(dirname(p.shellJson), { recursive: true });
+  if (own) await writeFile(`${p.shellJson}.aios-backup`, await readFile(p.shellJson, 'utf8'));
+  await writeFile(p.shellJson, `${JSON.stringify(after, null, 2)}\n`);
+  report.written.push(p.shellJson);
+  report.notes.push(own ? `Pinned the AI OS circle in the bar; the previous ${p.shellJson} is in ${p.shellJson}.aios-backup.` : `Pinned the AI OS circle in the bar, in a new ${p.shellJson} copied from Omarchy's defaults.`);
+}
+
 export type Run = (cmd: string, args: string[]) => Promise<void>;
 
 export interface InstallOptions {
@@ -204,6 +294,8 @@ export interface InstallOptions {
   autostart: boolean;
   /** Edit hyprland.lua. False leaves Hyprland untouched and only prints what to add. */
   hyprland: boolean;
+  /** Pin the tray circle in Omarchy's bar (shell.json). */
+  pinTray: boolean;
 }
 
 /** What install did, for setup to print. */
@@ -227,6 +319,7 @@ export async function installKiosk(p: KioskPaths, o: InstallOptions, run: Run): 
   await writeIfChanged(p.launcher, launcherScript({ port: o.port, profileDir: p.profileDir }), 0o755, report);
   await run('systemctl', ['--user', 'daemon-reload']);
   await run('systemctl', ['--user', 'enable', 'aios-core.service']);
+  if (o.pinTray) await pinInBar(p, report);
 
   if (!existsSync(p.hyprlandLua)) {
     report.notes.push(
@@ -265,6 +358,13 @@ export async function uninstallKiosk(p: KioskPaths, run: Run): Promise<string[]>
     if (after !== before) {
       await writeFile(p.hyprlandLua, after);
       removed.push(`AI OS line in ${p.hyprlandLua}`);
+    }
+  }
+  if (existsSync(p.shellJson)) {
+    const after = pinTrayIcon(await readJson(p.shellJson), false);
+    if (after) {
+      await writeFile(p.shellJson, `${JSON.stringify(after, null, 2)}\n`);
+      removed.push(`AI OS circle pinned in ${p.shellJson}`);
     }
   }
   for (const f of [p.aiosLua, p.launcher, p.unit]) {

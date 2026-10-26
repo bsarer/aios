@@ -17,7 +17,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { connect as netConnect } from 'node:net';
+import { createServer as createNetServer, connect as netConnect } from 'node:net';
 import { ImapFlow } from 'imapflow';
 import { type Page, chromium } from 'playwright-core';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
@@ -104,6 +104,18 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_r', function: { name: 'mail_read', arguments: JSON.stringify({ id: readId }) } }] } }] });
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
     return void res.end('data: [DONE]\n\n');
+  }
+  // S3: apps. List them, or start one; then answer with one line.
+  const appCall = last.role === 'user' ? (/^what apps do i have\??$/i.test(lastUser) ? ['apps_list', {}] : /^open (\w+)$/i.test(lastUser) && !/attachment/i.test(lastUser) ? ['open_app', { app: /^open (\w+)$/i.exec(lastUser)![1] }] : null) : null;
+  if (appCall) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_app', function: { name: appCall[0], arguments: JSON.stringify(appCall[1]) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /^\d+ apps? installed:|^Started /.test(last.content ?? '')) {
+    const text = (last.content ?? '').startsWith('Started') ? `${/^Started ([^.]+)/.exec(last.content ?? '')![1]} is open.` : (last.content ?? '');
+    chunk(res, { choices: [{ delta: { content: text } }] });
+    return finish(0.0004);
   }
   // S1: answer with the system tool's own result line.
   if (last.role === 'tool' && /^Volume is now|Nothing has changed yet/.test(last.content ?? '')) {
@@ -282,6 +294,37 @@ async function main(): Promise<void> {
       'exit 0',
     ].join('\n'),
   };
+  // S3: a pretend Hyprland. hyprctl reports one fullscreen chat window and one 1920x1200 monitor
+  // with a 26 px bar, and records every dispatch; gtk-launch records the app it was asked to start.
+  writeFileSync(join(state, 'dispatches'), '');
+  writeFileSync(join(state, 'launched'), '');
+  fakes.hyprctl = [
+    'case "$1 $2" in',
+    `  "-j clients") echo '[{"address":"0xc4a7","class":"org.aios.home","floating":false,"pinned":false,"fullscreen":2,"monitor":0}]' ;;`,
+    `  "-j monitors") echo '[{"id":0,"width":1920,"height":1200,"x":0,"y":0,"scale":1,"transform":0,"focused":true,"reserved":[0,26,0,0]}]' ;;`,
+    '  dispatch*) printf "%s\\n" "$2" >> "$S/dispatches"; echo ok ;;',
+    '  *) exit 1 ;;',
+    'esac',
+  ].join('\n');
+  fakes['uwsm-app'] = '[ "$1" = -- ] && shift\nexec "$@"';
+  fakes['gtk-launch'] = 'echo "$1" >> "$S/launched"';
+  const apps = join(tmp, 'data', 'applications');
+  mkdirSync(apps, { recursive: true });
+  writeFileSync(join(apps, 'firefox.desktop'), '[Desktop Entry]\nType=Application\nName=Firefox\nComment=Browse the web\nExec=firefox %u\nCategories=Network;WebBrowser;\n');
+  writeFileSync(join(apps, 'btop.desktop'), '[Desktop Entry]\nType=Application\nName=btop\nComment=Resource monitor\nExec=btop\nTerminal=true\n');
+  writeFileSync(join(apps, 'hidden.desktop'), '[Desktop Entry]\nType=Application\nName=Hidden helper\nExec=helper\nNoDisplay=true\n');
+  const hyprDir = join(tmp, 'run', 'hypr', 'e2e');
+  mkdirSync(hyprDir, { recursive: true });
+  const hyprSockets = new Set<import('node:net').Socket>();
+  const hyprEvents = createNetServer((sock) => {
+    hyprSockets.add(sock);
+    sock.on('close', () => hyprSockets.delete(sock));
+  });
+  await new Promise<void>((r) => hyprEvents.listen(join(hyprDir, '.socket2.sock'), r));
+  const hyprEmit = (line: string) => {
+    for (const sock of hyprSockets) sock.write(`${line}\n`);
+  };
+  const dispatches = () => readFileSync(join(state, 'dispatches'), 'utf8').trim().split('\n').filter(Boolean);
   for (const [name, body] of Object.entries(fakes)) {
     writeFileSync(join(bin, name), `#!/bin/sh\nS="${state}"\n${body}\n`);
     chmodSync(join(bin, name), 0o755);
@@ -313,7 +356,19 @@ async function main(): Promise<void> {
     core = spawn('pnpm', ['--silent', '--filter', '@aios/core', 'start'], {
       cwd: root,
       detached: true,
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, XDG_CONFIG_HOME: join(tmp, 'config'), XDG_DATA_HOME: join(tmp, 'data'), HOME: tmp, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        XDG_CONFIG_HOME: join(tmp, 'config'),
+        XDG_DATA_HOME: join(tmp, 'data'),
+        XDG_DATA_DIRS: join(tmp, 'share'),
+        XDG_RUNTIME_DIR: join(tmp, 'run'),
+        HYPRLAND_INSTANCE_SIGNATURE: 'e2e',
+        XDG_CURRENT_DESKTOP: 'Hyprland',
+        HOME: tmp,
+        NO_PROXY: '127.0.0.1,localhost',
+        no_proxy: '127.0.0.1,localhost',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     core.stdout?.on('data', (d) => (coreLog += d));
@@ -436,6 +491,40 @@ async function main(): Promise<void> {
     check('Wi-Fi is off', fakeState('radio') === 'disabled');
     check('status strip shows Wi-Fi off', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Wi-Fi off')));
     await shot(page, 's1-wifi-off');
+
+    // S3: apps. The chat lists installed apps, starts one, and steps aside as the orb until it closes.
+    await input.fill('what apps do I have?');
+    await input.press('Enter');
+    check('the chat lists installed apps', await waitFor(async () => /Firefox \(id: firefox\): Browse the web/.test(await lastAssistant().innerText())));
+    check('hidden apps are not listed', !(await lastAssistant().innerText()).includes('Hidden helper'));
+    await input.fill('open firefox');
+    await input.press('Enter');
+    const orb = page.getByTestId('orb');
+    check('"open firefox" starts it through gtk-launch', await waitFor(async () => fakeState('launched') === 'firefox.desktop'), fakeState('launched'));
+    check('the chat becomes the orb', await waitFor(async () => (await orb.count()) === 1));
+    check('Hyprland was asked to shrink, pin and place it', ['hl.dsp.window.pin({ action = "on", window = "address:0xc4a7" })', 'hl.dsp.window.move({ x = 932, y = 34, window = "address:0xc4a7" })'].every((d) => dispatches().includes(d)), dispatches().join(' | '));
+    await page.setViewportSize({ width: 56, height: 56 });
+    await shot(page, 's3-orb');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    // Firefox's window opens; a window the user opens themselves doesn't count.
+    hyprEmit('openwindow>>f1,1,firefox,Mozilla Firefox');
+    hyprEmit('openwindow>>k1,1,kitty,Terminal');
+    await orb.click();
+    check('clicking the orb brings the chat back at half screen', await waitFor(async () => (await page.getByTestId('window-controls').count()) === 1 && (await chat.innerText()).includes('Firefox is open.')));
+    check('Hyprland was asked for the right half, with focus', ['hl.dsp.window.resize({ x = 942, y = 1150, window = "address:0xc4a7" })', 'hl.dsp.focus({ window = "address:0xc4a7" })'].every((d) => dispatches().includes(d)));
+    await shot(page, 's3-half');
+    await page.keyboard.press('Escape');
+    check('Esc at half screen goes back to the orb', await waitFor(async () => (await orb.count()) === 1));
+    await orb.click();
+    await page.getByTestId('window-orb').click();
+    check('"Back to the orb" does too', await waitFor(async () => (await orb.count()) === 1));
+    hyprEmit('closewindow>>k1');
+    await sleep(500);
+    check("closing the user's own window changes nothing", (await orb.count()) === 1);
+    hyprEmit('closewindow>>f1');
+    check('closing Firefox brings the chat back full screen', await waitFor(async () => (await orb.count()) === 0 && (await page.getByTestId('window-controls').count()) === 0 && (await input.count()) === 1));
+    check('Hyprland was asked for fullscreen', dispatches().at(-2) === 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "address:0xc4a7" })', dispatches().at(-2));
+    await shot(page, 's3-back');
     // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
     if (await mailStackUp()) {
       check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Mail: connected'), 15_000));
@@ -535,6 +624,7 @@ async function main(): Promise<void> {
     await browser.close();
     await stopCore();
     mock.close();
+    hyprEvents.close();
   }
   if (failures) console.log(`\n--- aios-core output ---\n${coreLog}`);
   console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');

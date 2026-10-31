@@ -512,8 +512,10 @@ async function main(): Promise<void> {
 
     // 1. Boot: greeting and live status.
     check('greeting on boot', await waitFor(async () => /(Hello|Morning|Afternoon|Evening), John/.test(await chat.innerText())));
-    const hhmm = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    check('status strip shows the current time', (await page.getByTestId('clock').innerText()) === hhmm, await page.getByTestId('clock').innerText());
+    // The strip may not have ticked yet when the minute turns, so the minute before also counts.
+    const hhmm = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const shownClock = await page.getByTestId('clock').innerText();
+    check('status strip shows the current time', [hhmm(Date.now()), hhmm(Date.now() - 60_000)].includes(shownClock), shownClock);
     check('agent idle at start', (await agentState.innerText()).includes('idle'));
     const costBefore = await page.getByTestId('cost').innerText();
     await shot(page, '1-boot');

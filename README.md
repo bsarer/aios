@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments) and S3 (starting apps) are merged. S4 (building apps) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is in review.
 
 ## Mail
 
@@ -79,10 +79,31 @@ Needs Claude Code installed and signed in on this computer (run `claude` once in
 - **Offline by design:** afterwards AI OS puts its own Content-Security-Policy at the top of the app's `index.html`, which blocks every network request and anything loaded from elsewhere, and opens the app as a Chromium app window with a profile of its own (`~/.local/share/aios/app-profiles/<app>/`). Its launcher entry is `~/.local/share/applications/aios-app-<app>.desktop`; delete that file and the folder to remove an app.
 - **Settings:** `[builder]` in the config: `enabled` (default true), `command` (default `claude`; give the full path if the service can't find it), `model` (passed as `--model`; unset uses Claude Code's default), `budgetChoicesUsd` (the caps a card offers, default `[1, 2, 5]`), `maxBudgetUsd` (the highest cap offered, default 5), `timeoutMinutes`. Every build is in the audit log with its cost, but never the words of your request.
 
+## Calendar
+
+Google Calendar, through its REST API with plain `fetch` (no Google SDK), signed in once in your browser. Optional: leave `[calendar]` out of the config and there are no calendar tools.
+
+- **Ask about your calendar:** "what's on tomorrow?" uses `calendar_list`, and "when am I free Thursday afternoon?" uses `calendar_free`, which works out the gaps between your busy events (events shown as free, and invites you declined, don't count; it looks within `[calendar] workday`, default 09:00-18:00, unless you name other hours). Both are read-only.
+- **Changing it:** "set up a meeting with Ana at 3", "move my 10am to 11" and "cancel lunch on Friday" each show a card with every detail: title, time (and the old time for a move), place, notes and who gets an email. Nothing changes and Google sends no invite, update or cancellation until you click **Add**, **Change** or **Cancel event**. The click carries a hash of exactly what the card shows. **Discard** changes nothing. A move keeps the event's length; a new event lasts `defaultMinutes` (30) unless you say otherwise. Guests are emailed only when the event has guests.
+- **Only your own events:** the chat can change or cancel events you organize. For someone else's meeting it offers to email the organizer instead. One occurrence of a repeating event changes on its own, and the card says so.
+- **Invites are outside text:** anyone can put an event in your calendar by sending an invite, so event titles, places, notes and guest lists reach the model the way an email does: sanitized, wrapped in `<untrusted>` tags, and hidden again from your next message on. Free time (`calendar_free`) is only times worked out by code, so it carries no outside text. A card asked for while an email or event text was in view says so, and a guest who is in neither your message nor the event is flagged on the card.
+- **Retries never double up:** a new event gets an id made from its card, so clicking again after a failure, or after the app stopped mid-way, finds the event already there instead of making a second one.
+- **Audit:** every card, click and change is in the audit log, with the event id and who was emailed.
+
+**Setting it up** (once, about ten minutes, in your own Google account):
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable the **Google Calendar API** for it.
+2. Set up the project's OAuth consent screen: user type **External**, with your own Google address as a test user.
+3. Create an **OAuth client** of type **Desktop app**. Keep its client ID and secret.
+4. Run `pnpm run setup`, answer yes to Google Calendar, and paste the client ID and secret (the secret goes to the keyring). Setup then opens Google's sign-in page in your browser. Allow access to calendar events, and the refresh token goes straight to the keyring. `pnpm calendar:login` signs in again at any time.
+5. Restart AI OS.
+
+AI OS asks only for `calendar.events` (see and change events), not calendar settings or sharing. Google shows an "unverified app" warning for a personal project like this; that's expected. **While the consent screen is in "Testing", Google expires the sign-in after 7 days**, and the chat will then say to run `pnpm calendar:login`. To stop that, set the consent screen's publishing status to **In production**; for your own use it stays unverified. Settings: `[calendar]` `clientId`, `calendarId` (default `primary`), `defaultMinutes`, `workday`.
+
 ## Limits, failures and logs
 
 - **Daily cost cap:** `[cost] dailyCapUsd` (default 2). Once today's spend (midnight to midnight in your timezone) reaches it, no model call is made by chat, mail triage or the nightly summary until tomorrow. The chat says so, `/cost` shows the numbers, and new mail is still listed by sender and subject without a summary. Spend is what the provider reports per call (OpenRouter does), so a provider that reports no cost is never capped.
-- **Pause:** `/pause` stops every model call, from every part of the app, until `/resume`. It is checked in the model client itself, not only in the chat. Mail is still fetched and queued, and your own clicks on draft and memory cards still work. System changes stop too, including clicks on their cards.
+- **Pause:** `/pause` stops every model call, from every part of the app, until `/resume`. It is checked in the model client itself, not only in the chat. Mail is still fetched and queued, and your own clicks on draft, memory and calendar cards still work. System changes stop too, including clicks on their cards.
 - **When something fails, the chat says what and what to do:**
   - Model: wrong key, no credits, rate limit, timeout, provider down, no network, conversation too long.
   - API key missing or keyring locked: the chat still opens and says so. Before A7 the service crash-looped.
@@ -148,6 +169,10 @@ scripts           setup/uninstall CLI, mail seeder and checker, browser e2e chec
 fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in C1
+
+None. Google Calendar and its sign-in are plain `fetch` calls with zod-checked answers. Tests use a pretend Google Calendar (`fixtures/calendar.ts`), since Google has no local emulator.
 
 ## Dependencies added in S4
 

@@ -21,9 +21,10 @@ An app on Omarchy that takes over the whole screen (kiosk mode) and is, from the
 8. Email attachments (milestone S2, added 2026-10-25): open PDF, text and image attachments in a viewer in the chat; the model can read the text of PDF and text attachments, never images.
 9. Starting apps by chat (milestone S3, added 2026-10-26): the chat knows the installed apps and starts one when asked; while it is open the chat waits as a red orb at the top of the screen.
 10. Building apps by chat (milestone S4, added 2026-10-31): describe an app ("make me a pomodoro timer") and, after a click, Claude Code writes it as a small local web app that shows up among the installed apps; asking again changes it.
+11. Calendar by chat (milestone C1, added 2026-10-31): view Google Calendar events and free time; create, move and cancel events after a click on a card.
 
 ### Out of scope (parked for after alpha)
-WhatsApp, calendar, docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
+WhatsApp, docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
 
 ### Principles
 - **Chat is the only UI.** Everything (notifications, approvals, memory edits, settings changes) appears as chat messages or interactive chat cards. No hidden settings screens.
@@ -128,6 +129,9 @@ Output a table; pick the default per role from the results, not from reputation.
 | `open_app(app)` | device | S3: starts one installed app by its desktop id (`uwsm-app -- gtk-launch <id>`); no command, file, link or option. A confirm card while an email is in view |
 | `build_app(name, request)` | **write** | S4: shows a Build card; the click runs Claude Code headless in that app's own folder to create or change a local web app, then adds its launcher entry |
 | `build_status()` | read | S4: Build cards waiting for a click, the build running now (time, step, cap), and recent builds with outcome and cost |
+| `calendar_list(from, to?, query?)` | read | C1: events with ids; event text sanitized and wrapped in `<untrusted source="calendar">` |
+| `calendar_free(date, to?, dayStart?, dayEnd?, minutes?)` | read | C1: free gaps between busy events, worked out by code; no event text |
+| `calendar_create_event` / `calendar_update_event` / `calendar_cancel_event` | draft | C1: a card with every detail; the change, and Google's invite/update/cancellation email, happen only on its click (hash-checked) |
 | `now()` | read | Current date, time, timezone |
 | System controls (S1) | read / device / write | See S1 in §11: status reads are `read`; small reversible changes are `device`; Wi-Fi off, switching networks, pairing and forgetting Bluetooth devices are `write` |
 
@@ -280,9 +284,13 @@ Open PDF, text and image attachments from email. `mail_attachment_show` posts a 
 *Build visibility (added 2026-10-31 after the first real build ran for 7 minutes with nothing on screen):* the card offers spending caps to pick from (config `budgetChoicesUsd`) and shows the median cost of past builds of the same kind, saying that a Claude plan login's dollar figures are API-price estimates and its real limit is the plan's usage limits (from `claude auth status`; a build isn't offered when Claude Code isn't signed in). While running, the card shows Claude Code's current step from its stream-json output, the elapsed time and the cap, and a **Stop** button. When it ends, a chat message (with **Open** on success) and a desktop notification follow. `build_status` (read) lets the chat answer "how is it going?". Builds are recorded in an `app_builds` table (names, steps, outcome, cost; never the request's words).
 *Accept:* "make me a pomodoro timer" shows a Build card; the click builds it and "open Pomodoro" starts it; "make the breaks 10 minutes" changes it; the built app cannot reach the network; an email asking to build an app gets no card (CI injection suite); checked on the real machine.
 
+**C1: Calendar** (approved 2026-10-31; after S4, before A8)
+Google Calendar over its REST API v3 with plain `fetch` and zod-checked answers (no Google SDK). Signed in once with OAuth for a desktop app (loopback redirect on 127.0.0.1, PKCE S256, `state`), scope `calendar.events` only, from the user's own Google Cloud project; the refresh token and client secret live in the keyring, the access token in memory. Endpoints are config (`[calendar]`), so tests point them at a pretend Google Calendar (`fixtures/calendar.ts`), since Google has no local emulator. `calendar_list` (read) wraps every event's text as untrusted, because anyone can put an invite in the calendar; `calendar_free` (read) returns only times. `calendar_create_event`, `calendar_update_event` and `calendar_cancel_event` (draft) post a card; the change and Google's emails to guests happen only from a hash-checked click (`CalendarActions`), and only on events the user organizes. Cards say when outside text was in view and flag guests from neither the user's message nor the event. A new event's id comes from its card, so a retry never makes a second one. Every card and click is audited.
+*Accept:* "what's on tomorrow" lists the day; "when am I free Thursday" gives the gaps; "set up a meeting with Ana at 3", "move my 10am to 11" and "cancel lunch" each show a card and change the calendar only on the click; a hostile invite asking to cancel meetings, invite an attacker and plant a memory joins the CI injection suite and changes nothing; checked against a real Google account.
+
 **A8: Dogfood week**
 Use it daily (including system controls); record median latency, cost per day, notification precision (useful vs noisy), crashes, and what you reached for outside the chat.
-*Accept:* findings report that decides the post-alpha order (calendar, WhatsApp, docs, files, more system tools).
+*Accept:* findings report that decides the post-alpha order (WhatsApp, docs, files, more system tools).
 
 ---
 

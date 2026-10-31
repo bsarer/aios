@@ -1,14 +1,16 @@
+import { parseConfig, serializeConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import { type Prompter, collectSetup, secretRefs } from '../src/setup-lib.js';
 
 /** Answers questions by matching a substring of the prompt. */
-function scripted(answers: [match: string, answer: string | boolean][]): Prompter & { asked: string[] } {
+function scripted(answers: [match: string, answer: string | boolean | string[]][]): Prompter & { asked: string[] } {
   const asked: string[] = [];
   const find = (q: string) => {
     asked.push(q);
     const hit = answers.find(([m]) => q.includes(m));
     if (!hit) throw new Error(`unexpected prompt: ${q}`);
-    return hit[1];
+    // A list answers successive askings of the same question.
+    return Array.isArray(hit[1]) ? (hit[1].shift() ?? '') : hit[1];
   };
   return {
     asked,
@@ -60,5 +62,36 @@ describe('collectSetup', () => {
   it('requires an API key on first run', async () => {
     const noKey = firstRun.map(([m, a]) => (m === '[chat] API key' ? [m, ''] : [m, a])) as typeof firstRun;
     await expect(collectSetup(scripted(noKey), null, providers)).rejects.toThrow(/API key is required/);
+  });
+
+  it('re-asks a host given with its port, and a port that is not a number', async () => {
+    const answers: [string, string | boolean | string[]][] = [
+      ...firstRun.filter(([m]) => m !== 'GreenMail'),
+      ['GreenMail', false],
+      ['Mail address', 'test.aios@gmail.com'],
+      ['username', ''],
+      ['IMAP host', ['imap.gmail.com, port 993', 'imap.gmail.com']],
+      ['IMAP port', ['993 (SSL)', '']],
+      ['SMTP host', ['https://smtp.gmail.com', ' smtp.gmail.com ']],
+      ['SMTP port', ['']],
+      ['Mail app password', 'app-password'],
+    ];
+    const p = scripted(answers);
+    const { config } = await collectSetup(p, null, providers);
+    expect(config.mail).toMatchObject({
+      username: 'test.aios@gmail.com',
+      imap: { host: 'imap.gmail.com', port: 993, tls: true },
+      smtp: { host: 'smtp.gmail.com', port: 465, tls: true },
+      // Gmail saves sent mail itself.
+      saveSentCopy: false,
+    });
+    expect(p.asked.filter((q) => q.includes('IMAP host'))).toHaveLength(2);
+    expect(p.asked.filter((q) => q.includes('IMAP port'))).toHaveLength(2);
+  });
+
+  it('a config with a port in the host name is rejected with a clear message', async () => {
+    const { config } = await collectSetup(scripted(firstRun), null, providers);
+    const bad = serializeConfig(config).replace('host = "127.0.0.1"', 'host = "imap.gmail.com, port 993"');
+    expect(() => parseConfig(bad)).toThrow(/server name only/);
   });
 });

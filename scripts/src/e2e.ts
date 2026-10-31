@@ -105,14 +105,24 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
     return void res.end('data: [DONE]\n\n');
   }
-  // S4: building an app. Ask for it with build_app, then answer with one line.
-  if (last.role === 'user' && /^make me a pomodoro timer$/i.test(lastUser)) {
-    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_build', function: { name: 'build_app', arguments: JSON.stringify({ name: 'Pomodoro', request: 'a pomodoro timer' }) } }] } }] });
+  // S4: building an app ("make me a pomodoro timer" builds "Pomodoro"), and asking how it is going.
+  const buildAsk = last.role === 'user' ? /^make me (an? (\w+) (?:timer|app))$/i.exec(lastUser) : null;
+  const buildCall = buildAsk
+    ? ['build_app', { name: buildAsk[2]![0]!.toUpperCase() + buildAsk[2]!.slice(1), request: buildAsk[1] }]
+    : last.role === 'user' && /^how is my build going\?$/i.test(lastUser)
+      ? ['build_status', {}]
+      : null;
+  if (buildCall) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_build', function: { name: buildCall[0], arguments: JSON.stringify(buildCall[1]) } }] } }] });
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
     return void res.end('data: [DONE]\n\n');
   }
-  if (last.role === 'tool' && /^A card now asks the user to confirm building/.test(last.content ?? '')) {
-    chunk(res, { choices: [{ delta: { content: 'Click Build on the card and I will make it.' } }] });
+  if (last.role === 'tool' && /^A card in the chat now asks the user to confirm building/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'Click Build on the card to start.' } }] });
+    return finish(0.0004);
+  }
+  if (last.role === 'tool' && /^App builds, newest first:/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: last.content ?? '' } }] });
     return finish(0.0004);
   }
   // S3: apps. List them, or start one; then answer with one line.
@@ -327,16 +337,26 @@ async function main(): Promise<void> {
   ].join('\n');
   fakes['uwsm-app'] = '[ "$1" = -- ] && shift\nexec "$@"';
   fakes['gtk-launch'] = 'echo "$1" >> "$S/launched"';
-  // S4: a pretend Claude Code. It notes how it was run and writes an app that tries the network.
+  // S4: a pretend Claude Code, signed in with a plan. It notes how it was run, says it is writing
+  // index.html, waits for the test to let it go on ($S/claude-go), and writes an app that tries
+  // the network. $S/claude-mode makes it hang until stopped (stop) or hit its cap (fail).
   fakes.claude = [
+    `if [ "$1" = auth ]; then echo '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 0; fi`,
     'pwd > "$S/claude-cwd"',
     'printf "%s\\n" "$@" > "$S/claude-args"',
     'cat > "$S/claude-stdin"',
+    'mode=$(cat "$S/claude-mode" 2>/dev/null)',
+    `if [ "$mode" = fail ]; then echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"result":"","total_cost_usd":1.02}'; exit 1; fi`,
+    `echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"index.html"}}]}}'`,
+    'if [ "$mode" = stop ]; then sleep 60; exit 0; fi',
+    'i=0; while [ ! -f "$S/claude-go" ] && [ $i -lt 150 ]; do sleep 0.2; i=$((i+1)); done',
     `printf '%s' '<!doctype html><html><head><title>Pomodoro</title></head><body><p id="local">waiting</p><p id="net">waiting</p><script src="app.js"></script></body></html>' > index.html`,
     `printf '%s' "document.getElementById('local').textContent = 'local script ran'; fetch('http://127.0.0.1:${mockPort}/probe').then(() => { document.getElementById('net').textContent = 'reached' }, () => { document.getElementById('net').textContent = 'blocked' });" > app.js`,
+    `echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"app.js"}}]}}'`,
     `echo '{"type":"result","subtype":"success","is_error":false,"result":"A 25-minute focus timer.","total_cost_usd":0.31}'`,
   ].join('\n');
   fakes.chromium = 'exit 0';
+  fakes['notify-send'] = 'printf "%s|" "$@" >> "$S/notified"; echo >> "$S/notified"';
   const apps = join(tmp, 'data', 'applications');
   mkdirSync(apps, { recursive: true });
   writeFileSync(join(apps, 'firefox.desktop'), '[Desktop Entry]\nType=Application\nName=Firefox\nComment=Browse the web\nExec=firefox %u\nCategories=Network;WebBrowser;\n');
@@ -555,21 +575,39 @@ async function main(): Promise<void> {
     check('Hyprland was asked for fullscreen', dispatches().at(-2) === 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "address:0xc4a7" })', dispatches().at(-2));
     await shot(page, 's3-back');
 
-    // S4: building an app. A Build card, Claude Code runs on the click, and the app is offline.
+    // S4: building an app. A Build card with caps to pick, progress while Claude Code runs,
+    // a message with Open when it is done, and the app is offline.
+    const notified = () => (existsSync(join(state, 'notified')) ? fakeState('notified') : '');
     await input.fill('make me a pomodoro timer');
     await input.press('Enter');
     const buildCard = page.locator('[data-kind="action"]').last();
-    check('"make me a pomodoro timer" shows a Build card', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'pending' && (await buildCard.getByTestId('action-confirm').innerText()) === 'Build'));
+    const choice = (card: typeof buildCard, value: string) => card.locator(`[data-testid="action-choice"][data-value="${value}"]`);
+    check(
+      '"make me a pomodoro timer" shows a Build card with caps to pick',
+      await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'pending' && (await buildCard.getByTestId('action-choice').allInnerTexts()).join(',') === 'Build · up to $1,Build · up to $2,Build · up to $5'),
+    );
+    const buildNote = await buildCard.getByTestId('action-note').innerText();
+    check('the card says there is no estimate yet, and what plan dollars mean', buildNote.includes('There are no past new builds to estimate the cost from yet.') && buildNote.includes("signed in with a Claude plan"), buildNote);
+    check('the chat says to click Build to start', await waitFor(async () => (await lastAssistant().innerText()).includes('Click Build on the card to start.')));
     check('nothing is built before the click', !existsSync(join(state, 'claude-args')));
     await shot(page, 's4-build-card');
-    await buildCard.getByTestId('action-confirm').click();
-    check('Build runs Claude Code and says what it made', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'done' && (await buildCard.innerText()).includes('Built “Pomodoro”. A 25-minute focus timer. It cost $0.31. Say “open Pomodoro” to start it.')), await buildCard.innerText());
+    await choice(buildCard, '2').click();
+    check('the running card shows what Claude Code is doing, the time and the cap', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'running' && (await buildCard.getByTestId('action-progress').innerText()) === 'Writing index.html…' && (await buildCard.getByTestId('action-elapsed').innerText()).includes('stops at $2')), await buildCard.innerText());
+    check('the cap picked is the one Claude Code got', fakeState('claude-args').includes('--max-budget-usd\n2\n'));
+    await shot(page, 's4-building');
+    await input.fill('how is my build going?');
+    await input.press('Enter');
+    check('the chat can say how the build is going', await waitFor(async () => /“Pomodoro”: building for less than a minute; now: Writing index\.html\. It stops at \$2 at most\./.test(await lastAssistant().innerText())), await lastAssistant().innerText());
+    writeFileSync(join(state, 'claude-go'), '');
+    check('the card says what it made', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'done' && (await buildCard.innerText()).includes('Built “Pomodoro” in less than a minute. A 25-minute focus timer. About $0.31 at API prices.')), await buildCard.innerText());
+    const builtMsg = page.locator('[data-kind="build_result"]').last();
+    check('a message says it is ready, with Open', (await builtMsg.getAttribute('data-ok')) === 'true' && (await builtMsg.innerText()).includes('“Pomodoro” is ready. A 25-minute focus timer.') && (await builtMsg.getByTestId('build-open').count()) === 1);
+    check('a desktop notification says it is ready', notified().includes('--app-name=AI OS|Pomodoro is ready|'), notified());
     const appDir = join(tmp, 'data', 'aios', 'apps', 'pomodoro');
     check('Claude Code ran in the app folder, restricted, with the request on stdin', fakeState('claude-cwd') === appDir && fakeState('claude-args').includes('--restricted') && fakeState('claude-stdin') === 'a pomodoro timer', fakeState('claude-cwd'));
     await shot(page, 's4-built');
-    await input.fill('open pomodoro');
-    await input.press('Enter');
-    check('"open pomodoro" starts the built app', await waitFor(async () => fakeState('launched').split('\n').includes('aios-app-pomodoro.desktop')), fakeState('launched'));
+    await builtMsg.getByTestId('build-open').click();
+    check('Open starts the built app', await waitFor(async () => fakeState('launched').split('\n').includes('aios-app-pomodoro.desktop')), fakeState('launched'));
     hyprEmit('openwindow>>b1d,1,aios-app-pomodoro,Pomodoro');
     hyprEmit('closewindow>>b1d');
     check('closing it brings the chat back', await waitFor(async () => (await page.getByTestId('orb').count()) === 0 && (await input.count()) === 1));
@@ -580,6 +618,28 @@ async function main(): Promise<void> {
     check('the built app cannot reach the network', await waitFor(async () => (await appPage.locator('#net').innerText()) === 'blocked') && probeHits === 0, `${await appPage.locator('#net').innerText()}, ${probeHits} hits`);
     await appPage.close();
     await page.bringToFront();
+    // A build can be stopped from its card, and the next card has an estimate.
+    writeFileSync(join(state, 'claude-mode'), 'stop');
+    await input.fill('make me a notes app');
+    await input.press('Enter');
+    const notesCard = page.locator('[data-kind="action"]').last();
+    check('the next Build card estimates from the last build', await waitFor(async () => (await notesCard.getAttribute('data-state')) === 'pending' && (await notesCard.getByTestId('action-note').innerText()).startsWith('Similar new builds cost about $0.31 (median of 1).')));
+    await choice(notesCard, '1').click();
+    check('the build starts', await waitFor(async () => (await notesCard.getByTestId('action-progress').count()) === 1));
+    await notesCard.getByTestId('action-stop').click();
+    check('Stop stops it and says so', await waitFor(async () => (await notesCard.getAttribute('data-state')) === 'cancelled' && (await notesCard.innerText()).includes("Stopped after less than a minute. The app wasn't added.")), await notesCard.innerText());
+    check('a stopped build gets no message or notification', (await page.locator('[data-kind="build_result"]').count()) === 1 && !notified().includes('Notes'));
+    // A failed build says why, in the chat and on the desktop.
+    writeFileSync(join(state, 'claude-mode'), 'fail');
+    await input.fill('make me a dice app');
+    await input.press('Enter');
+    const diceCard = page.locator('[data-kind="action"]').last();
+    await waitFor(async () => (await diceCard.getAttribute('data-state')) === 'pending' && (await diceCard.innerText()).includes('Dice'));
+    await choice(diceCard, '1').click();
+    const failMsg = page.locator('[data-kind="build_result"]').last();
+    check('a failed build says why on the card and in a message', await waitFor(async () => (await diceCard.getAttribute('data-state')) === 'failed' && (await failMsg.getAttribute('data-ok')) === 'false' && (await failMsg.innerText()).includes("Building “Dice” didn't work: it reached its $1 spending cap before finishing.")), await failMsg.innerText());
+    check('a failed build has no Open button, and a notification says it failed', (await failMsg.getByTestId('build-open').count()) === 0 && notified().includes("Building Dice didn't work|"), notified());
+    await shot(page, 's4-failed');
     // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
     if (await mailStackUp()) {
       check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Mail: connected'), 15_000));

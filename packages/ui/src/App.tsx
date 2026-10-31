@@ -28,8 +28,10 @@ export function App() {
     onIgnoreMail: (itemId, mailId) => send({ type: 'mail_ignore', itemId, mailId }),
     onDraftSend: (id, hash) => send({ type: 'draft_send', id, hash }),
     onDraftDiscard: (id) => send({ type: 'draft_discard', id }),
-    onActionConfirm: (id, hash) => send({ type: 'action_confirm', id, hash }),
+    onActionConfirm: (id, hash, choice) => send({ type: 'action_confirm', id, hash, ...(choice === undefined ? {} : { choice }) }),
     onActionCancel: (id) => send({ type: 'action_cancel', id }),
+    onActionStop: (id) => send({ type: 'action_stop', id }),
+    onAppOpen: (actionId) => send({ type: 'app_open', actionId }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
   };
 

@@ -1,5 +1,5 @@
 import type { ChatItem, MailRow } from '@aios/shared/protocol';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import { AttachmentViewer } from './AttachmentViewer';
 
@@ -44,9 +44,13 @@ export interface MessageActions {
   onDraftSend: (id: string, hash: string) => void;
   onDraftDiscard: (id: string) => void;
   onDraftEdit: (id: string, edit: { to: string[]; subject: string; body: string }) => void;
-  /** A system change (S1) runs only on this click, which echoes the card's hash. */
-  onActionConfirm: (id: string, hash: string) => void;
+  /** A system change (S1) runs only on this click, which echoes the card's hash and the choice clicked. */
+  onActionConfirm: (id: string, hash: string, choice?: string) => void;
   onActionCancel: (id: string) => void;
+  /** Stop on a running build (S4). */
+  onActionStop: (id: string) => void;
+  /** Open on a finished build's message (S4); names the Build card, not the app. */
+  onAppOpen: (actionId: string) => void;
 }
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
@@ -60,19 +64,78 @@ const ACTION_STATE_TEXT: Record<ActionItem['state'], string> = {
 };
 
 /** A system change waiting for a click. The title can hold network or device names: plain text only. */
+/** "0:42", "3:05", "1:02:09". */
+function clock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const mm = String(Math.floor(s / 60) % 60).padStart(s >= 3600 ? 2 : 1, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/** What a running build is doing, how long it has run and its cap, with Stop. */
+function ActionProgress({ item, progress, onStop }: { item: ActionItem; progress: NonNullable<ActionItem['progress']>; onStop: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  return (
+    <div className="mt-3 flex items-center gap-3 text-sm" style={{ color: 'var(--muted)' }}>
+      <span className="spin inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-current border-t-transparent" />
+      <span data-testid="action-progress" className="min-w-0 flex-1 truncate">
+        {progress.step}
+      </span>
+      <span data-testid="action-elapsed" className="tabular-nums">
+        {clock(now - progress.startedAt)}
+        {progress.capUsd !== undefined && ` · stops at $${progress.capUsd}`}
+      </span>
+      <button
+        type="button"
+        data-testid="action-stop"
+        className="glass rounded-lg px-3 py-0.5"
+        disabled={stopping}
+        onClick={() => {
+          setStopping(true);
+          onStop();
+        }}
+        aria-label={`Stop: ${item.title}`}
+      >
+        {stopping ? 'Stopping…' : 'Stop'}
+      </button>
+    </div>
+  );
+}
+
 function ActionCard({ item, actions }: { item: ActionItem; actions: MessageActions }) {
+  const primary = { background: 'var(--accent)', color: 'var(--bg)' };
   return (
     <div data-kind="action" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--warning)' }}>
       <div data-testid="action-title">{item.title}</div>
+      {item.note && item.state === 'pending' && (
+        <div data-testid="action-note" className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.note}
+        </div>
+      )}
       {item.state === 'pending' ? (
-        <div className="mt-3 flex gap-2">
-          <button type="button" data-testid="action-confirm" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onActionConfirm(item.id, item.hash)}>
-            {item.confirm}
-          </button>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {item.choices ? (
+            item.choices.map((c) => (
+              <button key={c.value} type="button" data-testid="action-choice" data-value={c.value} className="rounded-lg px-3 py-1" style={primary} onClick={() => actions.onActionConfirm(item.id, item.hash, c.value)}>
+                {c.label}
+              </button>
+            ))
+          ) : (
+            <button type="button" data-testid="action-confirm" className="rounded-lg px-3 py-1" style={primary} onClick={() => actions.onActionConfirm(item.id, item.hash)}>
+              {item.confirm}
+            </button>
+          )}
           <button type="button" data-testid="action-cancel" className="glass rounded-lg px-3 py-1" onClick={() => actions.onActionCancel(item.id)}>
             Cancel
           </button>
         </div>
+      ) : item.state === 'running' && item.progress ? (
+        <ActionProgress item={item} progress={item.progress} onStop={() => actions.onActionStop(item.id)} />
       ) : (
         <div data-testid="action-state" className="mt-2 text-sm" style={{ color: item.state === 'failed' ? 'var(--danger)' : 'var(--muted)' }}>
           {item.result ?? ACTION_STATE_TEXT[item.state]}
@@ -306,5 +369,16 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <ActionCard item={item} actions={actions} />;
     case 'attachment':
       return <AttachmentCard item={item} />;
+    case 'build_result':
+      return (
+        <div data-kind="build_result" data-ok={item.ok} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.ok ? 'var(--accent)' : 'var(--danger)'}` }}>
+          <div data-testid="build-result-text">{item.text}</div>
+          {item.ok && (
+            <button type="button" data-testid="build-open" className="mt-3 rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onAppOpen(item.actionId)}>
+              Open
+            </button>
+          )}
+        </div>
+      );
   }
 }

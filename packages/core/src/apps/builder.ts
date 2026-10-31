@@ -22,7 +22,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { z } from 'zod';
 import { dataDir } from '../paths.js';
 import { cleanName } from '../system/controls.js';
@@ -39,6 +39,17 @@ export interface BuildRequest {
   name: string;
   request: string;
 }
+
+export interface BuildOptions {
+  signal?: AbortSignal | undefined;
+  /** Called with a short line each time Claude Code starts a step, e.g. "Writing index.html". */
+  onStep?: ((step: string) => void) | undefined;
+  /** This build's spending cap; the config's maxBudgetUsd when not given. */
+  maxBudgetUsd?: number | undefined;
+}
+
+/** How Claude Code is signed in, from `claude auth status`: 'plan' is a Claude subscription. */
+export type ClaudeLogin = 'plan' | 'api' | 'none' | 'unknown';
 
 export interface BuildResult {
   slug: string;
@@ -116,7 +127,7 @@ export function systemPrompt(name: string): string {
   ].join('\n');
 }
 
-export function claudeArgs(c: BuilderConfig, name: string): string[] {
+export function claudeArgs(c: BuilderConfig, name: string, maxBudgetUsd = c.maxBudgetUsd): string[] {
   return [
     '-p',
     '--output-format',
@@ -132,7 +143,7 @@ export function claudeArgs(c: BuilderConfig, name: string): string[] {
     '--strict-mcp-config',
     '--no-session-persistence',
     '--max-budget-usd',
-    String(c.maxBudgetUsd),
+    String(maxBudgetUsd),
     '--max-turns',
     String(MAX_TURNS),
     ...(c.model ? ['--model', c.model] : []),
@@ -150,7 +161,51 @@ const ResultLine = z.looseObject({
   total_cost_usd: z.number().optional(),
 });
 
-export class BuildError extends Error {}
+/**
+ * Claude Code's assistant messages, read only for the tool calls in them, to show progress.
+ * The block shape isn't documented, so anything unexpected is skipped.
+ */
+const AssistantLine = z.looseObject({
+  type: z.literal('assistant'),
+  message: z.looseObject({ content: z.array(z.unknown()) }),
+});
+const ToolUse = z.looseObject({
+  type: z.literal('tool_use'),
+  name: z.string(),
+  input: z.looseObject({ file_path: z.string().optional() }).optional(),
+});
+
+/** One short line for the Build card about what a tool call is doing. */
+export function stepText(tool: string, filePath?: string): string {
+  const file = filePath ? cleanName(basename(filePath)).slice(0, 60) : '';
+  switch (tool) {
+    case 'Write':
+      return file ? `Writing ${file}` : 'Writing a file';
+    case 'Edit':
+    case 'MultiEdit':
+      return file ? `Editing ${file}` : 'Editing a file';
+    case 'Read':
+      return file ? `Reading ${file}` : 'Reading a file';
+    case 'Glob':
+    case 'Grep':
+      return 'Looking through the files';
+    default:
+      return 'Working';
+  }
+}
+
+/** `claude auth status` prints JSON with authMethod; only that field is read. */
+const AuthStatus = z.looseObject({ authMethod: z.string().optional() });
+
+export class BuildError extends Error {
+  constructor(
+    message: string,
+    /** What Claude Code reported spending before it stopped, when it said. */
+    readonly costUsd: number | null = null,
+  ) {
+    super(message);
+  }
+}
 
 export interface AppBuilderOptions {
   config: BuilderConfig;
@@ -196,7 +251,46 @@ export class AppBuilder {
     return null;
   }
 
-  async build(req: BuildRequest, signal?: AbortSignal): Promise<BuildResult> {
+  /**
+   * How Claude Code is signed in. Runs `claude auth status`, which prints no secrets; only its
+   * authMethod is read. 'unknown' when it can't tell (an older Claude Code, a timeout).
+   */
+  login(): Promise<ClaudeLogin> {
+    return new Promise((resolve) => {
+      let out = '';
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(this.o.config.command, ['auth', 'status'], { env: this.env, shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
+      } catch {
+        resolve('unknown');
+        return;
+      }
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        resolve('unknown');
+      }, 10_000);
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', (d: string) => {
+        out = (out + d).slice(0, 10_000);
+      });
+      child.once('error', () => {
+        clearTimeout(timer);
+        resolve('unknown');
+      });
+      child.once('close', () => {
+        clearTimeout(timer);
+        let method: string | undefined;
+        try {
+          method = AuthStatus.safeParse(JSON.parse(out)).data?.authMethod;
+        } catch {
+          method = undefined;
+        }
+        resolve(method === undefined ? 'unknown' : method === 'none' ? 'none' : method === 'claude.ai' ? 'plan' : 'api');
+      });
+    });
+  }
+
+  async build(req: BuildRequest, opts: BuildOptions = {}): Promise<BuildResult> {
     const name = appName(req.name);
     const slug = name ? appSlug(name) : null;
     if (!name || !slug) throw new BuildError('that is not a usable app name');
@@ -209,7 +303,7 @@ export class AppBuilder {
         if (!SAFE_PATH.test(p)) throw new BuildError(`the folder ${p} has characters a launcher can't hold`);
       }
       await mkdir(dir, { recursive: true });
-      const { summary, costUsd } = await this.runClaude(dir, name, req.request, signal);
+      const { summary, costUsd } = await this.runClaude(dir, name, req.request, opts);
       const index = join(dir, 'index.html');
       const st = await lstat(index).catch(() => null);
       if (!st?.isFile()) throw new BuildError("Claude Code finished without writing index.html, so there's no app to open");
@@ -252,10 +346,12 @@ export class AppBuilder {
     );
   }
 
-  private runClaude(dir: string, name: string, request: string, signal?: AbortSignal): Promise<{ summary: string; costUsd: number | null }> {
+  private runClaude(dir: string, name: string, request: string, opts: BuildOptions): Promise<{ summary: string; costUsd: number | null }> {
     const c = this.o.config;
+    const { signal, onStep } = opts;
+    const budget = opts.maxBudgetUsd ?? c.maxBudgetUsd;
     return new Promise((resolve, reject) => {
-      const child = spawn(c.command, claudeArgs(c, name), { cwd: dir, env: this.env, shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(c.command, claudeArgs(c, name, budget), { cwd: dir, env: this.env, shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
       let out = '';
       let err = '';
       let result: z.infer<typeof ResultLine> | null = null;
@@ -288,8 +384,16 @@ export class AppBuilder {
           out = out.slice(nl + 1);
           if (!line.startsWith('{')) continue;
           try {
-            const parsed = ResultLine.safeParse(JSON.parse(line));
+            const json: unknown = JSON.parse(line);
+            const parsed = ResultLine.safeParse(json);
             if (parsed.success) result = parsed.data;
+            const said = onStep ? AssistantLine.safeParse(json) : null;
+            if (said?.success) {
+              for (const block of said.data.message.content) {
+                const use = ToolUse.safeParse(block);
+                if (use.success) onStep!(stepText(use.data.name, use.data.input?.file_path));
+              }
+            }
           } catch {
             // Not JSON; ignore.
           }
@@ -311,8 +415,12 @@ export class AppBuilder {
           resolve({ summary: cleanName(r.result ?? '').slice(0, 200), costUsd: cost });
           return;
         }
+        if (r?.subtype === 'error_max_budget_usd') {
+          reject(new BuildError(`it reached its $${budget} spending cap before finishing`, cost));
+          return;
+        }
         const why = r?.is_error ? cleanName(r.result ?? r.subtype ?? 'error') : cleanName(err.split('\n').filter(Boolean).at(-1) ?? '') || `it exited with code ${code ?? 'unknown'}`;
-        reject(new BuildError(`Claude Code stopped: ${why.slice(0, 200)}`));
+        reject(new BuildError(`Claude Code stopped: ${why.slice(0, 200)}`, cost));
       });
       child.stdin.end(request);
     });

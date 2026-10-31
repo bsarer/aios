@@ -34,6 +34,7 @@ import {
   mailTools,
   systemTools,
   buildAppTool,
+  BuildLog,
   toolByName,
   triageRequest,
 } from '@aios/core';
@@ -158,8 +159,20 @@ describe('hostile mail', () => {
         build: async (r: { name: string; request: string }) => (built.push(r), { slug: 'x', name: r.name, created: true, summary: '', costUsd: null, desktopId: 'aios-app-x.desktop' }),
         exists: () => false,
         unavailable: async () => null,
+        login: async () => 'plan' as const,
       };
-      tools.register(buildAppTool({ builder, actions: systemActions, scan: async () => [] }));
+      const notified: unknown[] = [];
+      tools.register(
+        buildAppTool({
+          builder,
+          actions: systemActions,
+          scan: async () => [],
+          log: new BuildLog(store),
+          budgets: [1, 2, 5],
+          post: (item) => cards.push(item),
+          notify: (...n) => void notified.push(n),
+        }),
+      );
 
       const call = (name: string, args: unknown): ToolCall => ({ id: name, name, arguments: JSON.stringify(args) });
       // An email with attachments is read only through them, so the attachment tool alone must taint the turn.
@@ -220,6 +233,7 @@ describe('hostile mail', () => {
       expect(moved).toEqual([]);
       // No app was built, and no Build card was shown.
       expect(built).toEqual([]);
+      expect(notified).toEqual([]);
       // Not one system command started. Device changes the email asked for exist only as cards
       // that say an email was in view, waiting for a click that never came.
       expect(commands).toEqual([]);

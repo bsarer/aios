@@ -98,6 +98,23 @@ export const ChatItem = z.discriminatedUnion('kind', [
     state: z.enum(['pending', 'running', 'done', 'cancelled', 'failed']),
     /** Outcome written by code after it ran. */
     result: z.string().optional(),
+    /** S4: a line under the title written by code, e.g. what similar builds cost. */
+    note: z.string().optional(),
+    /** S4: confirm buttons that each pick an option (a build's spending cap); shown instead of `confirm`. */
+    choices: z.array(z.strictObject({ label: z.string(), value: z.string().max(20) })).max(4).optional(),
+    /** S4: while running, what it is doing now; the card can be stopped while this is set. */
+    progress: z.strictObject({ step: z.string(), startedAt: z.number(), capUsd: z.number().optional() }).optional(),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('build_result'),
+    /** S4: posted when an app build finishes or fails. */
+    id: z.string(),
+    /** The Build card it came from; Open sends this back. */
+    actionId: z.string(),
+    /** Written by code. */
+    text: z.string(),
+    ok: z.boolean(),
     at: z.number(),
   }),
   z.strictObject({
@@ -141,8 +158,12 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('mail_ignore'), itemId: z.string().max(100), mailId: z.string().max(100) }),
   z.strictObject({ type: z.literal('draft_send'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('draft_discard'), id: z.string().max(100) }),
-  z.strictObject({ type: z.literal('action_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('action_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/), choice: z.string().max(20).optional() }),
   z.strictObject({ type: z.literal('action_cancel'), id: z.string().max(100) }),
+  /** S4: Stop on a running build card. */
+  z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
+  /** S4: Open on a finished build; names the Build card, never an app or command. */
+  z.strictObject({ type: z.literal('app_open'), actionId: z.string().max(100) }),
   z.strictObject({
     type: z.literal('draft_edit'),
     id: z.string().max(100),

@@ -116,6 +116,13 @@ export const ALPHA_TOOLS = [
       request: z.string().min(1).max(2000).describe("What to build or change, in the user's own words with any details they gave"),
     }),
   }),
+  def({
+    name: 'build_status',
+    tier: 'read',
+    description:
+      'How app builds are going: Build cards still waiting for a click, the build running now (how long, what step, its cap), and recent builds that finished, failed or were stopped, with cost. Use when the user asks about a build.',
+    input: z.strictObject({}),
+  }),
   // ── System controls (S1) ──
   def({
     name: 'system_status',

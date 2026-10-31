@@ -10,8 +10,10 @@ import { hyprlandIpc } from './apps/hyprland.js';
 import { createLauncher } from './apps/launcher.js';
 import { scanApps } from './apps/desktop.js';
 import { AppBuilder } from './apps/builder.js';
-import { appTools, buildAppTool } from './apps/tools.js';
+import { BuildLog } from './apps/history.js';
+import { appTools, buildAppTool, buildStatusTool, builtAppOpener } from './apps/tools.js';
 import { ChatWindow } from './apps/window.js';
+import { desktopNotify } from './notify.js';
 import { AuditLog } from './audit.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
@@ -123,9 +125,27 @@ async function main(): Promise<void> {
     onMode: (mode) => shell?.broadcast({ type: 'window', mode }),
     notice: (level, text) => shell?.agent.notice(level, text),
   });
-  const apps = appTools({ scan: () => scanApps(), launch: createLauncher(), window: chatWindow });
+  const launch = createLauncher();
+  const apps = appTools({ scan: () => scanApps(), launch, window: chatWindow });
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
-  if (config.builder.enabled) tools.register(buildAppTool({ builder: new AppBuilder({ config: config.builder }), actions: systemActions, scan: () => scanApps() }));
+  const buildLog = new BuildLog(store);
+  buildLog.recover(Date.now());
+  if (config.builder.enabled) {
+    const { maxBudgetUsd, budgetChoicesUsd } = config.builder;
+    const budgets = budgetChoicesUsd.filter((b) => b <= maxBudgetUsd);
+    tools.register(
+      buildAppTool({
+        builder: new AppBuilder({ config: config.builder }),
+        actions: systemActions,
+        scan: () => scanApps(),
+        log: buildLog,
+        budgets: budgets.length ? budgets : [maxBudgetUsd],
+        post: (item) => shell?.agent.post(item),
+        notify: (title, body) => desktopNotify(title, body),
+      }),
+    );
+    tools.register(buildStatusTool({ log: buildLog, actions: systemActions }));
+  }
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
   let nightlyNoticeFor = '';
   const nightly = new Nightly({
@@ -162,6 +182,7 @@ async function main(): Promise<void> {
     approvals,
     systemActions,
     chatWindow,
+    openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),
   });

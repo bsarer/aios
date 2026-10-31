@@ -106,6 +106,17 @@ export const ALPHA_TOOLS = [
     }),
   }),
   def({
+    name: 'calendar_find',
+    tier: 'read',
+    description:
+      "Find the id of one of the user's events to change or cancel: events from `from` to `to` (optionally matching a query, e.g. \"lunch\"), as id, time and whether the user organizes it. It gives no titles or other event text; use calendar_list to tell the user what is on.",
+    input: z.strictObject({
+      from: z.string().describe('Local date "2026-11-02" or time "2026-11-02T09:00"'),
+      to: z.string().optional().describe('Local date (inclusive) or time; default: the end of the day `from` is on'),
+      query: z.string().max(200).optional().describe('Words from the title, place or guests'),
+    }),
+  }),
+  def({
     name: 'calendar_free',
     tier: 'read',
     description:
@@ -120,7 +131,7 @@ export const ALPHA_TOOLS = [
   }),
   def({
     name: 'calendar_create_event',
-    tier: 'draft',
+    tier: 'write',
     description:
       'Propose a new event in the user\'s calendar. Shows a card with every detail; nothing is added and no invite is sent until the user clicks Add. Times are the user\'s local time; give dates without times for an all-day event.',
     input: z.strictObject({
@@ -134,9 +145,9 @@ export const ALPHA_TOOLS = [
   }),
   def({
     name: 'calendar_update_event',
-    tier: 'draft',
+    tier: 'write',
     description:
-      "Propose a change to one of the user's own events, by its id from calendar_list: a new time (moving it keeps its length unless an end is given), title, place or description, or more guests. Shows a card; nothing changes until the user clicks Change.",
+      "Propose a change to one of the user's own events, by its id from calendar_find: a new time (moving it keeps its length unless an end is given), title, place or description, or more guests. Shows a card; nothing changes until the user clicks Change.",
     input: z
       .strictObject({
         id: z.string().min(1).max(300),
@@ -151,8 +162,8 @@ export const ALPHA_TOOLS = [
   }),
   def({
     name: 'calendar_cancel_event',
-    tier: 'draft',
-    description: "Propose cancelling one of the user's own events, by its id from calendar_list. Shows a card; nothing is cancelled and no guest is told until the user clicks Cancel event.",
+    tier: 'write',
+    description: "Propose cancelling one of the user's own events, by its id from calendar_find. Shows a card; nothing is cancelled and no guest is told until the user clicks Cancel event.",
     input: z.strictObject({ id: z.string().min(1).max(300) }),
   }),
   // ── Apps (S3) ──

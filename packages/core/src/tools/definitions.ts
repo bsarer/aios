@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_CHANGES, SheetChange, WordChange } from '../docs/changes.js';
 
 /**
  * Risk tiers are enforced in code (registry and approval brokers), not by prompts.
@@ -247,6 +248,44 @@ export const ALPHA_TOOLS = [
     description:
       'Open a Word file in WordCraft or an Excel file in GridCraft, in its own window. The chat shrinks to a red orb at the top of the screen and comes back when the app is closed.',
     input: z.strictObject({ path: z.string().min(1).max(1000) }),
+  }),
+  // ── Editing documents (D2) ──
+  def({
+    name: 'doc_edit',
+    tier: 'write',
+    description:
+      'Propose changes to a Word (.docx) file: replace or delete text, format or restyle text, add paragraphs at the end. Shows a card listing every change; nothing is saved until the user clicks Save, and then it goes to a NEW file next to the original (report-edited.docx). Read the document with doc_read first and quote `find` text exactly as it appears. Set overwrite only when the user said in their own words to overwrite or replace the original.',
+    input: z.strictObject({
+      path: z.string().min(1).max(1000),
+      changes: z.array(WordChange).min(1).max(MAX_CHANGES).describe('Applied in order'),
+      overwrite: z.boolean().optional().describe('Save over the original (a backup is kept). Only when the user asked for it'),
+    }),
+  }),
+  def({
+    name: 'sheet_edit',
+    tier: 'write',
+    description:
+      'Propose changes to one sheet of an Excel (.xlsx) file: set values or formulas, format cells, insert or delete rows and columns, sort, add a chart or table, fill a formula down. Shows a card listing every change; nothing is saved until the user clicks Save, and then it goes to a NEW file next to the original (sales-edited.xlsx). Read the cells with sheet_read first. Set overwrite only when the user said in their own words to overwrite or replace the original.',
+    input: z.strictObject({
+      path: z.string().min(1).max(1000),
+      sheet: z.string().min(1).max(100).optional().describe('The sheet to change; the first sheet when left out'),
+      changes: z.array(SheetChange).min(1).max(MAX_CHANGES).describe('Applied in order'),
+      overwrite: z.boolean().optional().describe('Save over the original (a backup is kept). Only when the user asked for it'),
+    }),
+  }),
+  def({
+    name: 'doc_create',
+    tier: 'write',
+    description:
+      'Propose a new Word or Excel file in the first document folder. Word: give `word` changes (usually one append with the paragraphs). Excel: give `sheet` changes (usually set with the rows, then format). Shows a card; the file is created only when the user clicks Save, and never over an existing file.',
+    input: z
+      .strictObject({
+        name: z.string().min(1).max(120).describe('File name without folder, e.g. "Trip budget"'),
+        kind: z.enum(['word', 'sheet']),
+        word: z.array(WordChange).min(1).max(MAX_CHANGES).optional(),
+        sheet: z.array(SheetChange).min(1).max(MAX_CHANGES).optional(),
+      })
+      .refine((a) => (a.kind === 'word' ? !!a.word && !a.sheet : !!a.sheet && !a.word), 'give `word` changes for a Word file or `sheet` changes for an Excel file'),
   }),
   // ── System controls (S1) ──
   def({

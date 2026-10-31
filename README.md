@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is in review.
 
 ## Mail
 
@@ -102,12 +102,13 @@ AI OS asks only for `calendar.events` (see and change events), not calendar sett
 
 ## Word and Excel files
 
-The chat reads, summarizes and shows `.docx` and `.xlsx` files from your document folders (D1), using the command-line tools of [WordCraft](https://github.com/storytold/wordcraft) and [GridCraft](https://github.com/storytold/gridcraft), open-source word processor and spreadsheet apps (MIT OR Apache-2.0). It can't change files yet; that's D2.
+The chat reads, summarizes and shows `.docx` and `.xlsx` files from your document folders (D1), using the command-line tools of [WordCraft](https://github.com/storytold/wordcraft) and [GridCraft](https://github.com/storytold/gridcraft), open-source word processor and spreadsheet apps (MIT OR Apache-2.0). Since D2 it can also change them and create new ones, always through a card you click.
 
 - **Ask about a document:** "summarize ~/Documents/report.docx", "what are the action items in the contract?", "top 3 products in sales.xlsx", "what's the total of column D?". Word text comes from `wordcraft-cli text`; cells come from `gridcraft-cli cat`, and totals, averages and counts from GridCraft's own formulas (`sheet_eval`), not from the model's arithmetic.
 - **See it:** "show me the report" posts a card; **Open** shows a Word file's pages (WordCraft turns it into a PDF) or a workbook's sheets as a table, full screen in the chat. "Open budget.xlsx in GridCraft" opens the app itself, and the chat becomes the orb as for other apps.
+- **Change it (D2):** "move the lease date in report.docx to 30 November", "make the title bold", "add a Price column to sales.xlsx and sort by revenue", "make a new budget spreadsheet with these rows". The chat shows a card listing each change with the text before and after; nothing is saved until you click **Save as new file**, and the result goes next to the original as `report-edited.docx` (then `-edited-2`…). The original is never touched unless you say so in your own words ("…and overwrite the original"); then the card is red, says **Overwrite**, and the original is copied to `~/.local/share/aios/doc-backups` first. If the file changed after the card appeared, or the new name got taken, nothing is written and the card says why. Changes come from a fixed list (replace, delete, format, restyle and add text; set cells and formulas, format, insert or delete rows and columns, sort, chart, table, fill down) that code turns into the apps' own commands; nothing else can run. A workbook GridCraft might not save back perfectly (`gridcraft-cli check`) gets a warning on the card.
 - **Only your folders:** files must be real `.docx`/`.xlsx` files inside `[docs] roots` (default `~/Documents`): links that lead out, hidden files, other types and a renamed file that isn't really a document are refused.
-- **Documents are outside text:** files can come from anywhere, so their text, cells, sheet names and even file names reach the model like an email does, sanitized, wrapped in `<untrusted>` tags and hidden again from your next message on. Formulas may only use calculation functions, never ones that reach the network or other files.
+- **Documents are outside text:** files can come from anywhere, so their text, cells, sheet names and even file names reach the model like an email does, sanitized, wrapped in `<untrusted>` tags and hidden again from your next message on. Formulas may only use calculation functions, never ones that reach the network or other files. A change card that appears while a document is in view says so; with an email or calendar event in view, the chat can't propose changes at all.
 
 **Install the apps.** GridCraft publishes Linux builds on its [releases page](https://github.com/storytold/gridcraft/releases) (AppImage, .deb, .rpm, Flatpak, .pkg.tar.zst, tarball). WordCraft had no published release on 31 October 2026, so build it from source (`cargo build --release -p wordcraft -p wordcraft-cli` in a clone) or use the AUR package. Put `wordcraft`, `wordcraft-cli`, `gridcraft` and `gridcraft-cli` on the service's PATH, or set their full paths in `[docs]` (`wordCli`, `sheetCli`, `wordApp`, `sheetApp`). Check with `wordcraft-cli text some.docx` and `gridcraft-cli version`. Settings: `[docs]` `enabled`, `roots`, `timeoutSeconds` (default 12).
 
@@ -181,6 +182,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in D2
+
+None. D2 uses the same WordCraft and GridCraft command-line tools as D1 (`run --script`, `check`).
 
 ## Dependencies added in D1
 

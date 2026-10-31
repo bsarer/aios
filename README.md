@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is in review.
 
 ## Mail
 
@@ -100,6 +100,17 @@ Google Calendar, through its REST API with plain `fetch` (no Google SDK), signed
 
 AI OS asks only for `calendar.events` (see and change events), not calendar settings or sharing. Google shows an "unverified app" warning for a personal project like this; that's expected. **While the consent screen is in "Testing", Google expires the sign-in after 7 days**, and the chat will then say to run `pnpm calendar:login`. To stop that, set the consent screen's publishing status to **In production**; for your own use it stays unverified. Settings: `[calendar]` `clientId`, `calendarId` (default `primary`), `defaultMinutes`, `workday`.
 
+## Word and Excel files
+
+The chat reads, summarizes and shows `.docx` and `.xlsx` files from your document folders (D1), using the command-line tools of [WordCraft](https://github.com/storytold/wordcraft) and [GridCraft](https://github.com/storytold/gridcraft), open-source word processor and spreadsheet apps (MIT OR Apache-2.0). It can't change files yet; that's D2.
+
+- **Ask about a document:** "summarize ~/Documents/report.docx", "what are the action items in the contract?", "top 3 products in sales.xlsx", "what's the total of column D?". Word text comes from `wordcraft-cli text`; cells come from `gridcraft-cli cat`, and totals, averages and counts from GridCraft's own formulas (`sheet_eval`), not from the model's arithmetic.
+- **See it:** "show me the report" posts a card; **Open** shows a Word file's pages (WordCraft turns it into a PDF) or a workbook's sheets as a table, full screen in the chat. "Open budget.xlsx in GridCraft" opens the app itself, and the chat becomes the orb as for other apps.
+- **Only your folders:** files must be real `.docx`/`.xlsx` files inside `[docs] roots` (default `~/Documents`): links that lead out, hidden files, other types and a renamed file that isn't really a document are refused.
+- **Documents are outside text:** files can come from anywhere, so their text, cells, sheet names and even file names reach the model like an email does, sanitized, wrapped in `<untrusted>` tags and hidden again from your next message on. Formulas may only use calculation functions, never ones that reach the network or other files.
+
+**Install the apps.** GridCraft publishes Linux builds on its [releases page](https://github.com/storytold/gridcraft/releases) (AppImage, .deb, .rpm, Flatpak, .pkg.tar.zst, tarball). WordCraft had no published release on 31 October 2026, so build it from source (`cargo build --release -p wordcraft -p wordcraft-cli` in a clone) or use the AUR package. Put `wordcraft`, `wordcraft-cli`, `gridcraft` and `gridcraft-cli` on the service's PATH, or set their full paths in `[docs]` (`wordCli`, `sheetCli`, `wordApp`, `sheetApp`). Check with `wordcraft-cli text some.docx` and `gridcraft-cli version`. Settings: `[docs]` `enabled`, `roots`, `timeoutSeconds` (default 12).
+
 ## Limits, failures and logs
 
 - **Daily cost cap:** `[cost] dailyCapUsd` (default 2). Once today's spend (midnight to midnight in your timezone) reaches it, no model call is made by chat, mail triage or the nightly summary until tomorrow. The chat says so, `/cost` shows the numbers, and new mail is still listed by sender and subject without a summary. Spend is what the provider reports per call (OpenRouter does), so a provider that reports no cost is never capped.
@@ -164,11 +175,16 @@ IMAP `127.0.0.1:3143`, SMTP `127.0.0.1:3025`, no TLS, user `john@aios.test`, pas
 ```
 packages/shared   config schema (zod) and TOML parsing
 packages/core     daemon: agent loop, Fastify/WebSocket server, SQLite store, memory, audit log, model adapter, keyring, tools, system controls, apps and the chat window
-packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip, attachment viewer, orb
+packages/ui       React chat UI (Vite + Tailwind): streaming chat, status strip, attachment and document viewers, orb
 scripts           setup/uninstall CLI, mail seeder and checker, browser e2e check
 fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
+fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in D1
+
+None in npm. WordCraft and GridCraft are separate programs you install yourself (Rust, MIT OR Apache-2.0, actively developed, alpha quality by their own account). Tests use pretend versions of their command-line tools (`fixtures/documents.ts`) and never run the real apps.
 
 ## Dependencies added in C1
 

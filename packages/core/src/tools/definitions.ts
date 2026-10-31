@@ -106,6 +106,16 @@ export const ALPHA_TOOLS = [
       'Start an installed app, by its id from apps_list or its exact name. It opens in its own window; the chat shrinks to a red orb at the top of the screen and comes back when the app is closed. Apps start without files, links or options.',
     input: z.strictObject({ app: z.string().min(1).max(200).describe('App id from apps_list, e.g. "firefox", or its exact name') }),
   }),
+  def({
+    name: 'build_app',
+    tier: 'write',
+    description:
+      'Build a new app, or change one built before, with Claude Code: a small local app (HTML/JS, no internet) that opens in its own window and then appears among the installed apps. Shows a Build card; nothing is built until the user clicks it. Use when the user asks to make, create or build an app, tool, game or widget, or to change one they built.',
+    input: z.strictObject({
+      name: z.string().min(1).max(40).describe('Short app name for the launcher, e.g. "Pomodoro"; the same name changes an existing app'),
+      request: z.string().min(1).max(2000).describe("What to build or change, in the user's own words with any details they gave"),
+    }),
+  }),
   // ── System controls (S1) ──
   def({
     name: 'system_status',

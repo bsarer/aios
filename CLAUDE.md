@@ -1,7 +1,7 @@
 # Rules for working on AI OS (alpha)
 - Follow AIOS_ALPHA_PLAN.md. One milestone at a time; stop and report after each.
 - TypeScript strict. Validate all external input with zod. No `any` without a comment.
-- No vendor AI SDKs; model access only through packages/core/src/model.ts.
+- No vendor AI SDKs; model access only through packages/core/src/model.ts. One approved exception (S4): the app builder runs the Claude Code CLI as a separate program (packages/core/src/apps/builder.ts).
 - Model names/endpoints live in config only; never hardcode them elsewhere.
 - Never read, write, or log real credentials. Secrets go through the keyring wrapper. Tests use the docker stack only.
 - Tool risk tiers and approvals are enforced in code (approval broker), not just in prompts.

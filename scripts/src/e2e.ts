@@ -11,7 +11,7 @@
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -104,6 +104,16 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_r', function: { name: 'mail_read', arguments: JSON.stringify({ id: readId }) } }] } }] });
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
     return void res.end('data: [DONE]\n\n');
+  }
+  // S4: building an app. Ask for it with build_app, then answer with one line.
+  if (last.role === 'user' && /^make me a pomodoro timer$/i.test(lastUser)) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_build', function: { name: 'build_app', arguments: JSON.stringify({ name: 'Pomodoro', request: 'a pomodoro timer' }) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /^A card now asks the user to confirm building/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'Click Build on the card and I will make it.' } }] });
+    return finish(0.0004);
   }
   // S3: apps. List them, or start one; then answer with one line.
   const appCall = last.role === 'user' ? (/^what apps do i have\??$/i.test(lastUser) ? ['apps_list', {}] : /^open (\w+)$/i.test(lastUser) && !/attachment/i.test(lastUser) ? ['open_app', { app: /^open (\w+)$/i.exec(lastUser)![1] }] : null) : null;
@@ -257,7 +267,16 @@ async function waitFor(fn: () => Promise<boolean>, ms = 5000): Promise<boolean> 
 
 async function main(): Promise<void> {
   if (shots) mkdirSync(shots, { recursive: true });
-  const mock = createServer((req, res) => void mockModel(req, res));
+  // S4: a built app trying the network would hit /probe; its policy must stop it first.
+  let probeHits = 0;
+  const mock = createServer((req, res) => {
+    if (req.url?.startsWith('/probe')) {
+      probeHits++;
+      res.writeHead(200, { 'access-control-allow-origin': '*', 'content-type': 'text/plain' });
+      return void res.end('reached');
+    }
+    void mockModel(req, res);
+  });
   await new Promise<void>((r) => mock.listen(0, '127.0.0.1', r));
   const mockPort = (mock.address() as AddressInfo).port;
 
@@ -308,6 +327,16 @@ async function main(): Promise<void> {
   ].join('\n');
   fakes['uwsm-app'] = '[ "$1" = -- ] && shift\nexec "$@"';
   fakes['gtk-launch'] = 'echo "$1" >> "$S/launched"';
+  // S4: a pretend Claude Code. It notes how it was run and writes an app that tries the network.
+  fakes.claude = [
+    'pwd > "$S/claude-cwd"',
+    'printf "%s\\n" "$@" > "$S/claude-args"',
+    'cat > "$S/claude-stdin"',
+    `printf '%s' '<!doctype html><html><head><title>Pomodoro</title></head><body><p id="local">waiting</p><p id="net">waiting</p><script src="app.js"></script></body></html>' > index.html`,
+    `printf '%s' "document.getElementById('local').textContent = 'local script ran'; fetch('http://127.0.0.1:${mockPort}/probe').then(() => { document.getElementById('net').textContent = 'reached' }, () => { document.getElementById('net').textContent = 'blocked' });" > app.js`,
+    `echo '{"type":"result","subtype":"success","is_error":false,"result":"A 25-minute focus timer.","total_cost_usd":0.31}'`,
+  ].join('\n');
+  fakes.chromium = 'exit 0';
   const apps = join(tmp, 'data', 'applications');
   mkdirSync(apps, { recursive: true });
   writeFileSync(join(apps, 'firefox.desktop'), '[Desktop Entry]\nType=Application\nName=Firefox\nComment=Browse the web\nExec=firefox %u\nCategories=Network;WebBrowser;\n');
@@ -525,6 +554,32 @@ async function main(): Promise<void> {
     check('closing Firefox brings the chat back full screen', await waitFor(async () => (await orb.count()) === 0 && (await page.getByTestId('window-controls').count()) === 0 && (await input.count()) === 1));
     check('Hyprland was asked for fullscreen', dispatches().at(-2) === 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "address:0xc4a7" })', dispatches().at(-2));
     await shot(page, 's3-back');
+
+    // S4: building an app. A Build card, Claude Code runs on the click, and the app is offline.
+    await input.fill('make me a pomodoro timer');
+    await input.press('Enter');
+    const buildCard = page.locator('[data-kind="action"]').last();
+    check('"make me a pomodoro timer" shows a Build card', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'pending' && (await buildCard.getByTestId('action-confirm').innerText()) === 'Build'));
+    check('nothing is built before the click', !existsSync(join(state, 'claude-args')));
+    await shot(page, 's4-build-card');
+    await buildCard.getByTestId('action-confirm').click();
+    check('Build runs Claude Code and says what it made', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'done' && (await buildCard.innerText()).includes('Built “Pomodoro”. A 25-minute focus timer. It cost $0.31. Say “open Pomodoro” to start it.')), await buildCard.innerText());
+    const appDir = join(tmp, 'data', 'aios', 'apps', 'pomodoro');
+    check('Claude Code ran in the app folder, restricted, with the request on stdin', fakeState('claude-cwd') === appDir && fakeState('claude-args').includes('--restricted') && fakeState('claude-stdin') === 'a pomodoro timer', fakeState('claude-cwd'));
+    await shot(page, 's4-built');
+    await input.fill('open pomodoro');
+    await input.press('Enter');
+    check('"open pomodoro" starts the built app', await waitFor(async () => fakeState('launched').split('\n').includes('aios-app-pomodoro.desktop')), fakeState('launched'));
+    hyprEmit('openwindow>>b1d,1,aios-app-pomodoro,Pomodoro');
+    hyprEmit('closewindow>>b1d');
+    check('closing it brings the chat back', await waitFor(async () => (await page.getByTestId('orb').count()) === 0 && (await input.count()) === 1));
+    // The built page itself, in Chromium: its own script runs, the network does not.
+    const appPage = await browser.newPage();
+    await appPage.goto(`file://${appDir}/index.html`);
+    check("the built app's own script runs", await waitFor(async () => (await appPage.locator('#local').innerText()) === 'local script ran'));
+    check('the built app cannot reach the network', await waitFor(async () => (await appPage.locator('#net').innerText()) === 'blocked') && probeHits === 0, `${await appPage.locator('#net').innerText()}, ${probeHits} hits`);
+    await appPage.close();
+    await page.bringToFront();
     // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
     if (await mailStackUp()) {
       check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Mail: connected'), 15_000));

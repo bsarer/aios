@@ -91,6 +91,18 @@ export const AiosConfig = z.strictObject({
       kiosk: z.boolean().default(true),
     })
     .default({ port: 7777, kiosk: true }),
+  /** S4: building apps with Claude Code. */
+  builder: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      /** Claude Code's command. An absolute path when the service doesn't see it on PATH. */
+      command: z.string().min(1).default('claude'),
+      /** Passed to Claude Code as --model when set; otherwise it uses its own default. */
+      model: z.string().min(1).optional(),
+      maxBudgetUsd: z.number().positive().max(50).default(2),
+      timeoutMinutes: z.int().min(1).max(60).default(15),
+    })
+    .default({ enabled: true, command: 'claude', maxBudgetUsd: 2, timeoutMinutes: 15 }),
 });
 export type AiosConfig = z.infer<typeof AiosConfig>;
 

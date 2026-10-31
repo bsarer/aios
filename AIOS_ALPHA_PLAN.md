@@ -20,6 +20,7 @@ An app on Omarchy that takes over the whole screen (kiosk mode) and is, from the
 7. System controls by chat (milestone S1, added 2026-10-25): Wi-Fi, Bluetooth, brightness, volume, night light, do not disturb, audio output, microphone mute, power profile, battery and system status, screen lock, theme.
 8. Email attachments (milestone S2, added 2026-10-25): open PDF, text and image attachments in a viewer in the chat; the model can read the text of PDF and text attachments, never images.
 9. Starting apps by chat (milestone S3, added 2026-10-26): the chat knows the installed apps and starts one when asked; while it is open the chat waits as a red orb at the top of the screen.
+10. Building apps by chat (milestone S4, added 2026-10-31): describe an app ("make me a pomodoro timer") and, after a click, Claude Code writes it as a small local web app that shows up among the installed apps; asking again changes it.
 
 ### Out of scope (parked for after alpha)
 WhatsApp, calendar, docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
@@ -125,6 +126,7 @@ Output a table; pick the default per role from the results, not from reputation.
 | `memory_propose(fact)` | draft | Queues a memory suggestion for user confirmation (see §6) |
 | `apps_list(query?)` | read | S3: installed apps from their desktop entries, with the id `open_app` takes |
 | `open_app(app)` | device | S3: starts one installed app by its desktop id (`uwsm-app -- gtk-launch <id>`); no command, file, link or option. A confirm card while an email is in view |
+| `build_app(name, request)` | **write** | S4: shows a Build card; the click runs Claude Code headless in that app's own folder to create or change a local web app, then adds its launcher entry |
 | `now()` | read | Current date, time, timezone |
 | System controls (S1) | read / device / write | See S1 in §11: status reads are `read`; small reversible changes are `device`; Wi-Fi off, switching networks, pairing and forgetting Bluetooth devices are `write` |
 
@@ -271,6 +273,10 @@ Open PDF, text and image attachments from email. `mail_attachment_show` posts a 
 **S3: Starting apps** (approved 2026-10-26; after S2, before A8)
 `apps_list` reads installed apps from XDG desktop entries ($XDG_DATA_HOME, then $XDG_DATA_DIRS; NoDisplay, Hidden, OnlyShowIn/NotShowIn and TryExec respected; the Exec line is never read). `open_app` (device tier) starts one by its desktop id the way Omarchy does, `uwsm-app -- gtk-launch <id>`, without a shell; ids must look like desktop ids and come from the list, and nothing else (no command, file, URL or option) can be passed. Core moves the chat window through Hyprland's IPC (`hyprctl dispatch` with Hyprland 0.55's Lua dispatchers, the `.socket2.sock` event socket for `openwindow`/`closewindow`): full screen → orb when an app starts → half screen when the orb is clicked → full screen when the last app the chat started closes. An app that opens no new window (already running) leaves the orb in place. Every start and every window move is audited. No new dependencies.
 *Accept:* "open Firefox" starts it and the chat becomes the orb; clicking the orb gives a half-screen chat; closing Firefox brings the chat back full screen; an email asking to open an app only gets a card; checked on the real machine.
+
+**S4: Building apps** (approved 2026-10-31; after S3, before A8)
+`build_app` (write tier) posts a **Build** card naming the app and the request; nothing runs until the user clicks it, and never from a turn with an email in view. The click runs Claude Code headless (`claude -p`, the command and optional model in config) in `~/.local/share/aios/apps/<app>/`, with `--restricted` and only the Read, Write, Edit, Glob and Grep tools (no shell, no web), `acceptEdits` inside that folder only, permission prompts denied, no MCP servers, a spending cap and a time limit. It builds a single-page HTML/CSS/JS app with `index.html` as its entry, no network and data in localStorage. Afterwards AI OS checks the result, adds a Content-Security-Policy that blocks all network access and loading from elsewhere, and writes `aios-app-<app>.desktop` that opens it as a Chromium app window with its own profile, so `apps_list` and `open_app` (S3) handle it like any app. Asking again about an existing app changes it in place. Every build is audited with its cost. This is an approved exception to "model access only through model.ts": Claude Code is a separate program with its own login and model access. Apps that need the network or system access are a later step.
+*Accept:* "make me a pomodoro timer" shows a Build card; the click builds it and "open Pomodoro" starts it; "make the breaks 10 minutes" changes it; the built app cannot reach the network; an email asking to build an app gets no card (CI injection suite); checked on the real machine.
 
 **A8: Dogfood week**
 Use it daily (including system controls); record median latency, cost per day, notification precision (useful vs noisy), crashes, and what you reached for outside the chat.

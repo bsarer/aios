@@ -38,6 +38,8 @@ export interface RegisteredTool {
   untrustedOutput?: boolean;
   /** Write tier: what the model is told when its call is refused. */
   deniedMessage?: string;
+  /** What the audit log records of valid arguments, when they hold the user's own words (S4). Default: all of them. */
+  auditArgs?: (args: unknown) => unknown;
 }
 
 export interface ToolOutcome {
@@ -123,31 +125,32 @@ export class ToolRegistry {
       return { ok: false, content: `Error: invalid arguments: ${parsed.error.issues.map((i) => i.message).join('; ')}`, label };
     }
 
+    const args = tool.auditArgs ? tool.auditArgs(parsed.data) : parsed.data;
     const tier = tool.def.tier;
     // Changes to this computer never run from a context an email is in. A device change may
     // become a card the user confirms (below); anything else is refused.
     const asCard = ctx.untrustedInContext && tier === 'device' && !!tool.confirmWhenUntrusted;
     if (ctx.untrustedInContext && !asCard && (tier === 'device' || (tier === 'write' && tool.propose))) {
-      log({ decision: 'denied', reason: 'untrusted content in context', untrustedInContext: true, args: parsed.data });
+      log({ decision: 'denied', reason: 'untrusted content in context', untrustedInContext: true, args });
       return { ok: false, content: UNTRUSTED_REFUSAL, label };
     }
     // Write-tier actions never run from a model call. They run only from a click on their
     // card, through an approval broker (mail/approvals.ts, system/actions.ts), which audits
     // them itself. A tool with `propose` may show that card; nothing else happens here.
     if (tier === 'write' && !tool.propose) {
-      log({ decision: 'denied', reason: 'write tier runs only from a user click', untrustedInContext: ctx.untrustedInContext, args: parsed.data });
+      log({ decision: 'denied', reason: 'write tier runs only from a user click', untrustedInContext: ctx.untrustedInContext, args });
       return { ok: false, content: tool.deniedMessage ?? 'Error: only the user can do this, by approving it on a card.', label };
     }
     if (tier === 'device') {
       if (this.opts.isPaused?.()) {
-        log({ decision: 'denied', reason: 'paused', args: parsed.data });
+        log({ decision: 'denied', reason: 'paused', args });
         return { ok: false, content: 'Error: paused. The user types /resume to allow changes again.', label };
       }
       const { max, windowMs } = this.opts.deviceLimit ?? { max: 10, windowMs: 60_000 };
       const now = this.clock();
       while (this.deviceCalls.length && this.deviceCalls[0]! <= now - windowMs) this.deviceCalls.shift();
       if (this.deviceCalls.length >= max) {
-        log({ decision: 'denied', reason: 'device change limit', limit: max, windowMs, args: parsed.data });
+        log({ decision: 'denied', reason: 'device change limit', limit: max, windowMs, args });
         return { ok: false, content: `Error: that is more than ${max} changes in a minute, so I stopped. Tell the user and wait before trying again.`, label };
       }
       this.deviceCalls.push(now);
@@ -163,7 +166,7 @@ export class ToolRegistry {
       log({
         decision: proposing ? 'proposed' : 'allowed',
         untrustedInContext: ctx.untrustedInContext,
-        args: parsed.data,
+        args,
         ok: true,
         resultBytes: Buffer.byteLength(content),
         ms: Date.now() - started,
@@ -172,7 +175,7 @@ export class ToolRegistry {
       return { ok: true, content, label };
     } catch (err) {
       const message = (err as Error).message;
-      log({ decision: proposing ? 'proposed' : 'allowed', args: parsed.data, ok: false, error: message, ms: Date.now() - started });
+      log({ decision: proposing ? 'proposed' : 'allowed', args, ok: false, error: message, ms: Date.now() - started });
       return { ok: false, content: `Error: ${message}`, label };
     }
   }

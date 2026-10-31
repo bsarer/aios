@@ -21,9 +21,11 @@ An app on Omarchy that takes over the whole screen (kiosk mode) and is, from the
 8. Email attachments (milestone S2, added 2026-10-25): open PDF, text and image attachments in a viewer in the chat; the model can read the text of PDF and text attachments, never images.
 9. Starting apps by chat (milestone S3, added 2026-10-26): the chat knows the installed apps and starts one when asked; while it is open the chat waits as a red orb at the top of the screen.
 10. Building apps by chat (milestone S4, added 2026-10-31): describe an app ("make me a pomodoro timer") and, after a click, Claude Code writes it as a small local web app that shows up among the installed apps; asking again changes it.
+11. Calendar (milestone C1, added 2026-10-31, plan not yet approved): see the calendar, find free time, and create, move or cancel events after a click.
+12. WhatsApp (milestone C2, added 2026-10-31, plan not yet approved): read and summarize chats, new-message notifications, and replies sent after a click, if a way to reach a personal account is chosen (see §15).
 
 ### Out of scope (parked for after alpha)
-WhatsApp, calendar, docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
+Docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
 
 ### Principles
 - **Chat is the only UI.** Everything (notifications, approvals, memory edits, settings changes) appears as chat messages or interactive chat cards. No hidden settings screens.
@@ -280,6 +282,14 @@ Open PDF, text and image attachments from email. `mail_attachment_show` posts a 
 *Build visibility (added 2026-10-31 after the first real build ran for 7 minutes with nothing on screen):* the card offers spending caps to pick from (config `budgetChoicesUsd`) and shows the median cost of past builds of the same kind, saying that a Claude plan login's dollar figures are API-price estimates and its real limit is the plan's usage limits (from `claude auth status`; a build isn't offered when Claude Code isn't signed in). While running, the card shows Claude Code's current step from its stream-json output, the elapsed time and the cap, and a **Stop** button. When it ends, a chat message (with **Open** on success) and a desktop notification follow. `build_status` (read) lets the chat answer "how is it going?". Builds are recorded in an `app_builds` table (names, steps, outcome, cost; never the request's words).
 *Accept:* "make me a pomodoro timer" shows a Build card; the click builds it and "open Pomodoro" starts it; "make the breaks 10 minutes" changes it; the built app cannot reach the network; an email asking to build an app gets no card (CI injection suite); checked on the real machine.
 
+**C1: Calendar** (added 2026-10-31; plan not yet approved; after S4, before A8)
+Calendar tools on the same registry and tiers. `calendar_list` / `calendar_free` (read) answer "what's on tomorrow" and "when am I free Thursday". `calendar_propose_event` / `calendar_propose_change` (write tier) only post a card; creating, moving or cancelling an event, and sending its invites, happen solely from the click carrying the card's hash, through the approval broker. Event titles, descriptions, locations and attendee names written by other people are untrusted like email: sanitize(), `<untrusted>` tags, and no write-tier tools, memory or config while they are in view. A `calendar` EventSource can remind before events. Sign-in is a one-time browser sign-in (OAuth) with the token in the keyring. Tests run against a local calendar server (CalDAV) in the docker test stack. *Open:* which provider (likely Google Calendar, since the mail account is Gmail); the provider's API details are checked against its current docs before building.
+*Accept:* "what's on tomorrow" and "when am I free Thursday afternoon" answer from the calendar; "set up a meeting with Ana at 3 tomorrow" shows a card and nothing changes until the click; moving and cancelling work the same way; an email or an event description asking to create, move or cancel an event gets no card (CI injection suite); checked on the real machine.
+
+**C2: WhatsApp** (added 2026-10-31; plan not yet approved, route undecided; after C1)
+Read chats, summarize them, notify on new messages through the same triage-and-notify pipeline as mail (a `whatsapp` EventSource), and draft replies sent only from a click. Message text is untrusted like email, with the same rules and tests. *Open:* WhatsApp has no official way to read a personal account (its official API covers business numbers only); the only route is an unofficial library that links as a WhatsApp Web device, which breaks WhatsApp's terms and can get the account banned (§15). Before building: check WhatsApp's current terms, and decide between full read and reply through that link, read-only, or leaving C2 out of the alpha.
+*Accept:* set once the route is chosen.
+
 **A8: Dogfood week**
 Use it daily (including system controls); record median latency, cost per day, notification precision (useful vs noisy), crashes, and what you reached for outside the chat.
 *Accept:* findings report that decides the post-alpha order (calendar, WhatsApp, docs, files, more system tools).
@@ -339,4 +349,6 @@ Use it daily (including system controls); record median latency, cost per day, n
 | IMAP rate limits | Some providers throttle frequent polling; prefer IDLE |
 | Kiosk lock-in | An app crash must never trap the user; compositor-level exit and TTY recovery are mandatory |
 | Omarchy version changes | Hyprland config format and menu system change between releases; check current docs before scripting |
+| WhatsApp access (C2) | No official API for personal accounts; an unofficial WhatsApp Web link breaks the terms and risks a ban. The user decides knowingly before any code; the library is reviewed like any new dependency |
+| Calendar invites as an injection path (C1) | Anyone can put text into the user's calendar by sending an invite; event text is untrusted, and event changes run only from a click |
 | Single test provider | Mail test account choice (Fastmail vs throwaway Gmail) affects IDLE support and auth; test both if cheap |

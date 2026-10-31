@@ -161,6 +161,17 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
     return void res.end('data: [DONE]\n\n');
   }
+  // D2: change the report; the change waits on a card.
+  if (last.role === 'user' && /^move the lease date in report\.docx to 30 november$/i.test(lastUser)) {
+    const args = { path: 'report.docx', changes: [{ op: 'replace', find: '15 November', replace: '30 November' }] };
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_doc_edit', function: { name: 'doc_edit', arguments: JSON.stringify(args) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /^A card listing the/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'The change is on a card; click Save as new file to keep it.' } }] });
+    return finish(0.0004);
+  }
   if (last.role === 'tool' && /^A card for the (Word|Excel) file/.test(last.content ?? '')) {
     chunk(res, { choices: [{ delta: { content: 'The card is in the chat; open it there.' } }] });
     return finish(0.0004);
@@ -501,8 +512,10 @@ async function main(): Promise<void> {
 
     // 1. Boot: greeting and live status.
     check('greeting on boot', await waitFor(async () => /(Hello|Morning|Afternoon|Evening), John/.test(await chat.innerText())));
-    const hhmm = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    check('status strip shows the current time', (await page.getByTestId('clock').innerText()) === hhmm, await page.getByTestId('clock').innerText());
+    // The strip may not have ticked yet when the minute turns, so the minute before also counts.
+    const hhmm = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const shownClock = await page.getByTestId('clock').innerText();
+    check('status strip shows the current time', [hhmm(Date.now()), hhmm(Date.now() - 60_000)].includes(shownClock), shownClock);
     check('agent idle at start', (await agentState.innerText()).includes('idle'));
     const costBefore = await page.getByTestId('cost').innerText();
     await shot(page, '1-boot');
@@ -817,6 +830,20 @@ async function main(): Promise<void> {
     await shot(page, '14-document-sheet');
     await page.keyboard.press('Escape');
     check('Esc closes the document', await waitFor(async () => (await page.getByTestId('document-viewer').count()) === 0));
+    // 12. Editing documents (D2): the change waits on a card; Save writes a new file next to the original.
+    const reportBefore = readFileSync(join(docs.documents, 'report.docx'));
+    await input.fill('move the lease date in report.docx to 30 November');
+    await input.press('Enter');
+    const changeCard = page.locator('[data-kind="doc_change"]').last();
+    check('the edit shows a change card', await waitFor(async () => (await changeCard.count()) === 1 && (await changeCard.getAttribute('data-state')) === 'pending', 15_000));
+    check('the card shows the text before and after', (await changeCard.getByTestId('doc-change-before').innerText()) === '15 November' && (await changeCard.getByTestId('doc-change-after').innerText()) === '30 November');
+    check('the card says where it saves', /report-edited\.docx\. The original stays as it is\./.test(await changeCard.getByTestId('doc-change-output').innerText()));
+    check('nothing is written before the click', !existsSync(join(docs.documents, 'report-edited.docx')));
+    await shot(page, '15-doc-change');
+    await changeCard.getByTestId('doc-change-confirm').click();
+    check('Save writes the new file', await waitFor(async () => (await changeCard.getAttribute('data-state')) === 'done', 15_000));
+    check('the new file has the change', readFileSync(join(docs.documents, 'report-edited.docx')).toString('utf8').includes('30 November'));
+    check('the original is unchanged', readFileSync(join(docs.documents, 'report.docx')).equals(reportBefore));
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

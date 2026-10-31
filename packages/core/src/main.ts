@@ -18,6 +18,8 @@ import { CalendarActions } from './calendar/actions.js';
 import { GoogleAuth, GoogleCalendar } from './calendar/google.js';
 import { calendarTools } from './calendar/tools.js';
 import { AuditLog } from './audit.js';
+import { DocActions } from './docs/actions.js';
+import { editTools } from './docs/edit.js';
 import { DocEngine } from './docs/engine.js';
 import { DocFiles } from './docs/files.js';
 import { createDocumentOpener } from './docs/open.js';
@@ -160,6 +162,7 @@ async function main(): Promise<void> {
   const apps = appTools({ scan: () => scanApps(), launch, window: chatWindow });
   // D1: Word and Excel files, read through WordCraft's and GridCraft's command-line tools.
   let documentFiles: DocumentFiles | undefined;
+  let docActions: DocActions | undefined;
   if (config.docs.enabled) {
     const d = config.docs;
     const docFiles = new DocFiles({ roots: d.roots });
@@ -168,6 +171,17 @@ async function main(): Promise<void> {
     const open = createDocumentOpener({ word: d.wordApp, sheet: d.sheetApp });
     // doc_open_app is device tier like open_app, so it shares open_app's confirm card.
     apps.push(...docTools({ files: docFiles, engine, viewer: documentFiles, open, window: chatWindow }));
+    // D2: changes go on a card; the Save click writes a new file (or, when asked, over the original after a backup).
+    docActions = new DocActions({
+      store,
+      files: docFiles,
+      engine,
+      viewer: documentFiles,
+      audit,
+      backupDir: join(dataDir(), 'doc-backups'),
+      show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
+    });
+    for (const t of editTools({ files: docFiles, engine, actions: docActions })) tools.register(t);
   }
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
   const buildLog = new BuildLog(store);
@@ -224,6 +238,7 @@ async function main(): Promise<void> {
     approvals,
     systemActions,
     ...(calendarActions ? { calendarActions } : {}),
+    ...(docActions ? { docActions } : {}),
     chatWindow,
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
@@ -272,6 +287,7 @@ async function main(): Promise<void> {
   approvals.recover();
   systemActions.recover();
   calendarActions?.recover();
+  docActions?.recover();
   shell.greet();
   // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
   await keyring.require(config.models.chat.apiKeyRef).catch((err: unknown) => {

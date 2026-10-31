@@ -11,6 +11,7 @@ import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
 import { cleanFact } from './memory/files.js';
 import type { CalendarActions } from './calendar/actions.js';
+import type { DocActions } from './docs/actions.js';
 import type { ApprovalBroker } from './mail/approvals.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
@@ -43,6 +44,8 @@ export interface ShellOptions {
   systemActions?: SystemActions;
   /** Calendar change cards and their clicks (C1). Without it, event messages are ignored. */
   calendarActions?: CalendarActions;
+  /** Word and Excel change cards and their clicks (D2). Without it, doc_change messages are ignored. */
+  docActions?: DocActions;
   /** Where the chat window sits (S3). Without it, window messages are ignored and the chat stays full screen. */
   chatWindow?: { readonly mode: WindowMode; request: (mode: WindowMode) => Promise<void> };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
@@ -162,6 +165,7 @@ export class Shell {
     if (msg.type === 'mail_ignore') return this.ignoreMail(msg.itemId, msg.mailId);
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
     if (msg.type === 'event_confirm' || msg.type === 'event_discard') return this.calendarAction(msg);
+    if (msg.type === 'doc_change_confirm' || msg.type === 'doc_change_discard') return this.docChangeAction(msg);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
     // The user's own click on a build they started, so like the window it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
@@ -234,6 +238,20 @@ export class Shell {
     const actions = this.o.calendarActions;
     if (!actions) return;
     if (msg.type === 'event_discard') {
+      actions.discard(msg.id);
+      return;
+    }
+    await actions.confirm(msg.id, msg.hash);
+  }
+
+  /**
+   * Clicks on a document change card (D2). The user's own action, so it works while paused;
+   * the broker checks the card's hash and state, and that the file is unchanged, first.
+   */
+  private async docChangeAction(msg: Extract<ClientMessage, { type: 'doc_change_confirm' | 'doc_change_discard' }>): Promise<void> {
+    const actions = this.o.docActions;
+    if (!actions) return;
+    if (msg.type === 'doc_change_discard') {
       actions.discard(msg.id);
       return;
     }

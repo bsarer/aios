@@ -2,6 +2,14 @@ import type { AuditLog } from '../audit.js';
 import type { ToolCall, ToolSpec } from '../model.js';
 import { type ToolDefinition, toolSpecs } from './definitions.js';
 
+/** Where untrusted text in the model's context came from (the `source` of its <untrusted> wrapper). */
+export type UntrustedSource = 'email' | 'calendar' | 'document';
+
+/** True when everything untrusted in view is document text (D2): no email, no calendar event, nothing unknown. */
+export function onlyDocuments(ctx: { untrustedInContext: boolean; untrustedSources?: ReadonlySet<UntrustedSource> | undefined }): boolean {
+  return ctx.untrustedInContext && !!ctx.untrustedSources?.size && [...ctx.untrustedSources].every((s) => s === 'document');
+}
+
 export interface ToolContext {
   signal: AbortSignal;
   /**
@@ -9,6 +17,8 @@ export interface ToolContext {
    * this call, so the call may have been steered by it. Computed by the agent, not the model.
    */
   untrustedInContext: boolean;
+  /** D2: which kinds of untrusted text are in view. Left out, it counts as unknown (never documents only). */
+  untrustedSources?: ReadonlySet<UntrustedSource>;
   /** The user's own message that started this turn. */
   userText: string;
 }
@@ -38,6 +48,11 @@ export interface RegisteredTool {
   untrustedOutput?: boolean;
   /** Write tier: what the model is told when its call is refused. */
   deniedMessage?: string;
+  /**
+   * D2 (decided 2026-10-31): a write-tier tool with `propose` that may still show its card while
+   * the only untrusted text in view is from documents. Never while an email or calendar event is.
+   */
+  allowWithDocuments?: boolean;
   /** What the audit log records of valid arguments, when they hold the user's own words (S4). Default: all of them. */
   auditArgs?: (args: unknown) => unknown;
 }
@@ -87,9 +102,12 @@ export class ToolRegistry {
    * While email text is in context, write-tier tools are left out, so an email cannot even
    * ask for one, and so are device-tier tools unless they can turn into a confirm card.
    */
-  specs(opts: { untrustedInContext?: boolean } = {}): ToolSpec[] {
+  specs(opts: { untrustedInContext?: boolean; untrustedSources?: ReadonlySet<UntrustedSource> } = {}): ToolSpec[] {
     const tools = [...this.tools.values()];
-    const offered = opts.untrustedInContext ? tools.filter((t) => t.def.tier !== 'write' && (t.def.tier !== 'device' || t.confirmWhenUntrusted)) : tools;
+    const docsOnly = onlyDocuments({ untrustedInContext: !!opts.untrustedInContext, untrustedSources: opts.untrustedSources });
+    const offered = opts.untrustedInContext
+      ? tools.filter((t) => (t.def.tier === 'write' ? docsOnly && t.allowWithDocuments && !!t.propose : t.def.tier !== 'device' || t.confirmWhenUntrusted))
+      : tools;
     return toolSpecs(offered.map((t) => t.def));
   }
 
@@ -134,7 +152,9 @@ export class ToolRegistry {
     // Changes to this computer never run from a context an email is in. A device change may
     // become a card the user confirms (below); anything else is refused.
     const asCard = ctx.untrustedInContext && tier === 'device' && !!tool.confirmWhenUntrusted;
-    if (ctx.untrustedInContext && !asCard && (tier === 'device' || (tier === 'write' && tool.propose))) {
+    // D2: an edit card may still be shown while only document text is in view.
+    const docCard = tier === 'write' && !!tool.propose && !!tool.allowWithDocuments && onlyDocuments(ctx);
+    if (ctx.untrustedInContext && !asCard && !docCard && (tier === 'device' || (tier === 'write' && tool.propose))) {
       log({ decision: 'denied', reason: 'untrusted content in context', untrustedInContext: true, args });
       return { ok: false, content: UNTRUSTED_REFUSAL, label };
     }

@@ -51,6 +51,9 @@ export interface MessageActions {
   /** A calendar change (C1) happens only on this click, which echoes the card's hash. */
   onEventConfirm: (id: string, hash: string) => void;
   onEventDiscard: (id: string) => void;
+  /** A document change (D2) is saved only on this click, which echoes the card's hash. */
+  onDocChangeConfirm: (id: string, hash: string) => void;
+  onDocChangeDiscard: (id: string) => void;
   /** Stop on a running build (S4). */
   onActionStop: (id: string) => void;
   /** Open on a finished build's message (S4); names the Build card, not the app. */
@@ -273,6 +276,83 @@ const EVENT_STATE_TEXT: Record<EventItem['state'], string> = {
   failed: '',
 };
 
+type DocChangeItem = Extract<ChatItem, { kind: 'doc_change' }>;
+
+const DOC_CHANGE_STATE_TEXT: Record<DocChangeItem['state'], string> = {
+  pending: '',
+  running: 'Saving…',
+  done: '✓ Saved',
+  discarded: 'Discarded. Nothing was saved.',
+  failed: '',
+};
+
+/** Changes to a Word or Excel file waiting for a click (D2). Quoted text can come from the file: plain text only. */
+function DocChangeCard({ item, actions }: { item: DocChangeItem; actions: MessageActions }) {
+  const open = item.state === 'pending' || item.state === 'failed';
+  const app = item.fileKind === 'word' ? 'Word' : 'Excel';
+  const heading = item.change === 'create' ? `Create a new ${app} file?` : item.overwrite ? `Change this ${app} file and save over it?` : `Change this ${app} file?`;
+  const confirm = item.overwrite ? 'Overwrite' : item.change === 'create' ? 'Create' : 'Save as new file';
+  const quote = (text: string, testid: string, strike = false) => (
+    <div data-testid={testid} className="mt-1 whitespace-pre-wrap break-words rounded-md px-2 py-1 text-[14px]" style={{ background: 'var(--panel)', textDecoration: strike ? 'line-through' : undefined, opacity: strike ? 0.75 : 1 }}>
+      {text}
+    </div>
+  );
+  return (
+    <div data-kind="doc_change" data-change={item.change} data-state={item.state} data-overwrite={item.overwrite} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.overwrite ? 'var(--danger)' : 'var(--accent)'}` }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {heading}
+      </div>
+      {item.file && (
+        <div data-testid="doc-change-file" className="mt-1 break-all font-medium">
+          {item.file}
+        </div>
+      )}
+      <ol className="mt-2 space-y-2">
+        {item.lines.map((l, i) => (
+          <li key={i} data-testid="doc-change-line" className="text-[15px]">
+            <div>{l.what}</div>
+            {l.before !== undefined && quote(l.before, 'doc-change-before', l.after !== undefined || /^Delete/.test(l.what))}
+            {l.after !== undefined && quote(l.after, 'doc-change-after')}
+          </li>
+        ))}
+      </ol>
+      <div data-testid="doc-change-output" className="mt-2 text-sm" style={{ color: item.overwrite ? 'var(--danger)' : 'var(--muted)' }}>
+        {item.overwrite ? `Saves over ${item.output}. The original is copied to the backups folder first.` : item.change === 'create' ? `Creates ${item.output}.` : `Saves to ${item.output}. The original stays as it is.`}
+      </div>
+      {item.warnings.map((w) => (
+        <div key={w} data-testid="doc-change-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          {w}
+        </div>
+      ))}
+      {item.state === 'failed' && item.result && (
+        <div data-testid="doc-change-state" className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.result}
+        </div>
+      )}
+      {open ? (
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            data-testid="doc-change-confirm"
+            className="rounded-lg px-3 py-1"
+            style={{ background: item.overwrite ? 'var(--danger)' : 'var(--accent)', color: 'var(--bg)' }}
+            onClick={() => actions.onDocChangeConfirm(item.id, item.hash)}
+          >
+            {item.state === 'failed' ? `Try again: ${confirm}` : confirm}
+          </button>
+          <button type="button" data-testid="doc-change-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onDocChangeDiscard(item.id)}>
+            Discard
+          </button>
+        </div>
+      ) : (
+        <div data-testid="doc-change-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.result ?? DOC_CHANGE_STATE_TEXT[item.state]}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A calendar change waiting for a click (C1). Titles and notes can come from other people's invites: plain text only. */
 function EventCard({ item, actions }: { item: EventItem; actions: MessageActions }) {
   const t = EVENT_TEXT[item.change];
@@ -479,6 +559,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <ActionCard item={item} actions={actions} />;
     case 'event':
       return <EventCard item={item} actions={actions} />;
+    case 'doc_change':
+      return <DocChangeCard item={item} actions={actions} />;
     case 'attachment':
       return <AttachmentCard item={item} />;
     case 'document':

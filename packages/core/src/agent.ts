@@ -10,7 +10,7 @@ import { type ChatMessage, type ModelClient, ModelError, type ModelResult } from
 import { chatSystemPrompt } from './prompts.js';
 import type { Store } from './store.js';
 import { formatNow } from './tools/now.js';
-import type { ToolRegistry } from './tools/registry.js';
+import type { ToolRegistry, UntrustedSource } from './tools/registry.js';
 
 export const MAX_ITERATIONS = 6;
 const CONTEXT_TURNS = 30;
@@ -26,6 +26,26 @@ export const SETTINGS_BLOCKED_NOTE =
 
 /** D1: tools whose results carry text from a Word or Excel file. */
 const isDocumentTool = (name: string) => name === 'docs_list' || name.startsWith('doc_') || name.startsWith('sheet_');
+
+const UNTRUSTED_SOURCE = /<untrusted source="([a-z]+)"/g;
+
+/**
+ * D2: which kinds of untrusted text the model can see, decided in code. A wrapper names its
+ * source; text inside a wrapper can't fake one (sanitize() neutralises the tag). A result
+ * from a tool that returns untrusted text counts by the tool's kind even without a wrapper.
+ * Anything unrecognised counts as email, the strictest.
+ */
+export function untrustedSources(messages: ChatMessage[], returnsUntrusted: (name: string) => boolean): Set<UntrustedSource> {
+  const out = new Set<UntrustedSource>();
+  for (const m of messages) {
+    if (m.role === 'tool' && returnsUntrusted(m.name)) out.add(isDocumentTool(m.name) ? 'document' : m.name.startsWith('calendar_') ? 'calendar' : 'email');
+    for (const match of (m.content ?? '').matchAll(UNTRUSTED_SOURCE)) {
+      const s = match[1];
+      out.add(s === 'document' || s === 'calendar' ? s : 'email');
+    }
+  }
+  return out;
+}
 
 /** What the model sees in place of an earlier exchange that involved an email (or calendar, or document text). */
 export function quarantineNote(ids: string[], calendar = false, document = false): string {
@@ -135,9 +155,8 @@ export class Agent {
         (name) => tools.returnsUntrusted(name),
       );
       // Decided in code from what the model can see, so an email cannot talk its way out of it.
-      const untrustedInContext = messages.some(
-        (m) => (m.role === 'tool' && tools.returnsUntrusted(m.name)) || UNTRUSTED_MARK.test(m.content ?? ''),
-      );
+      const sources = untrustedSources(messages, (name) => tools.returnsUntrusted(name));
+      const untrustedInContext = sources.size > 0;
       // So a blocked request gets "ask me again" rather than "I can't do that".
       const sys = messages.find((m) => m.role === 'system');
       if (untrustedInContext && sys) sys.content = `${sys.content}\n\n${SETTINGS_BLOCKED_NOTE}`;
@@ -146,7 +165,7 @@ export class Agent {
       let reply = '';
       let result: ModelResult | undefined;
       try {
-        for await (const d of model.stream({ role: 'chat', messages, tools: tools.specs({ untrustedInContext }), toolChoice: 'auto', signal })) {
+        for await (const d of model.stream({ role: 'chat', messages, tools: tools.specs({ untrustedInContext, untrustedSources: sources }), toolChoice: 'auto', signal })) {
           if (d.type === 'text') {
             if (!item) {
               item = { kind: 'assistant', id: this.newId(), text: '', at: at(), streaming: true };
@@ -179,7 +198,7 @@ export class Agent {
       for (const call of result.toolCalls) {
         const toolItem: ChatItem = { kind: 'tool', id: this.newId(), label: tools.label(call.name), state: 'running', at: at() };
         this.post(toolItem);
-        const outcome = await tools.execute(call, { signal, untrustedInContext, userText: text });
+        const outcome = await tools.execute(call, { signal, untrustedInContext, untrustedSources: sources, userText: text });
         this.patch({ ...toolItem, state: outcome.ok ? 'done' : 'failed' });
         store.saveTurn({ role: 'tool', toolCallId: call.id, name: call.name, content: outcome.content }, at());
         if (signal.aborted) {

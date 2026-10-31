@@ -159,7 +159,7 @@ describe('hostile mail', () => {
         exists: () => false,
         unavailable: async () => null,
       };
-      tools.register(buildAppTool({ builder, actions: systemActions }));
+      tools.register(buildAppTool({ builder, actions: systemActions, scan: async () => [] }));
 
       const call = (name: string, args: unknown): ToolCall => ({ id: name, name, arguments: JSON.stringify(args) });
       // An email with attachments is read only through them, so the attachment tool alone must taint the turn.

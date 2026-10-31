@@ -7,7 +7,7 @@
 import { toolByName } from '../tools/definitions.js';
 import type { SystemActions } from '../system/actions.js';
 import type { RegisteredTool } from '../tools/registry.js';
-import { type AppBuilder, appName, appSlug } from './builder.js';
+import { type AppBuilder, appDesktopId, appName, appSlug } from './builder.js';
 import { type DesktopApp, findApp, searchApps, shortId } from './desktop.js';
 import type { Launch } from './launcher.js';
 import type { ChatWindow } from './window.js';
@@ -66,7 +66,7 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
  * build_app (S4, write tier): a model call only shows a Build card. The build runs from the
  * click (system/actions.ts), which hands it to the AppBuilder.
  */
-export function buildAppTool(o: { builder: Pick<AppBuilder, 'build' | 'exists' | 'unavailable'>; actions: SystemActions }): RegisteredTool {
+export function buildAppTool(o: { builder: Pick<AppBuilder, 'build' | 'exists' | 'unavailable'>; actions: SystemActions; scan: () => Promise<DesktopApp[]> }): RegisteredTool {
   o.actions.setAppBuilder(async (a) => {
     const r = await o.builder.build({ name: a.name, request: a.request });
     const cost = r.costUsd === null ? '' : ` It cost $${r.costUsd.toFixed(2)}.`;
@@ -89,6 +89,9 @@ export function buildAppTool(o: { builder: Pick<AppBuilder, 'build' | 'exists' |
       const name = appName(raw);
       const slug = name ? appSlug(name) : null;
       if (!name || !slug) return `Error: ${q(raw)} can't be an app name; use a few letters or digits, e.g. "Pomodoro".`;
+      // An installed app with the same name would make "open <name>" ambiguous.
+      const taken = (await o.scan()).find((a) => a.id !== appDesktopId(slug) && appSlug(a.name) === slug);
+      if (taken) return `Error: ${q(taken.name)} is already the name of an installed app (id: ${shortId(taken.id)}). Pick a different name, e.g. "My ${name}", or ask the user for one.`;
       const why = await o.builder.unavailable();
       if (why) return `Error: ${why} Tell the user.`;
       const update = o.builder.exists(slug);

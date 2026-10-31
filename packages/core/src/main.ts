@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   });
   const apps = appTools({ scan: () => scanApps(), launch: createLauncher(), window: chatWindow });
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
-  if (config.builder.enabled) tools.register(buildAppTool({ builder: new AppBuilder({ config: config.builder }), actions: systemActions }));
+  if (config.builder.enabled) tools.register(buildAppTool({ builder: new AppBuilder({ config: config.builder }), actions: systemActions, scan: () => scanApps() }));
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
   let nightlyNoticeFor = '';
   const nightly = new Nightly({

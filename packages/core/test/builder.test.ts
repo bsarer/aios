@@ -155,7 +155,7 @@ describe('build_app', () => {
       show: (i, isNew) => (isNew ? shown.push(i) : shown.splice(shown.findIndex((x) => x.id === i.id), 1, i)),
       notice: () => undefined,
     });
-    const tools = new ToolRegistry(audit).register(buildAppTool({ builder: r.builder, actions }));
+    const tools = new ToolRegistry(audit).register(buildAppTool({ builder: r.builder, actions, scan: () => scanApps({ env: r.env }) }));
     const call = (args: unknown, untrustedInContext = false) =>
       tools.execute({ id: 'b', name: 'build_app', arguments: JSON.stringify(args) }, { signal: new AbortController().signal, untrustedInContext, userText: 'make it' });
     const cards = () => shown.filter((i): i is Extract<ChatItem, { kind: 'action' }> => i.kind === 'action');
@@ -193,6 +193,19 @@ describe('build_app', () => {
       expect((await t.call(args)).content).toMatch(/^Error: invalid arguments/);
     }
     expect((await t.call({ name: '!!!', request: 'x' })).content).toMatch(/can't be an app name/);
+  });
+
+  it('picks another name when an installed app already has it', async () => {
+    const t = toolRig();
+    const apps = join(t.r.env.XDG_DATA_HOME, 'applications');
+    mkdirSync(apps, { recursive: true });
+    writeFileSync(join(apps, 'org.gnome.Calculator.desktop'), '[Desktop Entry]\nType=Application\nName=Calculator\nExec=gnome-calculator\n');
+    expect((await t.call({ name: 'calculator!', request: 'a calculator' })).content).toBe('Error: “Calculator” is already the name of an installed app (id: org.gnome.Calculator). Pick a different name, e.g. "My calculator!", or ask the user for one.');
+    expect(t.cards()).toEqual([]);
+    // Its own earlier build is not a clash: that is a change.
+    await t.call({ name: 'Pomodoro', request: 'a timer' });
+    await t.actions.confirm(t.cards()[0]!.id, t.cards()[0]!.hash);
+    expect((await t.call({ name: 'Pomodoro', request: 'longer breaks' })).content).toMatch(/confirm changing “Pomodoro”/);
   });
 
   it("a card can't be confirmed with the wrong hash or twice", async () => {

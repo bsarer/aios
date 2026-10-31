@@ -2,6 +2,7 @@ import type { ChatItem, MailRow } from '@aios/shared/protocol';
 import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import { AttachmentViewer } from './AttachmentViewer';
+import { DocumentViewer } from './DocumentViewer';
 
 /** react-markdown renders no raw HTML by default, which matters: replies can quote email text. */
 function MemoryCard({ item, onDecide }: { item: Extract<ChatItem, { kind: 'memory' }>; onDecide: (decision: 'save' | 'skip') => void }) {
@@ -14,7 +15,7 @@ function MemoryCard({ item, onDecide }: { item: Extract<ChatItem, { kind: 'memor
       <div className="mt-1">{item.text}</div>
       {fromEmail && (
         <div className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
-          Suggested while an email was being read. Emails can try to plant false memories, so only save this if you know it is true.
+          Suggested while an email or document was being read. They can try to plant false memories, so only save this if you know it is true.
         </div>
       )}
       {item.state === 'pending' ? (
@@ -339,6 +340,29 @@ function EventCard({ item, actions }: { item: EventItem; actions: MessageActions
   );
 }
 
+type DocumentItem = Extract<ChatItem, { kind: 'document' }>;
+
+/** A Word or Excel file the user can open (D1). File names can come from anyone: plain text only. */
+function DocumentCard({ item }: { item: DocumentItem }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div data-kind="document" className="glass flex items-center gap-3 rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="min-w-0 flex-1">
+        <div data-testid="document-name" className="break-all">
+          {item.name}
+        </div>
+        <div className="text-sm" style={{ color: 'var(--muted)' }}>
+          {item.fileKind === 'word' ? 'Word document' : 'Excel spreadsheet'}
+        </div>
+      </div>
+      <button type="button" data-testid="document-open" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(true)}>
+        Open
+      </button>
+      {open && <DocumentViewer item={item} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
 type AttachmentItem = Extract<ChatItem, { kind: 'attachment' }>;
 
 const FILE_KIND_TEXT: Record<AttachmentItem['fileKind'], string> = { pdf: 'PDF', text: 'Text file', image: 'Picture' };
@@ -457,6 +481,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <EventCard item={item} actions={actions} />;
     case 'attachment':
       return <AttachmentCard item={item} />;
+    case 'document':
+      return <DocumentCard item={item} />;
     case 'build_result':
       return (
         <div data-kind="build_result" data-ok={item.ok} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.ok ? 'var(--accent)' : 'var(--danger)'}` }}>

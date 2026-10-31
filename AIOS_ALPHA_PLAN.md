@@ -22,9 +22,10 @@ An app on Omarchy that takes over the whole screen (kiosk mode) and is, from the
 9. Starting apps by chat (milestone S3, added 2026-10-26): the chat knows the installed apps and starts one when asked; while it is open the chat waits as a red orb at the top of the screen.
 10. Building apps by chat (milestone S4, added 2026-10-31): describe an app ("make me a pomodoro timer") and, after a click, Claude Code writes it as a small local web app that shows up among the installed apps; asking again changes it.
 11. Calendar by chat (milestone C1, added 2026-10-31): view Google Calendar events and free time; create, move and cancel events after a click on a card.
+12. WhatsApp (milestone C2, added 2026-10-31, plan not yet approved): read and summarize chats, new-message notifications, and replies sent after a click, if a way to reach a personal account is chosen (see §15).
 
 ### Out of scope (parked for after alpha)
-WhatsApp, docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
+Docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), voice, multi-user, MCP gateway, local models. The design keeps seams for all of these (see §10).
 
 ### Principles
 - **Chat is the only UI.** Everything (notifications, approvals, memory edits, settings changes) appears as chat messages or interactive chat cards. No hidden settings screens.
@@ -288,6 +289,10 @@ Open PDF, text and image attachments from email. `mail_attachment_show` posts a 
 Google Calendar over its REST API v3 with plain `fetch` and zod-checked answers (no Google SDK). Signed in once with OAuth for a desktop app (loopback redirect on 127.0.0.1, PKCE S256, `state`), scope `calendar.events` only, from the user's own Google Cloud project; the refresh token and client secret live in the keyring, the access token in memory. Endpoints are config (`[calendar]`), so tests point them at a pretend Google Calendar (`fixtures/calendar.ts`), since Google has no local emulator. `calendar_list` (read) wraps every event's text as untrusted, because anyone can put an invite in the calendar; `calendar_free` (read) returns only times. `calendar_create_event`, `calendar_update_event` and `calendar_cancel_event` (draft) post a card; the change and Google's emails to guests happen only from a hash-checked click (`CalendarActions`), and only on events the user organizes. Cards say when outside text was in view and flag guests from neither the user's message nor the event. A new event's id comes from its card, so a retry never makes a second one. Every card and click is audited.
 *Accept:* "what's on tomorrow" lists the day; "when am I free Thursday" gives the gaps; "set up a meeting with Ana at 3", "move my 10am to 11" and "cancel lunch" each show a card and change the calendar only on the click; a hostile invite asking to cancel meetings, invite an attacker and plant a memory joins the CI injection suite and changes nothing; checked against a real Google account.
 
+**C2: WhatsApp** (added 2026-10-31; plan not yet approved, route undecided; after C1)
+Read chats, summarize them, notify on new messages through the same triage-and-notify pipeline as mail (a `whatsapp` EventSource), and draft replies sent only from a click. Message text is untrusted like email, with the same rules and tests. *Open:* WhatsApp has no official way to read a personal account (its official API covers business numbers only); the only route is an unofficial library that links as a WhatsApp Web device, which breaks WhatsApp's terms and can get the account banned (§15). Before building: check WhatsApp's current terms, and decide between full read and reply through that link, read-only, or leaving C2 out of the alpha.
+*Accept:* set once the route is chosen.
+
 **A8: Dogfood week**
 Use it daily (including system controls); record median latency, cost per day, notification precision (useful vs noisy), crashes, and what you reached for outside the chat.
 *Accept:* findings report that decides the post-alpha order (WhatsApp, docs, files, more system tools).
@@ -347,4 +352,6 @@ Use it daily (including system controls); record median latency, cost per day, n
 | IMAP rate limits | Some providers throttle frequent polling; prefer IDLE |
 | Kiosk lock-in | An app crash must never trap the user; compositor-level exit and TTY recovery are mandatory |
 | Omarchy version changes | Hyprland config format and menu system change between releases; check current docs before scripting |
+| WhatsApp access (C2) | No official API for personal accounts; an unofficial WhatsApp Web link breaks the terms and risks a ban. The user decides knowingly before any code; the library is reviewed like any new dependency |
+| Calendar invites as an injection path (C1) | Anyone can put text into the user's calendar by sending an invite; event text is untrusted, and event changes run only from a click |
 | Single test provider | Mail test account choice (Fastmail vs throwaway Gmail) affects IDLE support and auth; test both if cheap |

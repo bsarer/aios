@@ -9,16 +9,19 @@
  * Both are alpha software; output formats that docs don't pin down are parsed leniently.
  */
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { parseCsv } from './csv.js';
+import type { DocCommand } from './recipes.js';
 
 export class DocToolError extends Error {
   constructor(
     readonly reason: 'missing' | 'timeout' | 'failed' | 'too_large',
     message: string,
+    /** What the tool printed before it failed, for tools that report through a failing exit (`check`). */
+    readonly stdout?: string,
   ) {
     super(message);
     this.name = 'DocToolError';
@@ -89,12 +92,17 @@ export function runCli(command: string, args: string[], label: string, o: RunCli
         if (code === 0) resolve(Buffer.concat(out).toString('utf8'));
         else {
           const why = err.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 300);
-          reject(new DocToolError('failed', `${label} failed${why ? `: ${why}` : ` (exit code ${code ?? 'unknown'})`}`));
+          reject(new DocToolError('failed', `${label} failed${why ? `: ${why}` : ` (exit code ${code ?? 'unknown'})`}`, Buffer.concat(out).toString('utf8')));
         }
       }),
     );
   });
 }
+
+/** What `gridcraft-cli check --json` says about saving a workbook again (schema gridcraft-check/1). */
+const CheckJson = z.looseObject({
+  files: z.array(z.looseObject({ roundTrip: z.looseObject({ error: z.string().nullable().optional(), differing: z.array(z.string()).optional() }).optional() })).optional(),
+});
 
 /** Sheet names from `info --json`. The schema isn't documented, so a few likely shapes are accepted. */
 const InfoJson = z.looseObject({
@@ -172,5 +180,60 @@ export class DocEngine {
     const args = ['eval', formula, '--in', absolute(path), ...(o.sheet ? ['--sheet', sheetArg(o.sheet)] : []), '--json'];
     const out = await this.run(this.o.sheetCli, args, 'GridCraft', { timeoutMs: this.o.timeoutMs, maxBytes: 64 * 1024, ...(o.signal ? { signal: o.signal } : {}) });
     return out.trim();
+  }
+
+  /**
+   * D2: run commands on a Word file (or a new blank one) and save the result to `out`, in one
+   * `wordcraft-cli run --script` (docs/mcp.md: a failing command stops the run and nothing is
+   * saved). The script lives in a private temporary folder; every path in it is absolute.
+   */
+  async applyWord(source: string | null, commands: DocCommand[], out: string, signal?: AbortSignal): Promise<void> {
+    const dir = await mkdtemp(join(tmpdir(), 'aios-edit-'));
+    try {
+      const script = join(dir, 'job.json');
+      // Without `file` the run starts on a blank document (docs/mcp.md).
+      await writeFile(script, JSON.stringify({ ...(source ? { file: absolute(source) } : {}), commands, save: [absolute(out)] }), { mode: 0o600 });
+      await this.run(this.o.wordCli, ['run', '--script', script], 'WordCraft', { timeoutMs: this.o.timeoutMs * 3, ...(signal ? { signal } : {}) });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  /** D2: the same for a workbook, with `gridcraft-cli run [--in] --script <steps.jsonl> --out` (docs/cli.md). */
+  async applySheet(source: string | null, sheet: string | undefined, commands: DocCommand[], out: string, signal?: AbortSignal): Promise<void> {
+    const dir = await mkdtemp(join(tmpdir(), 'aios-edit-'));
+    try {
+      const script = join(dir, 'steps.jsonl');
+      // `run --sheet` only picks the sheet to print, so the sheet is activated by the first step.
+      const steps = sheet ? [{ command: 'sheet.activate', params: { sheet } }, ...commands] : commands;
+      await writeFile(script, steps.map((c) => JSON.stringify(c)).join('\n') + '\n', { mode: 0o600 });
+      const args = ['run', ...(source ? ['--in', absolute(source)] : []), '--script', script, '--out', absolute(out), '--quiet'];
+      await this.run(this.o.sheetCli, args, 'GridCraft', { timeoutMs: this.o.timeoutMs * 3, ...(signal ? { signal } : {}) });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * D2: what GridCraft would lose saving this workbook again (`check --json` round trip), e.g.
+   * ["charts", "pivots"]. Empty when nothing, null when it can't tell. `check` exits 1 when it
+   * finds a difference, so that is read from its output, not its exit code.
+   */
+  async sheetRoundTrip(path: string, signal?: AbortSignal): Promise<string[] | null> {
+    let out: string;
+    try {
+      out = await this.run(this.o.sheetCli, ['check', absolute(path), '--json', '--max-report', '1'], 'GridCraft', { timeoutMs: this.o.timeoutMs, ...(signal ? { signal } : {}) });
+    } catch (err) {
+      if (!(err instanceof DocToolError) || err.reason !== 'failed') return null;
+      out = err.stdout ?? '';
+    }
+    try {
+      const parsed = CheckJson.safeParse(JSON.parse(out));
+      const rt = parsed.success ? parsed.data.files?.[0]?.roundTrip : undefined;
+      if (!rt) return null;
+      return rt.error ? ['the whole file'] : (rt.differing ?? []);
+    } catch {
+      return null;
+    }
   }
 }

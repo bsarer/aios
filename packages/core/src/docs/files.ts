@@ -7,7 +7,7 @@
  */
 import { lstat, open, opendir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export type DocKind = 'word' | 'sheet';
 
@@ -151,6 +151,39 @@ export class DocFiles {
     files.sort((a, b) => b.mtimeMs - a.mtimeMs);
     return { files, truncated };
   }
+
+  /**
+   * D2: a free name next to an edited file: report-edited.docx, then report-edited-2.docx…
+   * Never one that exists, so an edit can't replace anything by its name.
+   */
+  async editedName(file: DocFile): Promise<string> {
+    const ext = extname(file.path);
+    const base = basename(file.path, ext).replace(/-edited(-\d+)?$/, '');
+    for (let n = 1; n < 100; n++) {
+      const p = join(dirname(file.path), `${base}-edited${n === 1 ? '' : `-${n}`}${ext}`);
+      if (!(await exists(p))) return p;
+    }
+    throw new DocPathError('there are too many edited copies of this file already');
+  }
+
+  /** D2: where a new document goes: the first folder, under a plain name that isn't taken. */
+  async newFilePath(name: string, kind: DocKind): Promise<string> {
+    const ext = kind === 'word' ? '.docx' : '.xlsx';
+    const clean = name
+      .replace(/\.(docx|xlsx)$/i, '')
+      .replace(/[/\\]+/g, ' ')
+      .replace(/[^\p{L}\p{N} _.,()&+-]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/^[.\s-]+/, '')
+      .slice(0, 100);
+    if (!clean) throw new DocPathError('give the new file a name made of letters, numbers and spaces');
+    const [root] = await this.realRoots();
+    if (!root) throw new DocPathError(`none of the document folders (${this.rootsText()}) exist on this computer`);
+    const p = join(root, `${clean}${ext}`);
+    if (await exists(p)) throw new DocPathError(`${this.display(p)} exists already; pick another name, or edit that file`);
+    return p;
+  }
 }
 
 async function startsWithZip(p: string): Promise<boolean> {
@@ -162,4 +195,11 @@ async function startsWithZip(p: string): Promise<boolean> {
   } finally {
     await fh.close();
   }
+}
+
+async function exists(p: string): Promise<boolean> {
+  return lstat(p).then(
+    () => true,
+    () => false,
+  );
 }

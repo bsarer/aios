@@ -3,8 +3,10 @@
  * Tests never run the real apps. A fixture "document" is the four ZIP signature bytes
  * followed by JSON (Word: its text; Excel: its sheets as rows of cells from A1), and the
  * fake CLIs read that JSON. They answer the documented subcommands AI OS uses (text,
- * convert, info, cat, eval) and append every argument list to a log, so tests can see
- * exactly what reached the tools.
+ * convert, info, cat, eval; for D2 also `run` and `check`) and append every argument list
+ * to a log, so tests can see exactly what reached the tools. `run` applies the few commands
+ * whose effect tests read back (select.text, text.insert, text.delete, caret.docEnd,
+ * sheet.activate, range.setValues, home.insertRows, home.deleteRows) and records every command it was given in the saved file.
  *
  * Two hostile files carry instructions for the assistant: a Word document and a workbook
  * with them in a far-off cell and in a sheet name.
@@ -17,6 +19,8 @@ export const ZIP_HEADER = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
 export interface FakeWord {
   text: string;
+  /** D2: the commands a fake `run` applied, in order. */
+  applied?: { command: string; params?: Record<string, unknown> }[];
 }
 export interface FakeSheet {
   name: string;
@@ -24,6 +28,9 @@ export interface FakeSheet {
 }
 export interface FakeBook {
   sheets: FakeSheet[];
+  /** D2: what a fake `check` says GridCraft would lose saving it again. */
+  lossy?: string[];
+  applied?: { command: string; params?: Record<string, unknown> }[];
 }
 
 export const fakeDocBytes = (content: FakeWord | FakeBook) => Buffer.concat([ZIP_HEADER, Buffer.from(JSON.stringify(content))]);
@@ -80,6 +87,25 @@ const [cmd, file, out] = args;
 if (cmd === '--version') { console.log('wordcraft-cli 0.0.0-fake'); process.exit(0); }
 if (cmd === 'text') { process.stdout.write(load(file).text + '\n'); process.exit(0); }
 if (cmd === 'convert') { writeFileSync(out, '%PDF-1.4\n% fake\n' + load(file).text); process.exit(0); }
+if (cmd === 'run') {
+  const job = JSON.parse(readFileSync(opt('--script'), 'utf8'));
+  const doc = job.file ? load(job.file) : { text: '' };
+  let text = doc.text;
+  let sel = null;
+  let caret = text.length;
+  const applied = [];
+  for (const c of job.commands) {
+    applied.push(c);
+    const p = c.params ?? {};
+    if (c.command === 'select.text') { const i = text.indexOf(p.text); if (i < 0) fail('select.text: not found'); sel = [i, i + p.text.length]; }
+    else if (c.command === 'text.insert') { const [a, b] = sel ?? [caret, caret]; text = text.slice(0, a) + p.text + text.slice(b); caret = a + p.text.length; sel = null; }
+    else if (c.command === 'text.delete') { if (sel) { text = text.slice(0, sel[0]) + text.slice(sel[1]); caret = sel[0]; sel = null; } }
+    else if (c.command === 'caret.docEnd') { caret = text.length; sel = null; }
+    else if (!['format.set', 'para.style', 'para.bullets'].includes(c.command)) fail('unknown command ' + c.command);
+  }
+  for (const out of job.save) writeFileSync(out, Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(JSON.stringify({ text, applied }))]));
+  process.exit(0);
+}
 fail('unknown command ' + cmd);
 `;
 
@@ -107,6 +133,34 @@ if (cmd === 'eval') {
   let total = 0;
   for (let r = Number(m[2]); r <= Number(m[4]); r++) for (let c = colNum(m[1]); c <= colNum(m[3]); c++) { const v = (sh.rows[r - 1] ?? [])[c - 1]; if (typeof v === 'number') total += v; }
   console.log(JSON.stringify(total));
+  process.exit(0);
+}
+if (cmd === 'check') {
+  const lossy = load(a1).lossy ?? [];
+  console.log(JSON.stringify({ schema: 'gridcraft-check/1', files: [{ file: a1, roundTrip: { error: null, differing: lossy } }] }));
+  process.exit(lossy.length ? 1 : 0);
+}
+if (cmd === 'run') {
+  const src = opt('--in');
+  const book = src ? load(src) : { sheets: [{ name: 'Sheet1', rows: [] }] };
+  let sh = book.sheets[0];
+  const applied = book.applied ?? [];
+  for (const line of readFileSync(opt('--script'), 'utf8').split('\n').filter(Boolean)) {
+    const c = JSON.parse(line);
+    applied.push(c);
+    const p = c.params ?? {};
+    if (c.command === 'sheet.activate') { sh = book.sheets.find((x) => x.name === p.sheet); if (!sh) fail('no sheet named ' + p.sheet); }
+    else if (c.command === 'range.setValues') {
+      const s = cell(p.range.split(':')[0]);
+      p.values.forEach((row, i) => row.forEach((v, j) => { const r = s.r - 1 + i; while (sh.rows.length <= r) sh.rows.push([]); sh.rows[r][s.c - 1 + j] = v; }));
+    } else if (c.command === 'home.insertRows' || c.command === 'home.deleteRows') {
+      const [a, b] = p.rows.split(':').map(Number);
+      if (c.command === 'home.insertRows') sh.rows.splice(a - 1, 0, ...Array.from({ length: b - a + 1 }, () => []));
+      else sh.rows.splice(a - 1, b - a + 1);
+    }
+  }
+  for (const row of sh.rows) for (let j = 0; j < row.length; j++) if (row[j] === undefined) row[j] = '';
+  writeFileSync(opt('--out'), Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(JSON.stringify({ ...book, applied }))]));
   process.exit(0);
 }
 fail('unknown command ' + cmd);

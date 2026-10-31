@@ -443,7 +443,7 @@ describe('app tools', () => {
     expect(r.content).toMatch(/card now asks the user to confirm/);
     expect(launched).toEqual([]);
     expect(steps).toEqual([]);
-    expect(cards()[0]).toMatchObject({ state: 'pending', confirm: 'Do it', title: "Open “firefox”? This was asked for while I was reading an email, so I'm checking with you first." });
+    expect(cards()[0]).toMatchObject({ state: 'pending', confirm: 'Do it', title: "Open “firefox”? This was asked for while I was reading an email or document, so I'm checking with you first." });
     expect(log().at(-1)).toMatchObject({ tool: 'open_app', decision: 'proposed', untrustedInContext: true });
     setPaused(true);
     expect((await call('open_app', { app: 'firefox' })).content).toMatch(/paused/);

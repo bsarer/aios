@@ -7,7 +7,8 @@
  * acceptance checks: streaming chat, the now() tool, Esc to stop, slash commands,
  * live status values, memory cards and, with the GreenMail stack up, new-mail
  * notifications, the reply flow and opening attachments; C1: the calendar against a pretend
- * Google Calendar (fixtures/calendar.ts). Never touches real accounts or keys.
+ * Google Calendar (fixtures/calendar.ts); D1: Word and Excel files through pretend WordCraft and
+ * GridCraft tools (fixtures/documents.ts). Never touches real accounts or keys.
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
@@ -23,6 +24,7 @@ import { ImapFlow } from 'imapflow';
 import { type Page, chromium } from 'playwright-core';
 import { utcToLocal, zonedToUtc } from '@aios/core';
 import { FAKE_CLIENT_ID, calendarFixtures, startFakeGoogleCalendar } from '../../fixtures/calendar.js';
+import { makeDocFixture } from '../../fixtures/documents.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
@@ -150,6 +152,22 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
   }
   if (last.role === 'tool' && /^App builds, newest first:/.test(last.content ?? '')) {
     chunk(res, { choices: [{ delta: { content: last.content ?? '' } }] });
+    return finish(0.0004);
+  }
+  // D1: documents. Show the sales workbook as a card, or read the report and quote it.
+  const docCall = last.role === 'user' ? (/^show my sales spreadsheet$/i.test(lastUser) ? ['doc_show', { path: 'Finance/sales.xlsx' }] : /^what does report\.docx say$/i.test(lastUser) ? ['doc_read', { path: 'report.docx' }] : null) : null;
+  if (docCall) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_doc', function: { name: docCall[0], arguments: JSON.stringify(docCall[1]) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /^A card for the (Word|Excel) file/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'The card is in the chat; open it there.' } }] });
+    return finish(0.0004);
+  }
+  if (last.role === 'tool' && /<untrusted source="document"/.test(last.content ?? '')) {
+    const line = (last.content ?? '').split('\n').find((l) => /lease/.test(l)) ?? '';
+    chunk(res, { choices: [{ delta: { content: `The report says: ${line}` } }] });
     return finish(0.0004);
   }
   // S3: apps. List them, or start one; then answer with one line.
@@ -412,6 +430,8 @@ async function main(): Promise<void> {
   }
   const fakeState = (name: string) => readFileSync(join(state, name), 'utf8').trim();
   const port = 17_000 + Math.floor(Math.random() * 1000);
+  // D1: fixture documents and pretend WordCraft/GridCraft tools.
+  const docs = makeDocFixture();
   mkdirSync(join(tmp, 'config', 'aios'), { recursive: true });
   const role = `baseUrl = "http://127.0.0.1:${mockPort}/v1"\nmodel = "mock/model"\napiKeyRef = "keyring:model-chat"\n`;
   writeFileSync(
@@ -421,6 +441,7 @@ async function main(): Promise<void> {
       `[mail]\naddress = "john@aios.test"\nusername = "john@aios.test"\npasswordRef = "keyring:mail"\nbatchWindowSeconds = 2\n` +
       `imap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n` +
       `[calendar]\nclientId = "${FAKE_CLIENT_ID}"\napiBaseUrl = "${gcal.apiBaseUrl}"\ntokenUrl = "${gcal.tokenUrl}"\n` +
+      `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -781,6 +802,21 @@ async function main(): Promise<void> {
     } else {
       console.log('SKIP  mail checks (GreenMail not running; `pnpm test:stack:up` to include them)');
     }
+    // 11. Documents (D1): the model reads a Word file's text; a workbook opens as a table from a card.
+    await input.fill('what does report.docx say');
+    await input.press('Enter');
+    check('the model reads the Word file', await waitFor(async () => (await lastAssistant().innerText()).includes('Renew the office lease by 15 November'), 15_000));
+    await input.fill('show my sales spreadsheet');
+    await input.press('Enter');
+    check('"show my sales spreadsheet" shows a document card', await waitFor(async () => (await page.locator('[data-kind="document"]').count()) === 1, 15_000));
+    check('the card names the file', (await page.getByTestId('document-name').innerText()) === 'sales.xlsx');
+    await page.getByTestId('document-open').click();
+    check('Open shows the sheet as a table', await waitFor(async () => (await page.getByTestId('document-sheet').count()) === 1, 15_000));
+    check('the table holds the cells', (await page.getByTestId('document-sheet').innerText()).includes('Lamp'));
+    check('both sheets have tabs', (await page.getByTestId('document-sheet-tab').count()) === 2);
+    await shot(page, '14-document-sheet');
+    await page.keyboard.press('Escape');
+    check('Esc closes the document', await waitFor(async () => (await page.getByTestId('document-viewer').count()) === 0));
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

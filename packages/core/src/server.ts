@@ -8,6 +8,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { ClientMessage } from '@aios/shared';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { DocumentFiles } from './docs/viewer.js';
 import type { AttachmentFiles } from './mail/attachments.js';
 import type { Shell } from './shell.js';
 
@@ -19,6 +20,8 @@ export interface ServerOptions {
   devOrigins?: string[];
   /** Files behind attachment cards (S2). Without it, /attachments answers 404. */
   attachments?: Pick<AttachmentFiles, 'file'>;
+  /** What is behind document cards (D1). Without it, /documents answers 404. */
+  documents?: Pick<DocumentFiles, 'file'>;
 }
 
 /**
@@ -87,6 +90,23 @@ export async function createServer(shell: Shell, o: ServerOptions): Promise<Fast
     if (!f) return reply.code(404).type('text/plain').send('That attachment is no longer in your mailbox.');
     if ('error' in f) return reply.code(422).type('text/plain').send(f.error);
     return reply.code(200).type(f.mime).send(f.bytes);
+  });
+
+  // D1: a Word file as a PDF WordCraft made, or a workbook's cells as JSON. Same headers as attachments.
+  app.get<{ Params: { id: string } }>('/documents/:id', async (req, reply) => {
+    reply.headers(ATTACHMENT_HEADERS);
+    const site = req.headers['sec-fetch-site'];
+    if (site !== undefined && site !== 'same-origin') return reply.code(403).type('text/plain').send('forbidden');
+    if (!o.documents || !/^doc-[0-9a-f-]{36}$/.test(req.params.id)) return reply.code(404).type('text/plain').send('not found');
+    const ac = new AbortController();
+    req.raw.once('close', () => {
+      if (!reply.sent) ac.abort();
+    });
+    const f = await o.documents.file(req.params.id, ac.signal);
+    if (!f) return reply.code(404).type('text/plain').send('That document card is no longer here.');
+    if ('error' in f) return reply.code(422).type('text/plain').send(f.error);
+    if (f.kind === 'pdf') return reply.code(200).type('application/pdf').send(f.bytes);
+    return reply.code(200).type('application/json; charset=utf-8').send(JSON.stringify(f.view));
   });
 
   if (o.uiDir && existsSync(o.uiDir)) {

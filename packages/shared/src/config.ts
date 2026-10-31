@@ -82,6 +82,29 @@ export const CalendarConfig = z.strictObject({
 });
 export type CalendarConfig = z.infer<typeof CalendarConfig>;
 
+/**
+ * D1: Word (.docx) and Excel (.xlsx) files, read through WordCraft's and GridCraft's own
+ * command-line tools (storytold/wordcraft, storytold/gridcraft; MIT OR Apache-2.0). They are
+ * separate programs, not npm packages. Only files under `roots` are ever opened.
+ */
+export const DocsConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** Folders the chat may read documents from. `~` is the home folder. */
+  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents']),
+  /** The command-line tools. Absolute paths when the service doesn't see them on PATH. */
+  wordCli: z.string().min(1).default('wordcraft-cli'),
+  sheetCli: z.string().min(1).default('gridcraft-cli'),
+  /** The desktop apps, started with the file as their one argument (doc_open_app). */
+  wordApp: z.string().min(1).default('wordcraft'),
+  sheetApp: z.string().min(1).default('gridcraft'),
+  /**
+   * How long one command may take. A chat tool also stops at the registry's 15 s limit;
+   * showing a Word file (a PDF conversion, from the card's Open) gets three times this.
+   */
+  timeoutSeconds: z.int().min(2).max(60).default(12),
+});
+export type DocsConfig = z.infer<typeof DocsConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -120,6 +143,16 @@ export const AiosConfig = z.strictObject({
       kiosk: z.boolean().default(true),
     })
     .default({ port: 7777, kiosk: true }),
+  /** D1: reading Word and Excel files. */
+  docs: DocsConfig.default({
+    enabled: true,
+    roots: ['~/Documents'],
+    wordCli: 'wordcraft-cli',
+    sheetCli: 'gridcraft-cli',
+    wordApp: 'wordcraft',
+    sheetApp: 'gridcraft',
+    timeoutSeconds: 12,
+  }),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

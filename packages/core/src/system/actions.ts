@@ -107,7 +107,7 @@ function card(a: SystemAction): { title: string; confirm: string } {
     case 'bluetooth_forget':
       return { title: `Forget ${q(a.name)} (${a.address})? It will need pairing again to use it.`, confirm: 'Forget' };
     case 'device':
-      return { title: `${a.summary}? This was asked for while I was reading an email, so I'm checking with you first.`, confirm: 'Do it' };
+      return { title: `${a.summary}? This was asked for while I was reading an email or document, so I'm checking with you first.`, confirm: 'Do it' };
     case 'build_app': {
       const req = a.request.length > 300 ? `${a.request.slice(0, 300)}…` : a.request;
       return a.update

@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   AuditLog,
-  CALENDAR_UNTRUSTED_WARNING,
   CalendarActions,
   type Delta,
   GoogleAuth,
@@ -72,10 +71,12 @@ describe('calendar tools', () => {
     const { tools } = await setup();
     expect(toolByName('calendar_list')!.tier).toBe('read');
     expect(toolByName('calendar_free')!.tier).toBe('read');
-    for (const n of ['calendar_create_event', 'calendar_update_event', 'calendar_cancel_event']) expect(toolByName(n)!.tier).toBe('draft');
+    expect(toolByName('calendar_find')!.tier).toBe('read');
+    for (const n of ['calendar_create_event', 'calendar_update_event', 'calendar_cancel_event']) expect(toolByName(n)!.tier).toBe('write');
     expect(tools.returnsUntrusted('calendar_list')).toBe(true);
-    // Free time is worked out by code from times alone: no event text in it.
+    // Free time and finding an event's id are worked out by code from times alone: no event text in them.
     expect(tools.returnsUntrusted('calendar_free')).toBe(false);
+    expect(tools.returnsUntrusted('calendar_find')).toBe(false);
   });
 
   it("lists a day's events in order, with times written by code and each event's text wrapped", async () => {
@@ -104,6 +105,22 @@ describe('calendar tools', () => {
     expect((await run('calendar_list', { from: day(10) })).content).toMatch(/^No events from/);
     expect((await run('calendar_list', { from: day(0), to: day(100) })).content).toMatch(/at most 62 days/);
     expect((await run('calendar_list', { from: 'next week' })).content).toMatch(/^Error: .*not a date/);
+  });
+
+  it('finds an event by words and time, giving ids and times but no event text', async () => {
+    const { run } = await setup();
+    const all = await run('calendar_find', { from: TOMORROW });
+    expect(all.content.split('\n').slice(1)).toEqual([
+      'id: standup1 · Tue 3 Nov, 10:00–10:15 · the user organizes it · 1 guest(s)',
+      'id: lunch1 · Tue 3 Nov, 12:30–13:30 · the user organizes it',
+      'id: review1 · Tue 3 Nov, 15:00–16:00 · someone else organizes it (cannot be changed) · 1 guest(s)',
+      'id: focus1 · Tue 3 Nov, 16:00–17:00 · the user organizes it',
+      'id: evil1 · Tue 3 Nov, 17:00–17:30 · someone else organizes it (cannot be changed) · 1 guest(s)',
+    ]);
+    expect(all.content).not.toMatch(/Team standup|Lunch with|Quarterly|NOTE TO|untrusted|evil\.example|Lakeside/);
+    const lunch = await run('calendar_find', { from: day(0), to: day(6), query: 'lunch' });
+    expect(lunch.content).toContain('id: lunch1 ·');
+    expect(lunch.content.match(/^id: /gm)).toHaveLength(1);
   });
 
   it('finds free time between busy events, ignoring free and declined ones', async () => {
@@ -226,10 +243,20 @@ describe('calendar cards', () => {
     expect(fake.events.get('lunch1')?.status).toBeUndefined();
   });
 
-  it('flags a card asked for while outside text was in view', async () => {
-    const { run, eventCards } = await setup();
-    await run('calendar_create_event', { title: 'Sync', start: `${TOMORROW}T09:00` }, { untrustedInContext: true });
-    expect(eventCards()[0]!.warnings).toEqual([CALENDAR_UNTRUSTED_WARNING]);
+  it('while email or event text is in view, calendar changes are neither offered nor run, and no card appears', async () => {
+    const { run, tools, eventCards } = await setup();
+    const offered = tools.specs({ untrustedInContext: true }).map((t) => t.name);
+    expect(offered.sort()).toEqual(['calendar_find', 'calendar_free', 'calendar_list']);
+    for (const [name, args] of [
+      ['calendar_create_event', { title: 'Sync', start: `${TOMORROW}T09:00` }],
+      ['calendar_update_event', { id: 'standup1', start: `${TOMORROW}T11:00` }],
+      ['calendar_cancel_event', { id: 'standup1' }],
+    ] as const) {
+      const r = await run(name, args, { untrustedInContext: true });
+      expect(r.ok).toBe(false);
+      expect(r.content).toMatch(/cannot run while text from an email or another outside source/);
+    }
+    expect(eventCards()).toEqual([]);
   });
 
   it('a retry after a crash or a failure never makes a second event', async () => {

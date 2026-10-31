@@ -42,6 +42,8 @@ export interface ShellOptions {
   systemActions?: SystemActions;
   /** Where the chat window sits (S3). Without it, window messages are ignored and the chat stays full screen. */
   chatWindow?: { readonly mode: WindowMode; request: (mode: WindowMode) => Promise<void> };
+  /** Open on a finished build's message (S4): opens the app that Build card built. */
+  openBuiltApp?: (actionId: string) => Promise<void>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -156,7 +158,9 @@ export class Shell {
     if (msg.type === 'memory') return this.decideMemory(msg.id, msg.decision);
     if (msg.type === 'mail_ignore') return this.ignoreMail(msg.itemId, msg.mailId);
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
-    if (msg.type === 'action_confirm' || msg.type === 'action_cancel') return this.systemAction(msg);
+    if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
+    // The user's own click on a build they started, so like the window it works while paused.
+    if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
     // The user's own click, so it works while paused; it only moves the chat window.
     if (msg.type === 'window') return this.o.chatWindow?.request(msg.mode);
     const cmd = parseCommand(msg.text);
@@ -222,14 +226,18 @@ export class Shell {
    * Clicks on a system action card. The broker checks the hash and the state, and refuses
    * while paused, before anything changes.
    */
-  private async systemAction(msg: Extract<ClientMessage, { type: 'action_confirm' | 'action_cancel' }>): Promise<void> {
+  private async systemAction(msg: Extract<ClientMessage, { type: 'action_confirm' | 'action_cancel' | 'action_stop' }>): Promise<void> {
     const actions = this.o.systemActions;
     if (!actions) return;
     if (msg.type === 'action_cancel') {
       actions.cancel(msg.id);
       return;
     }
-    await actions.confirm(msg.id, msg.hash);
+    if (msg.type === 'action_stop') {
+      actions.stop(msg.id);
+      return;
+    }
+    await actions.confirm(msg.id, msg.hash, msg.choice);
     // Wi-Fi changes show in the status strip straight away rather than at the next refresh.
     await this.refreshSystemStatus();
   }

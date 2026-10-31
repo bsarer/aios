@@ -99,10 +99,13 @@ export const AiosConfig = z.strictObject({
       command: z.string().min(1).default('claude'),
       /** Passed to Claude Code as --model when set; otherwise it uses its own default. */
       model: z.string().min(1).optional(),
-      maxBudgetUsd: z.number().positive().max(50).default(2),
+      /** The highest spending cap a Build card offers. */
+      maxBudgetUsd: z.number().positive().max(50).default(5),
+      /** The caps a Build card offers to pick from; any above maxBudgetUsd are left out. */
+      budgetChoicesUsd: z.array(z.number().positive().max(50)).min(1).max(4).default([1, 2, 5]),
       timeoutMinutes: z.int().min(1).max(60).default(15),
     })
-    .default({ enabled: true, command: 'claude', maxBudgetUsd: 2, timeoutMinutes: 15 }),
+    .default({ enabled: true, command: 'claude', maxBudgetUsd: 5, budgetChoicesUsd: [1, 2, 5], timeoutMinutes: 15 }),
 });
 export type AiosConfig = z.infer<typeof AiosConfig>;
 

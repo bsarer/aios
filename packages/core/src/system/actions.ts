@@ -7,7 +7,7 @@
  * confirm(), reached solely by a click on that card carrying the hash the card showed.
  *
  *   pending ──confirm click (hash matches)──▶ running ──▶ done | failed
- *      └──── cancel ──▶ cancelled
+ *      └──── cancel ──▶ cancelled           └── Stop click (builds) ──▶ cancelled
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { ChatItem } from '@aios/shared';
@@ -23,16 +23,38 @@ export type SystemAction =
   | { action: 'bluetooth_forget'; address: string; name: string }
   /** A device-tier change asked for while an email was in view: runs only after a click. */
   | { action: 'device'; tool: string; args: unknown; summary: string }
-  /** S4: build or change an app. `request` is the user's own words; audits get its length only. */
-  | { action: 'build_app'; name: string; slug: string; request: string; update: boolean };
+  /**
+   * S4: build or change an app. `request` is the user's own words; audits get its length only.
+   * The click picks one of `budgets` as the spending cap; `note` is shown under the title.
+   */
+  | { action: 'build_app'; name: string; slug: string; request: string; update: boolean; budgets: number[]; note?: string | undefined };
+
+export interface AppBuildContext {
+  /** The card's id. */
+  id: string;
+  /** Aborted by the card's Stop button. */
+  signal: AbortSignal;
+  /** Shows what the build is doing now on the card. */
+  progress: (step: string) => void;
+  /** The spending cap the click chose. */
+  budgetUsd: number;
+}
 
 /** Builds the app a Build card names; set by buildAppTool. Returns the card's result text and audit fields. */
-export type AppBuildRunner = (a: Extract<SystemAction, { action: 'build_app' }>) => Promise<{ result: string; audit?: Record<string, unknown> }>;
+export type AppBuildRunner = (
+  a: Extract<SystemAction, { action: 'build_app' }>,
+  ctx: AppBuildContext,
+) => Promise<{ result: string; audit?: Record<string, unknown> }>;
+
+/** Thrown by a runner that stopped because the user clicked Stop; its message is the card's result. */
+export class StoppedError extends Error {}
+
+const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 
 /** What audits record of an action: never the words of a build request. */
 function auditable(a: SystemAction): Record<string, unknown> {
   if (a.action !== 'build_app') return a;
-  const { request, ...rest } = a;
+  const { request, note: _note, ...rest } = a;
   return { ...rest, requestChars: request.length };
 }
 
@@ -89,10 +111,16 @@ function card(a: SystemAction): { title: string; confirm: string } {
     case 'build_app': {
       const req = a.request.length > 300 ? `${a.request.slice(0, 300)}…` : a.request;
       return a.update
-        ? { title: `Change the app ${q(a.name)}? Claude Code will edit it as you asked: ${q(req)}. It takes a few minutes and only touches that app's folder.`, confirm: 'Change' }
-        : { title: `Build a new app, ${q(a.name)}? Claude Code will write it from your request: ${q(req)}. It takes a few minutes and only touches that app's own folder.`, confirm: 'Build' };
+        ? { title: `Change the app ${q(a.name)}? Claude Code will edit it as you asked: ${q(req)}. It only touches that app's folder.`, confirm: 'Change' }
+        : { title: `Build a new app, ${q(a.name)}? Claude Code will write it from your request: ${q(req)}. It only touches that app's own folder.`, confirm: 'Build' };
     }
   }
+}
+
+/** The cap buttons on a Build card: "Build · up to $2". */
+function choices(a: SystemAction, confirm: string): ActionItem['choices'] {
+  if (a.action !== 'build_app') return undefined;
+  return a.budgets.map((b) => ({ label: `${confirm} · up to ${usd(b)}`, value: String(b) }));
 }
 
 export class SystemActions {
@@ -100,6 +128,8 @@ export class SystemActions {
   private readonly newId: () => string;
   private deviceRunner: DeviceRunner | null = null;
   private appBuilder: AppBuildRunner | null = null;
+  /** Builds running now: their Stop handle and what the card shows about them. */
+  private readonly live = new Map<string, { ac: AbortController; step: string; startedAt: number; capUsd: number }>();
 
   constructor(private readonly o: SystemActionsOptions) {
     this.clock = o.clock ?? Date.now;
@@ -123,7 +153,39 @@ export class SystemActions {
   }
 
   private item(r: Row): ActionItem {
-    return { kind: 'action', id: r.id, title: r.title, confirm: r.confirm, hash: r.hash, state: r.state, ...(r.result ? { result: r.result } : {}), at: r.created_at };
+    const spec = JSON.parse(r.spec) as SystemAction;
+    const live = r.state === 'running' ? this.live.get(r.id) : undefined;
+    const options = choices(spec, r.confirm);
+    return {
+      kind: 'action',
+      id: r.id,
+      title: r.title,
+      confirm: r.confirm,
+      hash: r.hash,
+      state: r.state,
+      ...(r.result ? { result: r.result } : {}),
+      ...(spec.action === 'build_app' && spec.note ? { note: spec.note } : {}),
+      ...(options ? { choices: options } : {}),
+      ...(live ? { progress: { step: live.step, startedAt: live.startedAt, capUsd: live.capUsd } } : {}),
+      at: r.created_at,
+    };
+  }
+
+  /** A finished build's app, for its Open button: only from a Build card that is done. */
+  builtApp(id: string): { name: string; slug: string } | null {
+    const r = this.row(id);
+    if (r?.state !== 'done') return null;
+    const spec = JSON.parse(r.spec) as SystemAction;
+    return spec.action === 'build_app' ? { name: spec.name, slug: spec.slug } : null;
+  }
+
+  /** Pending Build cards, oldest first, for build_status. */
+  pendingBuilds(): { id: string; name: string; at: number }[] {
+    const rows = this.db.prepare("SELECT * FROM system_actions WHERE state = 'pending' ORDER BY created_at").all() as Row[];
+    return rows.flatMap((r) => {
+      const spec = JSON.parse(r.spec) as SystemAction;
+      return spec.action === 'build_app' ? [{ id: r.id, name: spec.name, at: r.created_at }] : [];
+    });
   }
 
   private refresh(id: string): void {
@@ -160,8 +222,11 @@ export class SystemActions {
     return item;
   }
 
-  /** The confirm click. Runs only a pending action whose hash matches what the card showed. */
-  async confirm(id: string, shownHash: string): Promise<ConfirmResult> {
+  /**
+   * The confirm click. Runs only a pending action whose hash matches what the card showed.
+   * `choice` is the button clicked on a card with choices; it must be one the card offered.
+   */
+  async confirm(id: string, shownHash: string, choice?: string): Promise<ConfirmResult> {
     const r = this.row(id);
     const spec = r ? (JSON.parse(r.spec) as SystemAction) : null;
     const audit = (entry: Record<string, unknown>) =>
@@ -182,6 +247,15 @@ export class SystemActions {
       this.refresh(id);
       return 'refused';
     }
+    let budgetUsd = 0;
+    if (spec.action === 'build_app') {
+      const picked = choice === undefined ? undefined : spec.budgets.find((b) => String(b) === choice);
+      if (picked === undefined) {
+        audit({ decision: 'denied', reason: 'not one of the choices on the card' });
+        return 'refused';
+      }
+      budgetUsd = picked;
+    }
     if (this.o.isPaused?.()) {
       audit({ decision: 'denied', reason: 'paused' });
       this.o.notice('info', 'I am paused, so I changed nothing. Type /resume, then click again.');
@@ -191,21 +265,39 @@ export class SystemActions {
       audit({ decision: 'denied', reason: `action is ${r.state}` });
       return 'refused';
     }
-    audit({ decision: 'approved', ...auditable(spec) });
+    audit({ decision: 'approved', ...auditable(spec), ...(spec.action === 'build_app' ? { budgetUsd } : {}) });
+    if (spec.action === 'build_app') this.live.set(id, { ac: new AbortController(), step: 'Starting Claude Code', startedAt: this.clock(), capUsd: budgetUsd });
     this.refresh(id);
     try {
-      const { result, old, now, extra } = await this.run(spec);
+      const { result, old, now, extra } = await this.run(spec, id, budgetUsd);
+      this.live.delete(id);
       this.transition(id, ['running'], 'done', result);
       audit({ decision: 'approved', ok: true, old, new: now, ...extra });
       this.refresh(id);
       return 'done';
     } catch (err) {
+      this.live.delete(id);
+      if (err instanceof StoppedError) {
+        this.transition(id, ['running'], 'cancelled', err.message);
+        audit({ decision: 'approved', ok: false, stopped: true });
+        this.refresh(id);
+        return 'failed';
+      }
       const why = describeSystemError(err);
       this.transition(id, ['running'], 'failed', `Didn't work: ${why}.`);
       audit({ decision: 'approved', ok: false, error: why });
       this.refresh(id);
       return 'failed';
     }
+  }
+
+  /** The Stop click on a running build. Other actions can't be stopped part-way. */
+  stop(id: string): boolean {
+    const live = this.live.get(id);
+    if (!live || live.ac.signal.aborted) return false;
+    this.o.audit.append({ kind: 'system', event: 'action_stopped', actionId: id });
+    live.ac.abort();
+    return true;
   }
 
   cancel(id: string): boolean {
@@ -224,12 +316,18 @@ export class SystemActions {
     }
   }
 
-  private async run(a: SystemAction): Promise<{ result: string; old: unknown; now: unknown; extra?: Record<string, unknown> | undefined }> {
+  private async run(a: SystemAction, id: string, budgetUsd: number): Promise<{ result: string; old: unknown; now: unknown; extra?: Record<string, unknown> | undefined }> {
     const c = this.o.controls;
     switch (a.action) {
       case 'build_app': {
+        const live = this.live.get(id)!;
         if (!this.appBuilder) throw new Error('building apps is not set up');
-        const r = await this.appBuilder(a);
+        const progress = (step: string) => {
+          if (step === live.step || live.ac.signal.aborted) return;
+          live.step = step;
+          this.refresh(id);
+        };
+        const r = await this.appBuilder(a, { id, signal: live.ac.signal, progress, budgetUsd });
         return { result: r.result, old: undefined, now: undefined, extra: r.audit };
       }
       case 'device': {

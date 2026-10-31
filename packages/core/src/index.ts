@@ -39,3 +39,4 @@ export * from './apps/launcher.js';
 export * from './apps/tools.js';
 export * from './apps/window.js';
 export * from './apps/builder.js';
+export * from './apps/history.js';

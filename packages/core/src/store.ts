@@ -29,6 +29,10 @@ const MIGRATIONS = [
   `CREATE TABLE system_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, title TEXT NOT NULL, confirm TEXT NOT NULL, hash TEXT NOT NULL,
                                state TEXT NOT NULL, result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
    CREATE INDEX system_actions_state ON system_actions(state);`,
+  // S4: each app build, for its progress, build_status and cost estimates. Never the request's words.
+  `CREATE TABLE app_builds (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL, created INTEGER NOT NULL, state TEXT NOT NULL,
+                           step TEXT, error TEXT, cost_usd REAL, budget_usd REAL NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER);
+   CREATE INDEX app_builds_started ON app_builds(started_at);`,
 ];
 
 export interface UsageRow {

@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { Keyring } from '@aios/core';
 import { type AiosConfig, configDir, parseConfig, serializeConfig } from '@aios/shared';
 import { ImapFlow } from 'imapflow';
+import { signInToCalendar } from './calendar-auth.js';
 import { folderStatus } from './mailbox.js';
 import providers from '../providers.json' with { type: 'json' };
 import { terminalPrompter } from './prompt.js';
@@ -125,6 +126,18 @@ async function main(): Promise<void> {
     console.log(await testMail(result.config, keyring));
   } catch (err) {
     console.error(`mail test failed: ${(err as Error).message}`);
+  }
+  const cal = result.config.calendar;
+  if (cal) {
+    const signedIn = !!(await keyring.get(cal.tokenRef));
+    if (await prompter.confirm(signedIn ? 'Sign in to Google Calendar again?' : 'Sign in to Google Calendar now? (opens your browser)', !signedIn)) {
+      try {
+        const n = await signInToCalendar(cal, keyring, result.config.user.timezone, { loginHint: result.config.mail.address });
+        console.log(`calendar OK (${n} event(s) in the next 7 days)`);
+      } catch (err) {
+        console.error(`calendar sign-in failed: ${(err as Error).message}. Try again later with \`pnpm calendar:login\`.`);
+      }
+    }
   }
   try {
     await kiosk(result.config, prompter, false);

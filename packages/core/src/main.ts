@@ -14,6 +14,9 @@ import { BuildLog } from './apps/history.js';
 import { appTools, buildAppTool, buildStatusTool, builtAppOpener } from './apps/tools.js';
 import { ChatWindow } from './apps/window.js';
 import { desktopNotify } from './notify.js';
+import { CalendarActions } from './calendar/actions.js';
+import { GoogleAuth, GoogleCalendar } from './calendar/google.js';
+import { calendarTools } from './calendar/tools.js';
 import { AuditLog } from './audit.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
@@ -109,6 +112,29 @@ async function main(): Promise<void> {
     notice: (level, text) => shell?.agent.notice(level, text),
   });
   for (const t of draftTools({ broker: approvals, mail: mailClient, userName: config.user.name, selfAddress: config.mail.address })) tools.register(t);
+  // C1: the calendar, when configured. Sign-in comes from `pnpm calendar:login`; until then
+  // the tools answer that it isn't signed in.
+  let calendarActions: CalendarActions | undefined;
+  const cal = config.calendar;
+  if (cal) {
+    const clientSecretRef = cal.clientSecretRef;
+    const auth = new GoogleAuth({
+      tokenUrl: cal.tokenUrl,
+      clientId: cal.clientId,
+      clientSecret: async () => (clientSecretRef ? ((await keyring.get(clientSecretRef))?.reveal() ?? null) : null),
+      refreshToken: async () => (await keyring.get(cal.tokenRef))?.reveal() ?? null,
+    });
+    const api = new GoogleCalendar({ apiBaseUrl: cal.apiBaseUrl, calendarId: cal.calendarId, auth });
+    calendarActions = new CalendarActions({
+      store,
+      api,
+      audit,
+      timeZone: config.user.timezone,
+      show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
+    });
+    const calendar = calendarTools({ api, actions: calendarActions, timeZone: config.user.timezone, defaultMinutes: cal.defaultMinutes, workday: cal.workday, selfAddresses: [config.mail.address] });
+    for (const t of calendar) tools.register(t);
+  }
   const controls = new SystemControls();
   const systemActions = new SystemActions({
     store,
@@ -181,6 +207,7 @@ async function main(): Promise<void> {
     memory,
     approvals,
     systemActions,
+    ...(calendarActions ? { calendarActions } : {}),
     chatWindow,
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
@@ -227,6 +254,7 @@ async function main(): Promise<void> {
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();
   systemActions.recover();
+  calendarActions?.recover();
   shell.greet();
   // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
   await keyring.require(config.models.chat.apiKeyRef).catch((err: unknown) => {

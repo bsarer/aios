@@ -6,7 +6,8 @@
  * throwaway config, data dir and fake keyring, then drives Chromium through the
  * acceptance checks: streaming chat, the now() tool, Esc to stop, slash commands,
  * live status values, memory cards and, with the GreenMail stack up, new-mail
- * notifications, the reply flow and opening attachments. Never touches real accounts or keys.
+ * notifications, the reply flow and opening attachments; C1: the calendar against a pretend
+ * Google Calendar (fixtures/calendar.ts). Never touches real accounts or keys.
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
@@ -20,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer as createNetServer, connect as netConnect } from 'node:net';
 import { ImapFlow } from 'imapflow';
 import { type Page, chromium } from 'playwright-core';
+import { utcToLocal, zonedToUtc } from '@aios/core';
+import { FAKE_CLIENT_ID, calendarFixtures, startFakeGoogleCalendar } from '../../fixtures/calendar.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
@@ -30,6 +33,12 @@ const shotsArg = process.argv.indexOf('--shots');
 const shots = shotsArg > 0 ? process.argv[shotsArg + 1] : undefined;
 
 // ── Mock model ───────────────────────────────────────────────────────────────
+
+/** C1: the calendar fixtures are relative to today, in this machine's zone like the config. */
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const today = utcToLocal(Date.now(), TZ).slice(0, 10);
+const calDay = (n: number) => new Date(Date.parse(`${today}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const calAt = (n: number, hhmm: string) => zonedToUtc(`${calDay(n)}T${hhmm}`, TZ).toISOString();
 
 const chunk = (res: ServerResponse, obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -53,6 +62,24 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     res.end('data: [DONE]\n\n');
   };
 
+  // C1: calendar. A real model would call these from the user's words; the mock maps fixed phrases.
+  const toolCall = (name: string, args: unknown) => {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_c', function: { name, arguments: JSON.stringify(args) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    res.end('data: [DONE]\n\n');
+  };
+  if (last.role === 'user' && /^what'?s on tomorrow\??$/i.test(lastUser)) return toolCall('calendar_list', { from: calDay(1) });
+  if (last.role === 'user' && /^move my standup to 11$/i.test(lastUser)) return toolCall('calendar_update_event', { id: 'standup1', start: `${calDay(1)}T11:00` });
+  if (last.role === 'user' && /^cancel my lunch$/i.test(lastUser)) return toolCall('calendar_cancel_event', { id: 'lunch1' });
+  if (last.role === 'tool' && /<untrusted source="calendar"/.test(last.content ?? '')) {
+    const titles = [...(last.content ?? '').matchAll(/^Title: (.*)$/gm)].map((m) => m[1]);
+    chunk(res, { choices: [{ delta: { content: `Tomorrow: ${titles.join('; ')}.` } }] });
+    return finish(0.0004);
+  }
+  if (last.role === 'tool' && /^A card (with the change|asking to cancel)/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'The card is ready; nothing changes until you click it.' } }] });
+    return finish(0.0004);
+  }
   // Notifications: "why was that low-priority email low?" goes through mail_recent.
   if (last.role === 'user' && /low.priority email/i.test(lastUser)) {
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_n', function: { name: 'mail_recent', arguments: '{}' } }] } }] });
@@ -294,7 +321,12 @@ async function main(): Promise<void> {
   const bin = join(tmp, 'bin');
   mkdirSync(bin);
   // Fake keyring: the GreenMail test password for the mail account, a dummy key for the model.
-  writeFileSync(join(bin, 'secret-tool'), '#!/bin/sh\n[ "$1" = lookup ] || exit 1\n[ "$5" = mail ] && printf test-only-password && exit 0\nprintf test-key\n');
+  // C1: the pretend Google Calendar, and its refresh token in the fake keyring.
+  const gcal = await startFakeGoogleCalendar(calendarFixtures(calAt, calDay));
+  writeFileSync(
+    join(bin, 'secret-tool'),
+    '#!/bin/sh\n[ "$1" = lookup ] || exit 1\n[ "$5" = mail ] && printf test-only-password && exit 0\n[ "$5" = calendar-google ] && printf test-only-refresh-token && exit 0\nprintf test-key\n',
+  );
   chmodSync(join(bin, 'secret-tool'), 0o755);
   // Fake Omarchy commands for the system controls (S1), keeping their state in files.
   const state = join(tmp, 'system-state');
@@ -388,6 +420,7 @@ async function main(): Promise<void> {
       `[models.chat]\n${role}[models.triage]\n${role}[models.nightly]\n${role}` +
       `[mail]\naddress = "john@aios.test"\nusername = "john@aios.test"\npasswordRef = "keyring:mail"\nbatchWindowSeconds = 2\n` +
       `imap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n` +
+      `[calendar]\nclientId = "${FAKE_CLIENT_ID}"\napiBaseUrl = "${gcal.apiBaseUrl}"\ntokenUrl = "${gcal.tokenUrl}"\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -540,6 +573,31 @@ async function main(): Promise<void> {
     check('Wi-Fi is off', fakeState('radio') === 'disabled');
     check('status strip shows Wi-Fi off', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Wi-Fi off')));
     await shot(page, 's1-wifi-off');
+
+    // C1: calendar. Reading answers straight away; a change is a card until the click.
+    const calWrites = () => gcal.requests.filter((r) => r.path.includes('/events') && r.method !== 'GET');
+    await input.fill("what's on tomorrow?");
+    await input.press('Enter');
+    check('"what\'s on tomorrow" lists the events', await waitFor(async () => /Tomorrow: Team standup; Lunch with Sara; Design review/.test(await lastAssistant().innerText())));
+    await input.fill('move my standup to 11');
+    await input.press('Enter');
+    const moveCard = page.locator('[data-kind="event"]').last();
+    check('"move my standup" shows a calendar card', await waitFor(async () => (await moveCard.getAttribute('data-state')) === 'pending'));
+    check('the card shows the old and new time', /10:00–10:15/.test(await moveCard.getByTestId('event-before').innerText()) && /11:00–11:15/.test(await moveCard.getByTestId('event-when').innerText()));
+    check('the card names who gets an update', (await moveCard.getByTestId('event-attendees').innerText()).includes('ana@aios.test'));
+    check('nothing reached the calendar before the click', calWrites().length === 0, JSON.stringify(calWrites()));
+    await shot(page, 'c1-move-card');
+    await moveCard.getByTestId('event-confirm').click();
+    check('Change moves the event', await waitFor(async () => (await moveCard.getAttribute('data-state')) === 'done'));
+    check('the calendar got exactly one change, with an update to the guests', calWrites().length === 1 && calWrites()[0]!.method === 'PATCH' && calWrites()[0]!.query.sendUpdates === 'all', JSON.stringify(calWrites()));
+    check('the standup is at 11 now', Date.parse(gcal.events.get('standup1')?.start.dateTime ?? '') === Date.parse(calAt(1, '11:00')), JSON.stringify(gcal.events.get('standup1')?.start));
+    await input.fill('cancel my lunch');
+    await input.press('Enter');
+    const cancelCard = page.locator('[data-kind="event"]').last();
+    check('"cancel my lunch" shows a card', await waitFor(async () => (await cancelCard.getAttribute('data-change')) === 'cancel' && (await cancelCard.getAttribute('data-state')) === 'pending'));
+    await cancelCard.getByTestId('event-discard').click();
+    check('Discard leaves the lunch in the calendar', await waitFor(async () => (await cancelCard.getAttribute('data-state')) === 'discarded') && calWrites().length === 1);
+    await shot(page, 'c1-discarded');
 
     // S3: apps. The chat lists installed apps, starts one, and steps aside as the orb until it closes.
     await input.fill('what apps do I have?');
@@ -740,6 +798,7 @@ async function main(): Promise<void> {
     await stopCore();
     mock.close();
     hyprEvents.close();
+    await gcal.close();
   }
   if (failures) console.log(`\n--- aios-core output ---\n${coreLog}`);
   console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');

@@ -10,6 +10,7 @@ import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
 import { cleanFact } from './memory/files.js';
+import type { CalendarActions } from './calendar/actions.js';
 import type { ApprovalBroker } from './mail/approvals.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
@@ -40,6 +41,8 @@ export interface ShellOptions {
   approvals?: ApprovalBroker;
   /** Cards for system changes that need a click (S1). Without it, action messages are ignored. */
   systemActions?: SystemActions;
+  /** Calendar change cards and their clicks (C1). Without it, event messages are ignored. */
+  calendarActions?: CalendarActions;
   /** Where the chat window sits (S3). Without it, window messages are ignored and the chat stays full screen. */
   chatWindow?: { readonly mode: WindowMode; request: (mode: WindowMode) => Promise<void> };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
@@ -158,6 +161,7 @@ export class Shell {
     if (msg.type === 'memory') return this.decideMemory(msg.id, msg.decision);
     if (msg.type === 'mail_ignore') return this.ignoreMail(msg.itemId, msg.mailId);
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
+    if (msg.type === 'event_confirm' || msg.type === 'event_discard') return this.calendarAction(msg);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
     // The user's own click on a build they started, so like the window it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
@@ -220,6 +224,20 @@ export class Shell {
     } catch (err) {
       this.agent.notice('error', `I couldn't update the draft: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Clicks on a calendar card (C1). The user's own action, so like Send on a draft it works
+   * while paused; the broker checks the card's hash and state before anything changes.
+   */
+  private async calendarAction(msg: Extract<ClientMessage, { type: 'event_confirm' | 'event_discard' }>): Promise<void> {
+    const actions = this.o.calendarActions;
+    if (!actions) return;
+    if (msg.type === 'event_discard') {
+      actions.discard(msg.id);
+      return;
+    }
+    await actions.confirm(msg.id, msg.hash);
   }
 
   /**

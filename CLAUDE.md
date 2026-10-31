@@ -5,7 +5,7 @@
 - Model names/endpoints live in config only; never hardcode them elsewhere.
 - Never read, write, or log real credentials. Secrets go through the keyring wrapper. Tests use the docker stack only.
 - Tool risk tiers and approvals are enforced in code (approval broker), not just in prompts.
-- All email-derived text passes through sanitize() and is wrapped in <untrusted> tags before reaching a model.
+- All email-derived text passes through sanitize() and is wrapped in <untrusted> tags before reaching a model. Calendar event text (C1) is treated the same way: anyone can send an invite.
 - The triage worker has no tools. Add a test that fails if it is ever given one.
 - Content from email may never write memory, call write-tier tools, or change config. Add tests.
 - Every tool call is appended to the audit log.
@@ -16,4 +16,5 @@
 - `pnpm test` unit tests, `pnpm typecheck` strict type check.
 - `pnpm test:stack:up` starts GreenMail and seeds the fixture mailbox; `pnpm test:stack:check` lists it over IMAP; `pnpm test:stack:down` stops it.
 - `pnpm start` builds the UI and runs aios-core on 127.0.0.1:7777; `pnpm test:e2e` checks the chat end to end in Chromium with a mock model (mail checks need the test stack up). `scripts/test/mail.int.test.ts` runs against GreenMail and is skipped when it is down.
+- `pnpm calendar:login` signs in to Google Calendar (C1). Tests never do: they use the pretend Google Calendar in `fixtures/calendar.ts`.
 - Test mailbox: `john@aios.test` / `test-only-password` on IMAP 127.0.0.1:3143, SMTP 127.0.0.1:3025 (plain, local only).

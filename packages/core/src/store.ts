@@ -33,6 +33,10 @@ const MIGRATIONS = [
   `CREATE TABLE app_builds (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL, created INTEGER NOT NULL, state TEXT NOT NULL,
                            step TEXT, error TEXT, cost_usd REAL, budget_usd REAL NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER);
    CREATE INDEX app_builds_started ON app_builds(started_at);`,
+  // C1: calendar changes waiting for a click. The hash is what the click must match.
+  `CREATE TABLE calendar_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
+                                 result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX calendar_actions_state ON calendar_actions(state);`,
 ];
 
 export interface UsageRow {

@@ -9,10 +9,13 @@ export interface Prompter {
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
 export const modelKeyRef = (role: ModelRole): SecretRef => `keyring:model-${role}`;
+export const CALENDAR_SECRET_REF: SecretRef = 'keyring:calendar-client-secret';
+export const CALENDAR_TOKEN_REF: SecretRef = 'keyring:calendar-google';
 
 /** Every keyring reference a config points at, deduplicated. */
 export function secretRefs(config: AiosConfig): SecretRef[] {
-  return [...new Set([config.mail.passwordRef, ...MODEL_ROLES.map((r) => config.models[r].apiKeyRef)])];
+  const calendar = config.calendar ? [...(config.calendar.clientSecretRef ? [config.calendar.clientSecretRef] : []), config.calendar.tokenRef] : [];
+  return [...new Set([config.mail.passwordRef, ...MODEL_ROLES.map((r) => config.models[r].apiKeyRef), ...calendar])];
 }
 
 export interface CollectedSetup {
@@ -110,10 +113,29 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
     });
   }
 
+  // Calendar (C1): Google, through an OAuth client the user makes in their own Google Cloud project.
+  let calendar: AiosConfig['calendar'];
+  const prevCal = existing?.calendar;
+  if (await p.confirm('Connect a Google Calendar? (needs an OAuth client of type "Desktop app"; see the README)', !!prevCal)) {
+    const clientId = await p.ask('Google OAuth client ID', { default: prevCal?.clientId ?? '' });
+    if (!clientId) throw new Error('a client ID is required for the calendar');
+    const hint = prevCal?.clientSecretRef ? ' (leave empty to keep the stored one)' : ' (leave empty if the client has none)';
+    const secret = await p.ask(`Google OAuth client secret${hint}`, { secret: true });
+    if (secret) secrets.set(CALENDAR_SECRET_REF, secret);
+    calendar = {
+      ...(prevCal ?? {}),
+      provider: 'google',
+      clientId,
+      ...(secret || prevCal?.clientSecretRef ? { clientSecretRef: CALENDAR_SECRET_REF } : {}),
+      tokenRef: CALENDAR_TOKEN_REF,
+    } as AiosConfig['calendar'];
+  }
+
   const config = AiosConfig.parse({
     user: { name, timezone },
     models,
     mail,
+    ...(calendar ? { calendar } : {}),
     notifications: existing?.notifications,
     cost: existing?.cost,
     ui: existing?.ui,

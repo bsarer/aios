@@ -47,6 +47,9 @@ export interface MessageActions {
   /** A system change (S1) runs only on this click, which echoes the card's hash and the choice clicked. */
   onActionConfirm: (id: string, hash: string, choice?: string) => void;
   onActionCancel: (id: string) => void;
+  /** A calendar change (C1) happens only on this click, which echoes the card's hash. */
+  onEventConfirm: (id: string, hash: string) => void;
+  onEventDiscard: (id: string) => void;
   /** Stop on a running build (S4). */
   onActionStop: (id: string) => void;
   /** Open on a finished build's message (S4); names the Build card, not the app. */
@@ -253,6 +256,89 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
   );
 }
 
+type EventItem = Extract<ChatItem, { kind: 'event' }>;
+
+const EVENT_TEXT: Record<EventItem['change'], { heading: string; confirm: string; guests: string }> = {
+  create: { heading: 'Add to your calendar?', confirm: 'Add', guests: 'Invites go to' },
+  update: { heading: 'Change this event?', confirm: 'Change', guests: 'An update goes to' },
+  cancel: { heading: 'Cancel this event?', confirm: 'Cancel event', guests: 'A cancellation goes to' },
+};
+
+const EVENT_STATE_TEXT: Record<EventItem['state'], string> = {
+  pending: '',
+  running: 'Working…',
+  done: '✓ Done',
+  discarded: 'Discarded. Nothing changed.',
+  failed: '',
+};
+
+/** A calendar change waiting for a click (C1). Titles and notes can come from other people's invites: plain text only. */
+function EventCard({ item, actions }: { item: EventItem; actions: MessageActions }) {
+  const t = EVENT_TEXT[item.change];
+  const open = item.state === 'pending' || item.state === 'failed';
+  const row = (label: string, value: string, testid: string) => (
+    <div className="flex gap-2 text-[15px]">
+      <span className="w-16 shrink-0" style={{ color: 'var(--muted)' }}>
+        {label}
+      </span>
+      <span data-testid={testid} className="min-w-0 whitespace-pre-wrap break-words">
+        {value}
+      </span>
+    </div>
+  );
+  return (
+    <div data-kind="event" data-change={item.change} data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.change === 'cancel' ? 'var(--danger)' : 'var(--accent)'}` }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {t.heading}
+      </div>
+      <div data-testid="event-title" className="mt-1 font-medium">
+        {item.title}
+      </div>
+      <div className="mt-1 space-y-0.5">
+        {item.before && row('Was', item.before, 'event-before')}
+        {row(item.before ? 'Now' : 'When', item.when, 'event-when')}
+        {item.location !== undefined && row('Where', item.location || '(none)', 'event-location')}
+        {item.description !== undefined && row('Notes', item.description || '(none)', 'event-description')}
+      </div>
+      {item.attendees.length > 0 && (
+        <div data-testid="event-attendees" className="mt-2 text-sm">
+          {t.guests}: {item.attendees.join(', ')}
+        </div>
+      )}
+      {item.warnings.map((w) => (
+        <div key={w} data-testid="event-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          {w}
+        </div>
+      ))}
+      {item.state === 'failed' && item.result && (
+        <div data-testid="event-state" className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.result}
+        </div>
+      )}
+      {open ? (
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            data-testid="event-confirm"
+            className="rounded-lg px-3 py-1"
+            style={{ background: item.change === 'cancel' ? 'var(--danger)' : 'var(--accent)', color: 'var(--bg)' }}
+            onClick={() => actions.onEventConfirm(item.id, item.hash)}
+          >
+            {item.state === 'failed' ? `Try again: ${t.confirm}` : t.confirm}
+          </button>
+          <button type="button" data-testid="event-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onEventDiscard(item.id)}>
+            Discard
+          </button>
+        </div>
+      ) : (
+        <div data-testid="event-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.result ?? EVENT_STATE_TEXT[item.state]}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type AttachmentItem = Extract<ChatItem, { kind: 'attachment' }>;
 
 const FILE_KIND_TEXT: Record<AttachmentItem['fileKind'], string> = { pdf: 'PDF', text: 'Text file', image: 'Picture' };
@@ -367,6 +453,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <DraftCard item={item} actions={actions} />;
     case 'action':
       return <ActionCard item={item} actions={actions} />;
+    case 'event':
+      return <EventCard item={item} actions={actions} />;
     case 'attachment':
       return <AttachmentCard item={item} />;
     case 'build_result':

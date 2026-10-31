@@ -246,7 +246,7 @@ describe('hostile mail', () => {
         ['Lock the screen', 'pending'],
         ['Look for new Bluetooth devices to pair', 'pending'],
       ]);
-      expect(actionCards.every((c) => c.title.endsWith("asked for while I was reading an email, so I'm checking with you first."))).toBe(true);
+      expect(actionCards.every((c) => c.title.endsWith("asked for while I was reading an email or document, so I'm checking with you first."))).toBe(true);
       // Once the email is in context, write-tier tools are not even offered.
       const writeTier = new Set(tools.specs().map((t) => t.name).filter((n) => toolByName(n)!.tier === 'write'));
       expect(writeTier.size).toBeGreaterThanOrEqual(4);

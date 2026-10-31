@@ -325,7 +325,7 @@ describe('device tier', () => {
     expect(cards()[0]).toMatchObject({
       state: 'pending',
       confirm: 'Do it',
-      title: "Set the volume to 20% and unmute the sound? This was asked for while I was reading an email, so I'm checking with you first.",
+      title: "Set the volume to 20% and unmute the sound? This was asked for while I was reading an email or document, so I'm checking with you first.",
     });
     expect(log().at(-1)).toMatchObject({ tool: 'volume_set', decision: 'proposed', untrustedInContext: true });
     // A write-tier request is still refused outright.

@@ -18,6 +18,11 @@ import { CalendarActions } from './calendar/actions.js';
 import { GoogleAuth, GoogleCalendar } from './calendar/google.js';
 import { calendarTools } from './calendar/tools.js';
 import { AuditLog } from './audit.js';
+import { DocEngine } from './docs/engine.js';
+import { DocFiles } from './docs/files.js';
+import { createDocumentOpener } from './docs/open.js';
+import { docTools } from './docs/tools.js';
+import { DocumentFiles } from './docs/viewer.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
 import { AttachmentFiles } from './mail/attachments.js';
@@ -153,6 +158,17 @@ async function main(): Promise<void> {
   });
   const launch = createLauncher();
   const apps = appTools({ scan: () => scanApps(), launch, window: chatWindow });
+  // D1: Word and Excel files, read through WordCraft's and GridCraft's command-line tools.
+  let documentFiles: DocumentFiles | undefined;
+  if (config.docs.enabled) {
+    const d = config.docs;
+    const docFiles = new DocFiles({ roots: d.roots });
+    const engine = new DocEngine({ wordCli: d.wordCli, sheetCli: d.sheetCli, timeoutMs: d.timeoutSeconds * 1000 });
+    documentFiles = new DocumentFiles({ store, files: docFiles, engine, audit, post: (item) => shell?.agent.post(item) });
+    const open = createDocumentOpener({ word: d.wordApp, sheet: d.sheetApp });
+    // doc_open_app is device tier like open_app, so it shares open_app's confirm card.
+    apps.push(...docTools({ files: docFiles, engine, viewer: documentFiles, open, window: chatWindow }));
+  }
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
   const buildLog = new BuildLog(store);
   buildLog.recover(Date.now());
@@ -250,6 +266,7 @@ async function main(): Promise<void> {
     uiDir: join(here, '..', '..', 'ui', 'dist'),
     devOrigins: process.env.AIOS_UI_DEV_ORIGIN ? [process.env.AIOS_UI_DEV_ORIGIN] : [],
     attachments: attachmentFiles,
+    ...(documentFiles ? { documents: documentFiles } : {}),
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();

@@ -155,6 +155,17 @@ export const ChatItem = z.discriminatedUnion('kind', [
     n: z.int().min(1),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('document'),
+    /** D1: a Word or Excel file the user can open. Random; the only way to fetch it (GET /documents/<id>). */
+    id: z.string(),
+    /** The file's name. Files can come from anywhere: show as plain text only. */
+    name: z.string(),
+    fileKind: z.enum(['word', 'sheet']),
+    /** The file, as the server resolved it inside an allowed folder; checked again on every open. */
+    path: z.string(),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 

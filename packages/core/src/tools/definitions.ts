@@ -197,6 +197,57 @@ export const ALPHA_TOOLS = [
       'How app builds are going: Build cards still waiting for a click, the build running now (how long, what step, its cap), and recent builds that finished, failed or were stopped, with cost. Use when the user asks about a build.',
     input: z.strictObject({}),
   }),
+  // ── Word and Excel files (D1) ──
+  def({
+    name: 'docs_list',
+    tier: 'read',
+    description: "The user's Word (.docx) and Excel (.xlsx) files in their document folders, newest first, with the path the other document tools take.",
+    input: z.strictObject({ query: z.string().max(200).optional().describe('Part of a file or folder name, e.g. "budget"') }),
+  }),
+  def({
+    name: 'doc_read',
+    tier: 'read',
+    description: 'Read the text of a Word (.docx) file. Long documents come in parts: pass `from` (the character offset the previous part ended at) for the next one.',
+    input: z.strictObject({
+      path: z.string().min(1).max(1000).describe('From docs_list, e.g. "~/Documents/report.docx", or a name inside the document folders'),
+      from: z.int().min(0).optional(),
+    }),
+  }),
+  def({
+    name: 'sheet_read',
+    tier: 'read',
+    description:
+      'Read cells of an Excel (.xlsx) file as a table with column letters and row numbers, and list its sheets. Without a range it shows A1:Z75 of the first sheet. At most 2000 cells per call.',
+    input: z.strictObject({
+      path: z.string().min(1).max(1000).describe('From docs_list, e.g. "~/Documents/sales.xlsx"'),
+      sheet: z.string().min(1).max(100).optional().describe('Sheet name; the first sheet when left out'),
+      range: z.string().min(2).max(30).optional().describe('A1 notation, e.g. "A1:F40"'),
+    }),
+  }),
+  def({
+    name: 'sheet_eval',
+    tier: 'read',
+    description:
+      'Work out a formula over an Excel file without changing it, e.g. "=SUM(D2:D40)" or "=AVERAGEIF(B:B,\"North\",D:D)". Use it for totals, averages, counts and lookups instead of adding up numbers yourself. Only calculation functions are allowed.',
+    input: z.strictObject({
+      path: z.string().min(1).max(1000),
+      formula: z.string().min(2).max(500),
+      sheet: z.string().min(1).max(100).optional().describe('The sheet that unqualified references like D2:D40 mean; the first sheet when left out'),
+    }),
+  }),
+  def({
+    name: 'doc_show',
+    tier: 'read',
+    description: 'Show a Word or Excel file to the user: posts a card whose Open button shows the pages or the sheets full screen in the chat. Returns no document text.',
+    input: z.strictObject({ path: z.string().min(1).max(1000) }),
+  }),
+  def({
+    name: 'doc_open_app',
+    tier: 'device',
+    description:
+      'Open a Word file in WordCraft or an Excel file in GridCraft, in its own window. The chat shrinks to a red orb at the top of the screen and comes back when the app is closed.',
+    input: z.strictObject({ path: z.string().min(1).max(1000) }),
+  }),
   // ── System controls (S1) ──
   def({
     name: 'system_status',

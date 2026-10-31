@@ -44,7 +44,10 @@ export function sanitize(input: { text?: string | undefined; html?: string | und
 
 const attr = (v: string) => v.replace(/[^A-Za-z0-9._:@-]/g, '_');
 
-/** 'calendar' (C1): event text, which anyone who sends the user an invite can write. */
-export function wrapUntrusted(source: 'email' | 'calendar', id: string, sanitized: string): string {
+/**
+ * 'calendar' (C1): event text, which anyone who sends the user an invite can write.
+ * 'document' (D1): text, cells, sheet and file names from a Word or Excel file, which can come from anywhere.
+ */
+export function wrapUntrusted(source: 'email' | 'calendar' | 'document', id: string, sanitized: string): string {
   return `<untrusted source="${source}" id="${attr(id)}">\n${sanitized}\n</untrusted>`;
 }

@@ -56,6 +56,10 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
       return `Switch to the ${name('name')} theme`;
     case 'open_app':
       return `Open ${name('app')}`;
+    case 'doc_open_app': {
+      const file = String(args.path ?? '').split('/').pop() ?? '';
+      return `Open ${q(cleanName(file))} in ${/\.xlsx$/i.test(file) ? 'GridCraft' : 'WordCraft'}`;
+    }
     default:
       return `Run ${tool}`;
   }
@@ -76,7 +80,7 @@ export function systemTools(o: { controls: SystemControls; actions: SystemAction
     if (t.def.tier !== 'device') continue;
     t.confirmWhenUntrusted = async (args) => {
       o.actions.propose({ action: 'device', tool: t.def.name, args, summary: describeChange(t.def.name, args as Record<string, unknown>) });
-      return 'Because an email is in view, this was not done: a card now asks the user to confirm it. Tell them in one line; do not say it is done.';
+      return 'Because an email or other outside text is in view, this was not done: a card now asks the user to confirm it. Tell them in one line; do not say it is done.';
     };
   }
   return tools;

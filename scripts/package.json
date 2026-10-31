@@ -9,7 +9,8 @@
     "check-account": "tsx src/check-account.ts",
     "setup": "tsx src/setup.ts",
     "uninstall": "tsx src/uninstall.ts",
-    "e2e": "tsx src/e2e.ts"
+    "e2e": "tsx src/e2e.ts",
+    "calendar-login": "tsx src/calendar-login.ts"
   },
   "dependencies": {
     "@aios/core": "workspace:*",

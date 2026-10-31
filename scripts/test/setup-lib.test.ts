@@ -31,6 +31,7 @@ const firstRun: [string, string | boolean][] = [
   ['[chat] API key', 'sk-test-123'],
   ['for triage', true],
   ['for nightly', true],
+  ['Google Calendar', false],
 ];
 
 describe('collectSetup', () => {
@@ -50,11 +51,27 @@ describe('collectSetup', () => {
     const rerun = scripted([
       ['first name', ''], ['Timezone', ''], ['GreenMail', true],
       ['[chat] Provider', ''], ['[chat] Model name', ''], ['[chat] API key', ''],
-      ['for triage', true], ['for nightly', true],
+      ['for triage', true], ['for nightly', true], ['Google Calendar', false],
     ]);
     const { config, secrets } = await collectSetup(rerun, first, providers);
     expect(config).toEqual(first);
     expect([...secrets.keys()]).toEqual(['keyring:mail']); // test-stack password is a fixed test value
+  });
+
+  it('adds a Google Calendar with its client secret in the keyring, and keeps it on a re-run', async () => {
+    const answers = firstRun.map(([m, a]) => (m === 'Google Calendar' ? [m, true] : [m, a])) as typeof firstRun;
+    const { config, secrets } = await collectSetup(scripted([...answers, ['client ID', 'abc.apps.googleusercontent.com'], ['client secret', 'GOCSPX-test']]), null, providers);
+    expect(config.calendar).toMatchObject({ provider: 'google', clientId: 'abc.apps.googleusercontent.com', clientSecretRef: 'keyring:calendar-client-secret', tokenRef: 'keyring:calendar-google', calendarId: 'primary' });
+    expect(secrets.get('keyring:calendar-client-secret')).toBe('GOCSPX-test');
+    expect(JSON.stringify(config)).not.toContain('GOCSPX-test');
+    expect(secretRefs(config)).toEqual(['keyring:mail', 'keyring:model-chat', 'keyring:calendar-client-secret', 'keyring:calendar-google']);
+    const again = await collectSetup(
+      scripted([['first name', ''], ['Timezone', ''], ['GreenMail', true], ['[chat] Provider', ''], ['[chat] Model name', ''], ['[chat] API key', ''], ['for triage', true], ['for nightly', true], ['Google Calendar', true], ['client ID', ''], ['client secret', '']]),
+      config,
+      providers,
+    );
+    expect(again.config).toEqual(config);
+    expect(again.secrets.has('keyring:calendar-client-secret')).toBe(false);
   });
 
   it('requires an API key on first run', async () => {

@@ -37,6 +37,10 @@ const MIGRATIONS = [
   `CREATE TABLE calendar_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
                                  result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
    CREATE INDEX calendar_actions_state ON calendar_actions(state);`,
+  // D2: document changes waiting for a click. The hash is what the click must match.
+  `CREATE TABLE doc_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
+                            result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX doc_actions_state ON doc_actions(state);`,
 ];
 
 export interface UsageRow {

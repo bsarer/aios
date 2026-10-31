@@ -166,6 +166,30 @@ export const ChatItem = z.discriminatedUnion('kind', [
     path: z.string(),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('doc_change'),
+    /** D2: a change to a Word or Excel file, or a new one, that waits for a click. */
+    id: z.string(),
+    change: z.enum(['edit', 'create']),
+    fileKind: z.enum(['word', 'sheet']),
+    /** The file it changes (edit), as the user would write it. File names can come from anyone: plain text only. */
+    file: z.string().optional(),
+    /** The file the click writes, e.g. "~/Documents/report-edited.docx". */
+    output: z.string(),
+    /** True when the click replaces the original (a backup is kept). */
+    overwrite: z.boolean(),
+    /** Written by code from the changes; text in them may come from a document: plain text only. */
+    lines: z.array(z.strictObject({ what: z.string(), before: z.string().optional(), after: z.string().optional() })),
+    /** Written by code: suggested while a document was open, may not save cleanly, … */
+    warnings: z.array(z.string()),
+    /** sha256 of exactly what the card shows; the click echoes it back. */
+    hash: z.string(),
+    /** Only a confirm click moves 'pending' (or 'failed', to retry) to 'running'. */
+    state: z.enum(['pending', 'running', 'done', 'discarded', 'failed']),
+    /** Outcome written by code after it ran. */
+    result: z.string().optional(),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -199,6 +223,9 @@ export const ClientMessage = z.discriminatedUnion('type', [
   /** C1: the confirm button on a calendar card, echoing the card's hash. */
   z.strictObject({ type: z.literal('event_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('event_discard'), id: z.string().max(100) }),
+  /** D2: Save on a document change card, echoing the card's hash. */
+  z.strictObject({ type: z.literal('doc_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('doc_change_discard'), id: z.string().max(100) }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */

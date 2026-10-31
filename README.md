@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls) and S2 (email attachments) are merged. S3 (starting apps) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments) and S3 (starting apps) are merged. S4 (building apps) is in review.
 
 ## Mail
 
@@ -66,6 +66,16 @@ Needs Omarchy 4. Ask "what apps do I have?", "is there a music app?" or "open Fi
 - **Starting one** works like Omarchy's own launcher: `uwsm-app -- gtk-launch <app>`, so the app runs on its own and outlives the chat. Only an app from that list can be started, by name: no command, file, link or option ever reaches it. Opening an app is a `device` change, so it runs straight away from your message, counts toward the 10 changes a minute, stops while paused, and becomes a **Do it** card when asked for while an email is in view. Every start is audited.
 - **The orb:** when an app starts, the chat shrinks to a red orb at the top centre of the screen, on top of every workspace. A white dot on it means something new came in. Click it and the chat comes back on the right half of the screen; **Back to the orb** or Esc shrinks it again, **Full screen** brings it all back. When the last app the chat started is closed, the chat returns full screen by itself. Windows you open yourself don't count. An app that was already running and only raised its window leaves the orb in place.
 - Core moves the window through Hyprland (`hyprctl dispatch`, and Hyprland's event socket to see windows open and close), and every move is audited. Outside Hyprland the chat simply stays full screen: if apps start but the chat never becomes the orb, check that `systemctl --user show-environment` lists `HYPRLAND_INSTANCE_SIGNATURE`. If Hyprland refuses a move, the chat says so and still shows the orb.
+
+## Building apps
+
+Needs Claude Code installed and signed in on this computer (run `claude` once in a terminal). Ask "make me a pomodoro timer", "build a habit tracker" or "make a flashcard app for Spanish verbs".
+
+- **A Build card first:** the chat shows what it will build and nothing happens until you click **Build**. Asking about an app you already built ("make the breaks 10 minutes") shows a **Change** card instead. A build takes a few minutes; the card says when it is done, what it made and what it cost. It is never offered while an email is in view.
+- **What it builds:** a small app that opens in its own window and keeps its data on this computer (plain HTML, CSS and JavaScript in `~/.local/share/aios/apps/<app>/`). It then shows up in "what apps do I have?" and starts with "open Pomodoro", like any installed app. Apps that need the internet or control of the computer are not possible yet.
+- **How Claude Code runs:** headless (`claude -p`) inside that app's folder, with no shell, no web access and no MCP servers. It can only read and write files in the folder, anything else it tries is refused, and it stops at `[builder] maxBudgetUsd` (default 2) or `timeoutMinutes` (default 15). Your request goes to it on stdin, never on a command line. It uses its own login, so no key passes through AI OS.
+- **Offline by design:** afterwards AI OS puts its own Content-Security-Policy at the top of the app's `index.html`, which blocks every network request and anything loaded from elsewhere, and opens the app as a Chromium app window with a profile of its own (`~/.local/share/aios/app-profiles/<app>/`). Its launcher entry is `~/.local/share/applications/aios-app-<app>.desktop`; delete that file and the folder to remove an app.
+- **Settings:** `[builder]` in the config: `enabled` (default true), `command` (default `claude`; give the full path if the service can't find it), `model` (passed as `--model`; unset uses Claude Code's default), `maxBudgetUsd`, `timeoutMinutes`. Every build is in the audit log with its cost, but never the words of your request.
 
 ## Limits, failures and logs
 
@@ -136,6 +146,10 @@ scripts           setup/uninstall CLI, mail seeder and checker, browser e2e chec
 fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in S4
+
+None. Builds run the Claude Code CLI you install yourself.
 
 ## Dependencies added in S3
 

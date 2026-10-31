@@ -40,3 +40,8 @@ export * from './apps/tools.js';
 export * from './apps/window.js';
 export * from './apps/builder.js';
 export * from './apps/history.js';
+export * from './calendar/actions.js';
+export * from './calendar/google.js';
+export * from './calendar/oauth.js';
+export * from './calendar/time.js';
+export * from './calendar/tools.js';

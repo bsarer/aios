@@ -55,6 +55,33 @@ export const MailConfig = z.strictObject({
 });
 export type MailConfig = z.infer<typeof MailConfig>;
 
+/**
+ * C1: Google Calendar through its REST API (v3), signed in once with OAuth for a desktop
+ * app (`pnpm calendar:login`). Endpoints are config so tests can point them at a fake server.
+ * Checked 2026-10-31 against Google's discovery document and OpenID configuration.
+ */
+export const CalendarConfig = z.strictObject({
+  provider: z.literal('google').default('google'),
+  /** The OAuth client of type "Desktop app" from the user's own Google Cloud project. Not a secret. */
+  clientId: z.string().min(1),
+  /** Desktop clients are public, but the secret still lives in the keyring like any other. */
+  clientSecretRef: SecretRef.optional(),
+  /** The refresh token from `pnpm calendar:login`. */
+  tokenRef: SecretRef.default('keyring:calendar-google'),
+  /** "primary" is the signed-in user's own calendar. */
+  calendarId: z.string().min(1).max(200).default('primary'),
+  /** Length of a new event when the user gives no end time. */
+  defaultMinutes: z.int().min(5).max(24 * 60).default(30),
+  /** The hours calendar_free looks in when the user names a day but no hours. */
+  workday: z
+    .strictObject({ start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) })
+    .default({ start: '09:00', end: '18:00' }),
+  apiBaseUrl: z.url({ protocol: /^https?$/ }).default('https://www.googleapis.com/calendar/v3'),
+  authUrl: z.url({ protocol: /^https?$/ }).default('https://accounts.google.com/o/oauth2/v2/auth'),
+  tokenUrl: z.url({ protocol: /^https?$/ }).default('https://oauth2.googleapis.com/token'),
+});
+export type CalendarConfig = z.infer<typeof CalendarConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -68,6 +95,8 @@ export const AiosConfig = z.strictObject({
     nightly: ModelRoleConfig,
   }),
   mail: MailConfig,
+  /** C1: leave out to run without a calendar. */
+  calendar: CalendarConfig.optional(),
   notifications: z
     .strictObject({
       maxPerHour: z.int().min(1).default(6),

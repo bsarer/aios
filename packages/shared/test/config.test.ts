@@ -36,6 +36,25 @@ describe('config schema', () => {
     expect(c.mail.batchWindowSeconds).toBe(20);
     expect(c.ui).toEqual({ port: 7777, kiosk: true });
     expect(c.models.chat.maxTokens).toBe(1024);
+    expect(c.calendar).toBeUndefined();
+  });
+
+  it('C1: a calendar needs only a client id, and holds keyring references, never secrets', () => {
+    const c = parseConfig(`${valid}\n[calendar]\nclientId = "abc.apps.googleusercontent.com"\nclientSecretRef = "keyring:calendar-client-secret"\n`);
+    expect(c.calendar).toEqual({
+      provider: 'google',
+      clientId: 'abc.apps.googleusercontent.com',
+      clientSecretRef: 'keyring:calendar-client-secret',
+      tokenRef: 'keyring:calendar-google',
+      calendarId: 'primary',
+      defaultMinutes: 30,
+      workday: { start: '09:00', end: '18:00' },
+      apiBaseUrl: 'https://www.googleapis.com/calendar/v3',
+      authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+    });
+    expect(() => parseConfig(`${valid}\n[calendar]\nclientId = "x"\nclientSecret = "GOCSPX-plain"\n`)).toThrow(ConfigError);
+    expect(() => parseConfig(`${valid}\n[calendar]\nclientId = "x"\ntokenRef = "1//refresh-token-value"\n`)).toThrow(ConfigError);
   });
 
   it('round-trips through TOML', () => {

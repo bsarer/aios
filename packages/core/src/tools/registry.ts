@@ -93,6 +93,10 @@ export class ToolRegistry {
     return toolSpecs(offered.map((t) => t.def));
   }
 
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
   returnsUntrusted(name: string): boolean {
     return this.tools.get(name)?.untrustedOutput === true;
   }

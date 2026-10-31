@@ -107,6 +107,31 @@ export const ChatItem = z.discriminatedUnion('kind', [
     at: z.number(),
   }),
   z.strictObject({
+    kind: z.literal('event'),
+    /** C1: a calendar change that waits for a click: create, change or cancel one event. */
+    id: z.string(),
+    change: z.enum(['create', 'update', 'cancel']),
+    /** The event's title. May come from someone else's invite: show as plain text only. */
+    title: z.string(),
+    /** When, written by code in the user's timezone, e.g. "Mon 2 Nov, 15:00–15:30". */
+    when: z.string(),
+    /** update: when it was before the change, if the time changes. */
+    before: z.string().optional(),
+    location: z.string().optional(),
+    description: z.string().optional(),
+    /** Everyone who gets an invite, update or cancellation email from this click. */
+    attendees: z.array(z.string()),
+    /** Written by code: an attendee who came from neither the user nor the event, an email in view... */
+    warnings: z.array(z.string()),
+    /** sha256 of exactly what the card shows; the click echoes it back. */
+    hash: z.string(),
+    /** Only a confirm click moves 'pending' (or 'failed', to retry) to 'running'. */
+    state: z.enum(['pending', 'running', 'done', 'discarded', 'failed']),
+    /** Outcome written by code after it ran. */
+    result: z.string().optional(),
+    at: z.number(),
+  }),
+  z.strictObject({
     kind: z.literal('build_result'),
     /** S4: posted when an app build finishes or fails. */
     id: z.string(),
@@ -160,6 +185,9 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('draft_discard'), id: z.string().max(100) }),
   z.strictObject({ type: z.literal('action_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/), choice: z.string().max(20).optional() }),
   z.strictObject({ type: z.literal('action_cancel'), id: z.string().max(100) }),
+  /** C1: the confirm button on a calendar card, echoing the card's hash. */
+  z.strictObject({ type: z.literal('event_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('event_discard'), id: z.string().max(100) }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */

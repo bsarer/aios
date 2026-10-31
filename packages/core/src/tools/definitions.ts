@@ -92,6 +92,69 @@ export const ALPHA_TOOLS = [
       target: z.enum(['facts', 'profile']).optional().describe('"profile" for standing instructions and preferences; default "facts"'),
     }),
   }),
+  // ── Calendar (C1) ──
+  def({
+    name: 'calendar_list',
+    tier: 'read',
+    description:
+      "Events in the user's calendar from `from` to `to`, in start order, with ids for calendar_update_event and calendar_cancel_event. Dates and times are the user's own local time. A date as `to` includes that whole day. Give a query to find an event by words in its title, place, description or guests.",
+    input: z.strictObject({
+      from: z.string().describe('Local date "2026-11-02" or time "2026-11-02T09:00"'),
+      to: z.string().optional().describe('Local date (inclusive) or time; default: the end of the day `from` is on'),
+      query: z.string().max(200).optional(),
+      limit: z.int().min(1).max(100).optional(),
+    }),
+  }),
+  def({
+    name: 'calendar_free',
+    tier: 'read',
+    description:
+      "When the user is free: the gaps between their busy events on each day from `date` to `to` (at most 14 days), within working hours unless other hours are given. Times are the user's local time.",
+    input: z.strictObject({
+      date: z.string().describe('Local date, e.g. "2026-11-05"'),
+      to: z.string().optional().describe('Last local date to look at (inclusive); default: the same day'),
+      dayStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().describe('e.g. "08:00"; default: the start of the working day'),
+      dayEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$|^24:00$/).optional().describe('e.g. "20:00"; default: the end of the working day'),
+      minutes: z.int().min(5).max(24 * 60).optional().describe('Only gaps at least this long'),
+    }),
+  }),
+  def({
+    name: 'calendar_create_event',
+    tier: 'draft',
+    description:
+      'Propose a new event in the user\'s calendar. Shows a card with every detail; nothing is added and no invite is sent until the user clicks Add. Times are the user\'s local time; give dates without times for an all-day event.',
+    input: z.strictObject({
+      title: z.string().min(1).max(200),
+      start: z.string().describe('Local time "2026-11-02T15:00", or a date "2026-11-02" for all day'),
+      end: z.string().optional().describe('Local time, or the last date for all-day events; default: the usual meeting length'),
+      location: z.string().max(300).optional(),
+      description: z.string().max(2000).optional(),
+      attendees: z.array(z.email()).max(20).optional().describe('Guests to invite; they get an email once the user clicks'),
+    }),
+  }),
+  def({
+    name: 'calendar_update_event',
+    tier: 'draft',
+    description:
+      "Propose a change to one of the user's own events, by its id from calendar_list: a new time (moving it keeps its length unless an end is given), title, place or description, or more guests. Shows a card; nothing changes until the user clicks Change.",
+    input: z
+      .strictObject({
+        id: z.string().min(1).max(300),
+        title: z.string().min(1).max(200).optional(),
+        start: z.string().optional().describe('New local start time, or a date for all day'),
+        end: z.string().optional(),
+        location: z.string().max(300).optional(),
+        description: z.string().max(2000).optional(),
+        addAttendees: z.array(z.email()).max(20).optional(),
+      })
+      .refine((a) => [a.title, a.start, a.end, a.location, a.description, a.addAttendees].some((v) => v !== undefined), 'give at least one thing to change'),
+  }),
+  def({
+    name: 'calendar_cancel_event',
+    tier: 'draft',
+    description: "Propose cancelling one of the user's own events, by its id from calendar_list. Shows a card; nothing is cancelled and no guest is told until the user clicks Cancel event.",
+    input: z.strictObject({ id: z.string().min(1).max(300) }),
+  }),
   // ── Apps (S3) ──
   def({
     name: 'apps_list',

@@ -5,7 +5,9 @@
  * app from the installed list: no command, file, link or option ever reaches the launcher.
  */
 import { toolByName } from '../tools/definitions.js';
+import type { SystemActions } from '../system/actions.js';
 import type { RegisteredTool } from '../tools/registry.js';
+import { type AppBuilder, appName, appSlug } from './builder.js';
 import { type DesktopApp, findApp, searchApps, shortId } from './desktop.js';
 import type { Launch } from './launcher.js';
 import type { ChatWindow } from './window.js';
@@ -58,4 +60,43 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
       },
     },
   ];
+}
+
+/**
+ * build_app (S4, write tier): a model call only shows a Build card. The build runs from the
+ * click (system/actions.ts), which hands it to the AppBuilder.
+ */
+export function buildAppTool(o: { builder: Pick<AppBuilder, 'build' | 'exists' | 'unavailable'>; actions: SystemActions }): RegisteredTool {
+  o.actions.setAppBuilder(async (a) => {
+    const r = await o.builder.build({ name: a.name, request: a.request });
+    const cost = r.costUsd === null ? '' : ` It cost $${r.costUsd.toFixed(2)}.`;
+    return {
+      result: `${r.created ? 'Built' : 'Changed'} ${q(r.name)}.${r.summary ? ` ${r.summary}` : ''}${cost} Say “open ${r.name}” to start it.`,
+      audit: { app: r.desktopId, created: r.created, costUsd: r.costUsd },
+    };
+  });
+  return {
+    def: toolByName('build_app')!,
+    label: 'Getting the build ready…',
+    deniedMessage: 'Error: only the user can start a build, by clicking Build on its card.',
+    auditArgs: (args) => {
+      const { name, request } = args as { name: string; request: string };
+      return { name, requestChars: request.length };
+    },
+    handler: async () => 'Error: builds run only from the Build card.',
+    propose: async (args) => {
+      const { name: raw, request } = args as { name: string; request: string };
+      const name = appName(raw);
+      const slug = name ? appSlug(name) : null;
+      if (!name || !slug) return `Error: ${q(raw)} can't be an app name; use a few letters or digits, e.g. "Pomodoro".`;
+      const why = await o.builder.unavailable();
+      if (why) return `Error: ${why} Tell the user.`;
+      const update = o.builder.exists(slug);
+      o.actions.propose({ action: 'build_app', name, slug, request: request.trim(), update });
+      return {
+        content: `A card now asks the user to confirm ${update ? `changing ${q(name)}` : `building ${q(name)}`}. Nothing happens until they click it; the build takes a few minutes and the card shows when it is done. Say that in one short line.`,
+        audit: { app: slug, update },
+      };
+    },
+  };
 }

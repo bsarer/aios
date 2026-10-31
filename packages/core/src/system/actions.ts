@@ -1,7 +1,8 @@
 /**
  * The approval broker for system changes that could cut the user off or are hard to undo
  * (S1, write tier): Wi-Fi off, switching networks, pairing and forgetting Bluetooth devices;
- * and device-tier changes asked for while an email was in the model's view.
+ * device-tier changes asked for while an email was in the model's view; and building an app
+ * with Claude Code (S4).
  * A model call can only create a pending card (the tool's `propose`). The change runs from
  * confirm(), reached solely by a click on that card carrying the hash the card showed.
  *
@@ -21,7 +22,19 @@ export type SystemAction =
   | { action: 'bluetooth_pair'; address: string; name: string }
   | { action: 'bluetooth_forget'; address: string; name: string }
   /** A device-tier change asked for while an email was in view: runs only after a click. */
-  | { action: 'device'; tool: string; args: unknown; summary: string };
+  | { action: 'device'; tool: string; args: unknown; summary: string }
+  /** S4: build or change an app. `request` is the user's own words; audits get its length only. */
+  | { action: 'build_app'; name: string; slug: string; request: string; update: boolean };
+
+/** Builds the app a Build card names; set by buildAppTool. Returns the card's result text and audit fields. */
+export type AppBuildRunner = (a: Extract<SystemAction, { action: 'build_app' }>) => Promise<{ result: string; audit?: Record<string, unknown> }>;
+
+/** What audits record of an action: never the words of a build request. */
+function auditable(a: SystemAction): Record<string, unknown> {
+  if (a.action !== 'build_app') return a;
+  const { request, ...rest } = a;
+  return { ...rest, requestChars: request.length };
+}
 
 /** Runs a device-tier tool by name; set by systemTools. Returns the text and audit fields. */
 export type DeviceRunner = (tool: string, args: unknown) => Promise<{ content: string; audit?: Record<string, unknown> }>;
@@ -73,6 +86,12 @@ function card(a: SystemAction): { title: string; confirm: string } {
       return { title: `Forget ${q(a.name)} (${a.address})? It will need pairing again to use it.`, confirm: 'Forget' };
     case 'device':
       return { title: `${a.summary}? This was asked for while I was reading an email, so I'm checking with you first.`, confirm: 'Do it' };
+    case 'build_app': {
+      const req = a.request.length > 300 ? `${a.request.slice(0, 300)}…` : a.request;
+      return a.update
+        ? { title: `Change the app ${q(a.name)}? Claude Code will edit it as you asked: ${q(req)}. It takes a few minutes and only touches that app's folder.`, confirm: 'Change' }
+        : { title: `Build a new app, ${q(a.name)}? Claude Code will write it from your request: ${q(req)}. It takes a few minutes and only touches that app's own folder.`, confirm: 'Build' };
+    }
   }
 }
 
@@ -80,6 +99,7 @@ export class SystemActions {
   private readonly clock: () => number;
   private readonly newId: () => string;
   private deviceRunner: DeviceRunner | null = null;
+  private appBuilder: AppBuildRunner | null = null;
 
   constructor(private readonly o: SystemActionsOptions) {
     this.clock = o.clock ?? Date.now;
@@ -88,6 +108,10 @@ export class SystemActions {
 
   setDeviceRunner(run: DeviceRunner): void {
     this.deviceRunner = run;
+  }
+
+  setAppBuilder(run: AppBuildRunner): void {
+    this.appBuilder = run;
   }
 
   private get db() {
@@ -117,7 +141,7 @@ export class SystemActions {
   /** Show a card asking for the change. Changes nothing. */
   propose(a: SystemAction): ActionItem {
     const clean: SystemAction =
-      a.action === 'wifi_off' || a.action === 'device'
+      a.action === 'wifi_off' || a.action === 'device' || a.action === 'build_app'
         ? a
         : a.action === 'wifi_connect'
           ? { ...a, network: cleanName(a.network) }
@@ -130,7 +154,7 @@ export class SystemActions {
     this.db
       .prepare(`INSERT INTO system_actions (id, spec, title, confirm, hash, state, result, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?, ?)`)
       .run(id, spec, title, confirm, hash, now, now);
-    this.o.audit.append({ kind: 'system', event: 'action_proposed', actionId: id, ...clean });
+    this.o.audit.append({ kind: 'system', event: 'action_proposed', actionId: id, ...auditable(clean) });
     const item = this.item(this.row(id)!);
     this.o.show(item, true);
     return item;
@@ -167,12 +191,12 @@ export class SystemActions {
       audit({ decision: 'denied', reason: `action is ${r.state}` });
       return 'refused';
     }
-    audit({ decision: 'approved', ...spec });
+    audit({ decision: 'approved', ...auditable(spec) });
     this.refresh(id);
     try {
-      const { result, old, now } = await this.run(spec);
+      const { result, old, now, extra } = await this.run(spec);
       this.transition(id, ['running'], 'done', result);
-      audit({ decision: 'approved', ok: true, old, new: now });
+      audit({ decision: 'approved', ok: true, old, new: now, ...extra });
       this.refresh(id);
       return 'done';
     } catch (err) {
@@ -200,9 +224,14 @@ export class SystemActions {
     }
   }
 
-  private async run(a: SystemAction): Promise<{ result: string; old: unknown; now: unknown }> {
+  private async run(a: SystemAction): Promise<{ result: string; old: unknown; now: unknown; extra?: Record<string, unknown> | undefined }> {
     const c = this.o.controls;
     switch (a.action) {
+      case 'build_app': {
+        if (!this.appBuilder) throw new Error('building apps is not set up');
+        const r = await this.appBuilder(a);
+        return { result: r.result, old: undefined, now: undefined, extra: r.audit };
+      }
       case 'device': {
         if (!this.deviceRunner) throw new Error('device changes are not set up');
         const r = await this.deviceRunner(a.tool, a.args);

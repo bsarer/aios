@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is merged. F2 (file search by metadata) is in review.
 
 ## Mail
 
@@ -121,7 +121,14 @@ The chat looks after files in your folders (F1), by default `~/Documents` and `~
 - **Save attachments:** an attachment card in the chat has a **Save** button with a folder choice (default `~/Downloads`). It never overwrites; a second `invoice.pdf` becomes `invoice (2).pdf`. Notifications don't have the button yet: ask the chat to show the attachment.
 - **Only your folders:** paths outside the folders, links leading out and hidden files are refused. File names and text can come from anyone, so they reach the model like an email does, and with an email or calendar event in view the chat can't propose file changes.
 
-Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`), `saveTo` (default `~/Downloads`). File search by metadata comes next (F2).
+- **Find files by what they are (F2):** "find the lease I signed", "invoices from Hydro", "spreadsheets about the budget", "PDFs in Downloads from last month". AI OS keeps an index of your files.
+  - **What's in it:** each file's type, size, dates, pages or sheets, and title and author where the file has them, plus a one-line description and keywords. The index finds new and changed files within seconds.
+  - **Descriptions:** written by the triage model, about $0.001 a file, at most 200 a day (the rest wait for the next day). They stop at your daily cost cap and while paused.
+  - **Tags:** "tag it taxes 2026" adds your own tags (on a card).
+  - **`/reindex`:** reads everything again and says how far the index is.
+  - **Safety:** descriptions are written from files that can come from anyone, so they reach the chat as outside text, and the model that writes them has no tools.
+
+Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`), `saveTo` (default `~/Downloads`), `index` (default true), `summaries` (default true; false keeps facts and tags only, with no model calls), `summariesPerDay` (default 200), `maxIndexedFiles` (default 20000).
 
 ## Limits, failures and logs
 
@@ -193,6 +200,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in F2
+
+None. The index uses SQLite's FTS5 (already used for memory), Node's `fs.watch` and `zlib`.
 
 ## Dependencies added in F1
 

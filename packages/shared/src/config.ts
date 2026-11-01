@@ -114,6 +114,14 @@ export const FilesConfig = z.strictObject({
   roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads']),
   /** Where an attachment's Save button saves unless another folder is picked on the card. */
   saveTo: z.string().min(1).max(500).default('~/Downloads'),
+  /** F2: keep an index of the files (facts, summaries, tags) for files_search. */
+  index: z.boolean().default(true),
+  /** F2: describe each file with the triage model (about $0.001 a file). Off: facts and tags only. */
+  summaries: z.boolean().default(true),
+  /** F2: at most this many new summaries a day; the rest wait for the next day. */
+  summariesPerDay: z.int().min(0).max(10_000).default(200),
+  /** F2: index at most this many files. */
+  maxIndexedFiles: z.int().min(100).max(200_000).default(20_000),
 });
 export type FilesConfig = z.infer<typeof FilesConfig>;
 
@@ -166,7 +174,7 @@ export const AiosConfig = z.strictObject({
     timeoutSeconds: 12,
   }),
   /** F1: managing files in a few folders. */
-  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads' }),
+  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

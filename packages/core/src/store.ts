@@ -45,6 +45,14 @@ const MIGRATIONS = [
   `CREATE TABLE file_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
                              result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
    CREATE INDEX file_actions_state ON file_actions(state);`,
+  // F2: what is known about each file in the allowed folders, and a full-text index over it.
+  // Rebuilt from the disk at any time (/reindex); only tags are the user's own words.
+  `CREATE TABLE file_index (path TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL, kind TEXT NOT NULL, bytes INTEGER NOT NULL,
+                           mtime_ms REAL NOT NULL, birthtime_ms REAL NOT NULL, facts TEXT, facts_state TEXT NOT NULL, summary TEXT, keywords TEXT,
+                           summary_state TEXT NOT NULL, summary_attempts INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '', seen_at INTEGER NOT NULL);
+   CREATE INDEX file_index_facts ON file_index(facts_state, mtime_ms);
+   CREATE INDEX file_index_summary ON file_index(summary_state, mtime_ms);
+   CREATE VIRTUAL TABLE file_fts USING fts5(path UNINDEXED, name, folder, title, keywords, tags, summary, details, tokenize = 'unicode61 remove_diacritics 2');`,
 ];
 
 export interface UsageRow {

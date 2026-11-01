@@ -319,6 +319,17 @@ describe('chat window', () => {
     expect(modes).toEqual(['orb', 'half', 'orb', 'full']);
   });
 
+  it("opens the orb to half screen when an app's Change button posts a card, and leaves full screen alone", async () => {
+    const { w, modes, log } = windowRig();
+    await w.bringForward('Snake');
+    expect(modes).toEqual([]);
+    await w.appStarting('Snake');
+    await w.bringForward('Snake');
+    await w.bringForward('Snake');
+    expect(modes).toEqual(['orb', 'half']);
+    expect(log().at(-1)).toMatchObject({ kind: 'window', from: 'orb', to: 'half', reason: 'app_change', app: 'Snake' });
+  });
+
   it('comes back full screen when the app closes while the chat is half screen', async () => {
     const { w, hypr, settle } = windowRig();
     await w.appStarting('Firefox');

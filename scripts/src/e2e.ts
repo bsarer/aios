@@ -13,7 +13,7 @@
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -478,6 +478,14 @@ async function main(): Promise<void> {
   const port = 17_000 + Math.floor(Math.random() * 1000);
   // D1: fixture documents and pretend WordCraft/GridCraft tools.
   const docs = makeDocFixture();
+  // L1: an old, big-enough download for the morning tidy-up. The review only runs from /checkup here,
+  // and the resource monitor is off so the test machine's own numbers can't post alerts.
+  const downloads = join(tmp, 'Downloads');
+  mkdirSync(downloads);
+  const oldIso = join(downloads, 'old-installer.iso');
+  writeFileSync(oldIso, Buffer.alloc(2 * 1024 * 1024));
+  const longAgo = Date.now() / 1000 - 200 * 86_400;
+  utimesSync(oldIso, longAgo, longAgo);
   mkdirSync(join(tmp, 'config', 'aios'), { recursive: true });
   const role = `baseUrl = "http://127.0.0.1:${mockPort}/v1"\nmodel = "mock/model"\napiKeyRef = "keyring:model-chat"\n`;
   writeFileSync(
@@ -488,7 +496,8 @@ async function main(): Promise<void> {
       `imap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n` +
       `[calendar]\nclientId = "${FAKE_CLIENT_ID}"\napiBaseUrl = "${gcal.apiBaseUrl}"\ntokenUrl = "${gcal.tokenUrl}"\n` +
       `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
-      `[files]\nroots = ["${docs.documents}"]\n` +
+      `[files]\nroots = ["${docs.documents}", "${downloads}"]\n` +
+      `[assistant.monitor]\nenabled = false\n[assistant.review]\nenabled = false\nminFileMb = 1\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -905,6 +914,16 @@ async function main(): Promise<void> {
     await input.fill('/reindex');
     await input.press('Enter');
     check('/reindex says how far the index is', await waitFor(async () => (await page.locator('body').innerText()).includes('Reading your files again in the background'), 10_000));
+    // 15. L1: /checkup shows the numbers and a tidy-up card; the file goes to the Trash only on the click.
+    await input.fill('/checkup');
+    await input.press('Enter');
+    const cleanup = page.locator('[data-kind="cleanup"]').last();
+    check('/checkup shows memory and drive space', await waitFor(async () => /Memory: .* available\.[^]*free\./.test(await page.locator('body').innerText()), 10_000));
+    check('the tidy-up card suggests the old download', await waitFor(async () => (await cleanup.count()) === 1 && (await cleanup.getByTestId('cleanup-file').first().innerText()).includes('old-installer.iso'), 15_000));
+    check('nothing is moved before the click', existsSync(oldIso));
+    await cleanup.getByTestId('cleanup-trash').first().click();
+    check('Move to Trash marks the row', await waitFor(async () => (await cleanup.getByTestId('cleanup-file').first().getAttribute('data-state')) === 'trashed'));
+    check('the file is in the Trash with its info', !existsSync(oldIso) && existsSync(join(tmp, 'data', 'Trash', 'files', 'old-installer.iso')) && readFileSync(join(tmp, 'data', 'Trash', 'info', 'old-installer.iso.trashinfo'), 'utf8').includes(`Path=${oldIso.split('/').map(encodeURIComponent).join('/')}`));
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

@@ -10,7 +10,7 @@
 import { sizeText } from '../mail/attachments.js';
 import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool } from '../tools/registry.js';
-import { sanitize, wrapUntrusted } from '../untrusted.js';
+import { nameText, sanitize, wrapUntrusted } from '../untrusted.js';
 import type { ChatWindow } from '../apps/window.js';
 import { colLetters, formulaProblem, parseRange } from './cells.js';
 import type { DocEngine } from './engine.js';
@@ -62,7 +62,7 @@ async function resolveOr(files: DocFiles, path: string, want?: DocFile['kind']):
   try {
     const f = await files.resolve(path);
     if (want && f.kind !== want) {
-      return want === 'word' ? `Error: ${f.display} is an Excel file; use sheet_read or sheet_eval.` : `Error: ${f.display} is a Word file; use doc_read.`;
+      return want === 'word' ? `Error: ${nameText(f.display)} is an Excel file; use sheet_read or sheet_eval.` : `Error: ${nameText(f.display)} is a Word file; use doc_read.`;
     }
     return f;
   } catch (err) {
@@ -103,11 +103,11 @@ export function docTools(o: DocToolsOptions): RegisteredTool[] {
         if (typeof f === 'string') return f;
         const text = sanitize({ text: (await o.engine.wordText(f.path, ctx.signal)).slice(0, MAX_DOC_CHARS) }, { maxChars: MAX_DOC_CHARS });
         const audit = { path: f.path, bytes: f.bytes, chars: text.length, from };
-        if (!text.trim()) return { content: `${f.display} has no text to read. doc_show lets the user see it.`, audit };
-        if (from >= text.length) return { content: `${f.display} has ${text.length} characters; there is nothing after ${from}.`, audit };
+        if (!text.trim()) return { content: `${nameText(f.display)} has no text to read. doc_show lets the user see it.`, audit };
+        if (from >= text.length) return { content: `${nameText(f.display)} has ${text.length} characters; there is nothing after ${from}.`, audit };
         const end = Math.min(text.length, from + DOC_CHUNK_CHARS);
         const part = end < text.length || from > 0 ? ` Characters ${from}–${end} of ${text.length}.${end < text.length ? ` Call doc_read with from=${end} for the next part.` : ' This is the end.'}` : '';
-        return { content: `${f.display} (Word, ${sizeText(f.bytes)}).${part}\n${wrapUntrusted('document', f.display, text.slice(from, end))}`, audit };
+        return { content: `${nameText(f.display)} (Word, ${sizeText(f.bytes)}).${part}\n${wrapUntrusted('document', f.display, text.slice(from, end))}`, audit };
       },
     },
     {
@@ -129,7 +129,7 @@ export function docTools(o: DocToolsOptions): RegisteredTool[] {
         const sheet = a.sheet ?? names[0] ?? '';
         const body = [`Sheets: ${names.length ? names.join(', ') : '(unknown)'}`, `Showing ${sheet ? `sheet ${sheet}, ` : ''}${range.text}:`, '', formatGrid(grid.rows, range.start)].join('\n');
         return {
-          content: `${f.display} (Excel, ${sizeText(f.bytes)}).${a.range ? '' : ` No range was given, so this is ${DEFAULT_RANGE}; pass a range to see more.`}\n${wrap(f, body, 60_000)}`,
+          content: `${nameText(f.display)} (Excel, ${sizeText(f.bytes)}).${a.range ? '' : ` No range was given, so this is ${DEFAULT_RANGE}; pass a range to see more.`}\n${wrap(f, body, 60_000)}`,
           audit: { path: f.path, sheet: a.sheet ?? null, range: range.text, cells: range.cells },
         };
       },
@@ -146,7 +146,7 @@ export function docTools(o: DocToolsOptions): RegisteredTool[] {
         if (typeof f === 'string') return f;
         const result = await o.engine.evaluate(f.path, a.formula.trim(), { sheet: a.sheet, signal: ctx.signal });
         return {
-          content: `${a.formula.trim()} in ${f.display}${a.sheet ? ` (sheet ${sanitize({ text: a.sheet }, { maxChars: 100 })})` : ''}, worked out by GridCraft:\n${wrap(f, result, 4000)}`,
+          content: `${a.formula.trim()} in ${nameText(f.display)}${a.sheet ? ` (sheet ${sanitize({ text: a.sheet }, { maxChars: 100 })})` : ''}, worked out by GridCraft:\n${wrap(f, result, 4000)}`,
           audit: { path: f.path, sheet: a.sheet ?? null, formula: a.formula.trim() },
         };
       },

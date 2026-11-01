@@ -51,3 +51,15 @@ const attr = (v: string) => v.replace(/[^A-Za-z0-9._:@-]/g, '_');
 export function wrapUntrusted(source: 'email' | 'calendar' | 'document', id: string, sanitized: string): string {
   return `<untrusted source="${source}" id="${attr(id)}">\n${sanitized}\n</untrusted>`;
 }
+
+/**
+ * A file or folder name shown to the model outside an <untrusted> wrapper (in "x.pdf (PDF, 2 KB)."
+ * lines and errors). Names come from anywhere, so tags in them are neutralised and line breaks
+ * and control characters dropped; otherwise the name is kept exact so it can be passed back.
+ */
+export function nameText(name: string): string {
+  return name
+    .replace(/<\s*\/?\s*(untrusted|system|assistant|user|tool|developer)\b[^>]*>/gi, (m) => m.replace(/</g, '‹').replace(/>/g, '›'))
+    .replace(/[\u0000-\u001F\u007F\u2028\u2029]/g, ' ')
+    .slice(0, 1000);
+}

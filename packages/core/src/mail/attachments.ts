@@ -9,9 +9,11 @@
  * never sees an image.
  */
 import { randomUUID } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 import type { ChatItem } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
+import { type FileRoots, freeName } from '../files/roots.js';
 import type { Store } from '../store.js';
 import { cleanName } from '../system/controls.js';
 import type { AttachmentPart, MailClient } from './imap.js';
@@ -73,7 +75,7 @@ export function listAttachments(list: AttachmentPart[]): string {
       const k = declaredKind(a);
       // Server sizes are transfer-encoded; 3/4 is close enough for base64.
       const approx = a.size === null ? null : Math.round(a.size * 0.75);
-      return `${i + 1}. ${a.name} (${k ? `${KIND_WORD[k]}, ${sizeText(approx)}` : "can't be opened here"})`;
+      return `${i + 1}. ${a.name} (${k ? `${KIND_WORD[k]}, ${sizeText(approx)}` : `${sizeText(approx)}, can't be opened here but can be saved`})`;
     })
     .join('\n');
 }
@@ -119,13 +121,27 @@ export interface AttachmentFilesOptions {
   mail: Pick<MailClient, 'attachment'>;
   audit: AuditLog;
   post: (item: ChatItem) => void;
+  /** F1: patch a card in the chat after its Save click. */
+  patch?: (item: ChatItem) => void;
+  /** F1: the allowed folders, for Save buttons and for showing files from disk. Without it, neither. */
+  roots?: FileRoots;
+  /** F1: where Save saves unless another folder is picked (`[files] saveTo`). */
+  saveTo?: string;
+  /** F1: told about each file the Save click wrote (the F2 index). */
+  onSaved?: (path: string, source: { mailId: string; n: number }) => void;
   clock?: () => number;
 }
+
+/** F1: the most an attachment's Save click writes. */
+export const MAX_SAVE_BYTES = 50 * 1024 * 1024;
+
+export type AttachmentSaveResult = 'saved' | 'refused' | 'failed';
 
 /**
  * Attachment cards in the chat and the files behind them. A card's id is random and is the
  * only way to fetch its file, so the /attachments route serves exactly the attachments the
- * chat has shown, and nothing else from the mailbox.
+ * chat has shown, and nothing else from the mailbox. F1: a card can also stand for a file on
+ * disk (file_show), and an email attachment's card has a Save button.
  */
 export class AttachmentFiles {
   private readonly clock: () => number;
@@ -134,19 +150,34 @@ export class AttachmentFiles {
     this.clock = o.clock ?? Date.now;
   }
 
-  /** Post a card with an Open button. Downloads nothing; the file is fetched when opened. */
-  show(mailId: string, n: number, info: AttachmentPart): AttachmentItem | null {
-    const kind = declaredKind(info);
-    if (!kind) return null;
+  /** The folders a Save button offers: the default first, then the other allowed folders. */
+  private async saveFolders(): Promise<string[]> {
+    if (!this.o.roots) return [];
+    const first = await this.o.roots.defaultSaveFolder(this.o.saveTo ?? '~/Downloads');
+    const all = await this.o.roots.realRoots();
+    return [...new Set([...(first ? [first] : []), ...all])].map((p) => this.o.roots!.display(p));
+  }
+
+  /** Post a card with an Open button (for PDFs, text and pictures) and a Save button (F1). Downloads nothing. */
+  async show(mailId: string, n: number, info: AttachmentPart): Promise<AttachmentItem> {
+    const folders = await this.saveFolders();
     const item: AttachmentItem = {
       kind: 'attachment',
       id: `att-${randomUUID()}`,
       name: cleanName(info.name) || 'attachment',
-      fileKind: kind,
+      fileKind: declaredKind(info) ?? 'other',
       mailId,
       n,
+      ...(folders.length ? { folders } : {}),
       at: this.clock(),
     };
+    this.o.post(item);
+    return item;
+  }
+
+  /** F1: a card that opens a PDF, text file or picture from disk in the same viewer. */
+  showFile(file: { path: string; name: string }, fileKind: AttachmentKind): AttachmentItem {
+    const item: AttachmentItem = { kind: 'attachment', id: `att-${randomUUID()}`, name: cleanName(file.name) || 'file', fileKind, path: file.path, at: this.clock() };
     this.o.post(item);
     return item;
   }
@@ -154,7 +185,9 @@ export class AttachmentFiles {
   /** The bytes behind a card, checked again by their signature. Null when there is no such card or file. */
   async file(itemId: string): Promise<{ bytes: Buffer; mime: string } | { error: string } | null> {
     const item = this.o.store.getItem(itemId);
-    if (!item || item.kind !== 'attachment') return null;
+    if (!item || item.kind !== 'attachment' || item.fileKind === 'other') return null;
+    if (item.path !== undefined) return this.diskFile(item as AttachmentItem & { path: string; fileKind: AttachmentKind });
+    if (item.mailId === undefined || item.n === undefined) return null;
     const log = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'mail', event: 'attachment_opened', itemId, mailId: item.mailId, n: item.n, ...entry });
     const got = await this.o.mail.attachment(item.mailId, item.n, MAX_ATTACHMENT_BYTES).catch((err: unknown) => {
       log({ ok: false, error: (err as Error).message });
@@ -176,4 +209,81 @@ export class AttachmentFiles {
     log({ ok: true, fileKind: s.kind, mime: s.mime, bytes: got.bytes.length });
     return { bytes: got.bytes, mime: s.mime };
   }
+
+  /** F1: a file from disk, resolved inside the allowed folders again on every open. */
+  private async diskFile(item: AttachmentItem & { path: string; fileKind: AttachmentKind }): Promise<{ bytes: Buffer; mime: string } | { error: string } | null> {
+    const log = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'files', event: 'file_opened', itemId: item.id, path: item.path, ...entry });
+    if (!this.o.roots) return null;
+    const f = await this.o.roots.resolve(item.path, 'file').catch(() => null);
+    if (!f || f.path !== item.path) {
+      log({ ok: false, error: 'no longer there' });
+      return null;
+    }
+    if (f.bytes > MAX_ATTACHMENT_BYTES) return { error: `It is larger than ${sizeText(MAX_ATTACHMENT_BYTES)}, so it can't be opened here.` };
+    const bytes = await readFile(f.path);
+    const s = sniff(bytes, declaredKind({ name: f.name, type: '' }));
+    if (!s || s.kind !== item.fileKind) {
+      log({ ok: false, error: 'content does not match' });
+      return { error: "This file isn't really a PDF, text file or picture, so it won't be opened." };
+    }
+    log({ ok: true, fileKind: s.kind, bytes: bytes.length });
+    return { bytes, mime: s.mime };
+  }
+
+  /**
+   * F1: the Save click on an email attachment's card. The user's own click (not a model call),
+   * so it works while the email is on screen. Fetches the bytes again, writes them into the
+   * folder the card offered under a free name, and never replaces a file.
+   */
+  async save(itemId: string, folderIndex: number): Promise<AttachmentSaveResult> {
+    const item = this.o.store.getItem(itemId);
+    const audit = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'tool', tool: 'attachment_save', tier: 'write', via: 'click', itemId, ...entry });
+    if (!item || item.kind !== 'attachment' || item.mailId === undefined || item.n === undefined || !this.o.roots) {
+      audit({ decision: 'denied', reason: 'not an email attachment card' });
+      return 'refused';
+    }
+    const display = item.folders?.[folderIndex];
+    const folder = display ? await this.o.roots.resolve(display, 'dir').catch(() => null) : null;
+    if (!folder) {
+      audit({ decision: 'denied', reason: 'that folder is not offered or no longer allowed' });
+      return 'refused';
+    }
+    const done = (patch: Partial<AttachmentItem>) => {
+      const updated = { ...item, ...patch } as AttachmentItem;
+      this.o.store.saveItem(updated);
+      this.o.patch?.(updated);
+    };
+    try {
+      const got = await this.o.mail.attachment(item.mailId, item.n, MAX_SAVE_BYTES);
+      if (!got) throw new AttachmentError('that attachment is no longer in your mailbox');
+      if (got.bytes === 'too_large') throw new AttachmentError(`it is larger than ${sizeText(MAX_SAVE_BYTES)}`);
+      const name = safeFileName(got.info.name.replace(/[\p{Cc}\p{Cf}]/gu, '') || item.name);
+      // A free name, then an exclusive write: if the name is taken in between, try the next one.
+      let target = '';
+      for (let i = 0; i < 5; i++) {
+        target = await freeName(folder.path, name);
+        try {
+          await writeFile(target, got.bytes, { flag: 'wx', mode: 0o644 });
+          break;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || i === 4) throw err;
+        }
+      }
+      const shown = this.o.roots.display(target);
+      audit({ decision: 'approved', ok: true, mailId: item.mailId, n: item.n, path: target, bytes: got.bytes.length });
+      done({ saved: shown });
+      this.o.onSaved?.(target, { mailId: item.mailId, n: item.n });
+      return 'saved';
+    } catch (err) {
+      audit({ decision: 'approved', ok: false, error: (err as Error).message });
+      done({ saved: `Didn't save: ${(err as Error).message}` });
+      return 'failed';
+    }
+  }
+}
+
+/** A sender's file name as a safe name on disk: no folder parts, no leading dot. */
+function safeFileName(name: string): string {
+  const n = name.replace(/[/\\\u0000-\u001f\u007f]/g, '_').replace(/^[.\s]+/, '').trim().slice(0, 200);
+  return n || 'attachment';
 }

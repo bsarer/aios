@@ -147,9 +147,10 @@ export function attachmentTools(o: { mail: Pick<MailClient, 'read' | 'attachment
         if (!m) return `Error: no message with id ${id}.`;
         const info = m.attachments[n - 1];
         if (!info) return `Error: message ${id} has no attachment ${n}. mail_read lists its attachments.`;
-        const card = o.files.show(id, n, info);
-        if (!card) return `Error: attachment ${n} is not a PDF, text file or image, so it can't be opened here.`;
-        return { content: `A card for attachment ${n} is in the chat; the user opens it with its Open button.`, audit: { fileKind: card.fileKind, itemId: card.id } };
+        const card = await o.files.show(id, n, info);
+        const save = card.folders?.length ? ' Its Save button saves it to a folder.' : '';
+        if (card.fileKind === 'other') return { content: `A card for attachment ${n} is in the chat. It can't be opened here (not a PDF, text file or picture).${save} Say so in one line.`, audit: { fileKind: card.fileKind, itemId: card.id } };
+        return { content: `A card for attachment ${n} is in the chat; the user opens it with its Open button.${save}`, audit: { fileKind: card.fileKind, itemId: card.id } };
       },
     },
   ];

@@ -164,12 +164,12 @@ export function editTools(o: EditToolsOptions): RegisteredTool[] {
       deniedMessage: denied,
       allowWithDocuments: true,
       auditArgs: (args) => {
-        const a = args as { name: string; kind: DocKind; word?: WordChange[]; sheet?: SheetChange[] };
+        const a = args as { name: string; kind: DocKind; folder?: string; word?: WordChange[]; sheet?: SheetChange[] };
         return { kind: a.kind, changes: summary(a.word ?? a.sheet ?? []) };
       },
       propose: (args, ctx) =>
         asked(async () => {
-          const a = args as { name: string; kind: DocKind; word?: WordChange[]; sheet?: SheetChange[] };
+          const a = args as { name: string; kind: DocKind; folder?: string; word?: WordChange[]; sheet?: SheetChange[] };
           let commands: DocCommand[];
           let lines: CardLine[];
           let checks: DocChangeSpec['checks'];
@@ -182,7 +182,7 @@ export function editTools(o: EditToolsOptions): RegisteredTool[] {
             ({ commands, lines } = sheetCommands(a.sheet ?? []));
             checks = { sheet: sheetChecks(a.sheet ?? []) };
           }
-          const output = await o.files.newFilePath(a.name, a.kind);
+          const output = await o.files.newFilePath(a.name, a.kind, a.folder);
           const changes = a.word ?? a.sheet ?? [];
           const spec: DocChangeSpec = { change: 'create', kind: a.kind, output, overwrite: false, commands, checks, summary: summary(changes) };
           const card = o.actions.propose(spec, lines, baseWarnings(ctx));

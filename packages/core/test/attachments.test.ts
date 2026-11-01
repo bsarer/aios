@@ -66,7 +66,7 @@ describe('what an attachment is', () => {
 
   it('lists attachments by number with their kind', () => {
     expect(listAttachments([part('venues.pdf', 'application/pdf'), { ...part('swim.png', 'image/png'), size: 4096 }, part('x.zip', 'application/zip')])).toBe(
-      "1. venues.pdf (PDF, 75 bytes)\n2. swim.png (image, 3 KB)\n3. x.zip (can't be opened here)",
+      "1. venues.pdf (PDF, 75 bytes)\n2. swim.png (image, 3 KB)\n3. x.zip (75 bytes, can't be opened here but can be saved)",
     );
   });
 });
@@ -177,9 +177,12 @@ describe('attachment cards and files', () => {
       3: { info: part('x.zip', 'application/zip', 4), bytes: Buffer.from('PK') },
     });
     expect(text(await t.show.handler({ id: 'INBOX:5', attachment: 1 }, t.ctx))).toBe('A card for attachment 1 is in the chat; the user opens it with its Open button.');
-    expect(text(await t.show.handler({ id: 'INBOX:5', attachment: 3 }, t.ctx))).toMatch(/^Error: attachment 3 is not a PDF/);
+    // F1: any attachment gets a card (to save it); one that isn't a PDF, text or picture can't be opened.
+    expect(text(await t.show.handler({ id: 'INBOX:5', attachment: 3 }, t.ctx))).toMatch(/^A card for attachment 3 is in the chat\. It can't be opened here/);
     expect(text(await t.show.handler({ id: 'INBOX:5', attachment: 2 }, t.ctx))).toMatch(/^A card/);
-    const [png, fake] = t.posted as Extract<ChatItem, { kind: 'attachment' }>[];
+    const [png, zip, fake] = t.posted as Extract<ChatItem, { kind: 'attachment' }>[];
+    expect(zip).toMatchObject({ fileKind: 'other', n: 3 });
+    expect(await t.attachmentFiles.file(zip!.id)).toBeNull();
     expect(png).toMatchObject({ kind: 'attachment', name: 'swim.png', fileKind: 'image', mailId: 'INBOX:5', n: 1 });
     expect(png!.id).toMatch(/^att-[0-9a-f-]{36}$/);
 
@@ -193,9 +196,9 @@ describe('attachment cards and files', () => {
     ]);
   });
 
-  it('cleans control characters out of the file name shown on the card', () => {
+  it('cleans control characters out of the file name shown on the card', async () => {
     const t = setup({});
-    const card = t.attachmentFiles.show('INBOX:5', 1, part('inv‮oice\u0007.pdf', 'application/pdf'));
+    const card = await t.attachmentFiles.show('INBOX:5', 1, part('inv‮oice\u0007.pdf', 'application/pdf'));
     expect(card?.name).toBe('invoice.pdf');
   });
 });

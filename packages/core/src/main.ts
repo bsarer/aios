@@ -21,6 +21,9 @@ import { AuditLog } from './audit.js';
 import { DocActions } from './docs/actions.js';
 import { editTools } from './docs/edit.js';
 import { DocEngine } from './docs/engine.js';
+import { FileActions } from './files/actions.js';
+import { FileRoots } from './files/roots.js';
+import { fileTools } from './files/tools.js';
 import { DocFiles } from './docs/files.js';
 import { createDocumentOpener } from './docs/open.js';
 import { docTools } from './docs/tools.js';
@@ -99,7 +102,16 @@ async function main(): Promise<void> {
   const mailState = new MailState(store);
   tools.register(recentMailTool(mailState));
   // The shell is created below; cards only appear once it exists.
-  const attachmentFiles = new AttachmentFiles({ store, mail: mailClient, audit, post: (item) => shell?.agent.post(item) });
+  // F1: the folders files may be managed in. Word and Excel tools see them too.
+  const fileRoots = config.files.enabled ? new FileRoots({ roots: config.files.roots }) : undefined;
+  const attachmentFiles = new AttachmentFiles({
+    store,
+    mail: mailClient,
+    audit,
+    post: (item) => shell?.agent.post(item),
+    patch: (item) => shell?.patchItem(item),
+    ...(fileRoots ? { roots: fileRoots, saveTo: config.files.saveTo } : {}),
+  });
   for (const t of attachmentTools({ mail: mailClient, files: attachmentFiles })) tools.register(t);
   const outbox = new ImapSmtpOutbox(mailClient, {
     host: config.mail.smtp.host,
@@ -162,10 +174,12 @@ async function main(): Promise<void> {
   const apps = appTools({ scan: () => scanApps(), launch, window: chatWindow });
   // D1: Word and Excel files, read through WordCraft's and GridCraft's command-line tools.
   let documentFiles: DocumentFiles | undefined;
+  let docFilesForShow: DocFiles | undefined;
   let docActions: DocActions | undefined;
   if (config.docs.enabled) {
     const d = config.docs;
-    const docFiles = new DocFiles({ roots: d.roots });
+    const docFiles = new DocFiles({ roots: [...new Set([...d.roots, ...(config.files.enabled ? config.files.roots : [])])] });
+    docFilesForShow = docFiles;
     const engine = new DocEngine({ wordCli: d.wordCli, sheetCli: d.sheetCli, timeoutMs: d.timeoutSeconds * 1000 });
     documentFiles = new DocumentFiles({ store, files: docFiles, engine, audit, post: (item) => shell?.agent.post(item) });
     const open = createDocumentOpener({ word: d.wordApp, sheet: d.sheetApp });
@@ -182,6 +196,18 @@ async function main(): Promise<void> {
       show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
     });
     for (const t of editTools({ files: docFiles, engine, actions: docActions })) tools.register(t);
+  }
+  // F1: managing files. Changes go on a card; the click renames, copies or creates, never replacing anything.
+  let fileActions: FileActions | undefined;
+  if (fileRoots) {
+    fileActions = new FileActions({ store, roots: fileRoots, audit, show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)) });
+    const showDocument = documentFiles && docFilesForShow
+      ? async (path: string) => {
+          const card = documentFiles!.show(await docFilesForShow!.resolve(path));
+          return `A card for the ${card.fileKind === 'word' ? 'Word' : 'Excel'} file is in the chat; the user opens it with its Open button. Say so in one line.`;
+        }
+      : undefined;
+    for (const t of fileTools({ roots: fileRoots, actions: fileActions, viewer: attachmentFiles, ...(showDocument ? { showDocument } : {}) })) tools.register(t);
   }
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
   const buildLog = new BuildLog(store);
@@ -239,6 +265,8 @@ async function main(): Promise<void> {
     systemActions,
     ...(calendarActions ? { calendarActions } : {}),
     ...(docActions ? { docActions } : {}),
+    ...(fileActions ? { fileActions } : {}),
+    attachments: attachmentFiles,
     chatWindow,
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
@@ -288,6 +316,7 @@ async function main(): Promise<void> {
   systemActions.recover();
   calendarActions?.recover();
   docActions?.recover();
+  fileActions?.recover();
   shell.greet();
   // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
   await keyring.require(config.models.chat.apiKeyRef).catch((err: unknown) => {

@@ -105,6 +105,18 @@ export const DocsConfig = z.strictObject({
 });
 export type DocsConfig = z.infer<typeof DocsConfig>;
 
+/**
+ * F1: files in these folders can be listed, shown, read, renamed and copied from the chat,
+ * and attachments saved into them. Word and Excel tools use these folders too.
+ */
+export const FilesConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads']),
+  /** Where an attachment's Save button saves unless another folder is picked on the card. */
+  saveTo: z.string().min(1).max(500).default('~/Downloads'),
+});
+export type FilesConfig = z.infer<typeof FilesConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -153,6 +165,8 @@ export const AiosConfig = z.strictObject({
     sheetApp: 'gridcraft',
     timeoutSeconds: 12,
   }),
+  /** F1: managing files in a few folders. */
+  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads' }),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

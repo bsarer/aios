@@ -56,3 +56,6 @@ export * from './docs/open.js';
 export * from './docs/recipes.js';
 export * from './docs/tools.js';
 export * from './docs/viewer.js';
+export * from './files/actions.js';
+export * from './files/roots.js';
+export * from './files/tools.js';

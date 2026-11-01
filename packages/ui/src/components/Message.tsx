@@ -54,6 +54,11 @@ export interface MessageActions {
   /** A document change (D2) is saved only on this click, which echoes the card's hash. */
   onDocChangeConfirm: (id: string, hash: string) => void;
   onDocChangeDiscard: (id: string) => void;
+  /** F1: a file change happens only on this click, which echoes the card's hash. */
+  onFileChangeConfirm: (id: string, hash: string) => void;
+  onFileChangeDiscard: (id: string) => void;
+  /** F1: Save on an attachment card, into the folder picked (by its index on the card). */
+  onAttachmentSave: (id: string, folder: number) => void;
   /** Stop on a running build (S4). */
   onActionStop: (id: string) => void;
   /** Open on a finished build's message (S4); names the Build card, not the app. */
@@ -445,25 +450,131 @@ function DocumentCard({ item }: { item: DocumentItem }) {
 
 type AttachmentItem = Extract<ChatItem, { kind: 'attachment' }>;
 
-const FILE_KIND_TEXT: Record<AttachmentItem['fileKind'], string> = { pdf: 'PDF', text: 'Text file', image: 'Picture' };
+const FILE_KIND_TEXT: Record<AttachmentItem['fileKind'], string> = { pdf: 'PDF', text: 'Text file', image: 'Picture', other: 'File' };
 
-/** An email attachment the user can open (S2). The name came from the email: plain text only. */
-function AttachmentCard({ item }: { item: AttachmentItem }) {
+/** An email attachment (S2) or a file from disk (F1) the user can open, and save (F1). Names can come from anyone: plain text only. */
+function AttachmentCard({ item, actions }: { item: AttachmentItem; actions: MessageActions }) {
   const [open, setOpen] = useState(false);
+  const [folder, setFolder] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const fromMail = item.mailId !== undefined;
+  const canSave = fromMail && !!item.folders?.length && !item.saved;
   return (
-    <div data-kind="attachment" className="glass flex items-center gap-3 rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
-      <div className="min-w-0 flex-1">
-        <div data-testid="attachment-name" className="break-all">
-          {item.name}
+    <div data-kind="attachment" data-file-kind={item.fileKind} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div data-testid="attachment-name" className="break-all">
+            {item.name}
+          </div>
+          <div className="text-sm" style={{ color: 'var(--muted)' }}>
+            {FILE_KIND_TEXT[item.fileKind]}
+            {fromMail ? ' from an email' : ' in your folders'}
+            {item.fileKind === 'other' ? " (can't be opened here)" : ''}
+          </div>
         </div>
-        <div className="text-sm" style={{ color: 'var(--muted)' }}>
-          {FILE_KIND_TEXT[item.fileKind]} from an email
-        </div>
+        {item.fileKind !== 'other' && (
+          <button type="button" data-testid="attachment-open" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(true)}>
+            Open
+          </button>
+        )}
       </div>
-      <button type="button" data-testid="attachment-open" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(true)}>
-        Open
-      </button>
+      {canSave && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <span style={{ color: 'var(--muted)' }}>Save to</span>
+          <select data-testid="attachment-folder" className="glass rounded-lg px-2 py-1" value={folder} onChange={(e) => setFolder(Number(e.target.value))}>
+            {item.folders!.map((f, i) => (
+              <option key={f} value={i}>
+                {f}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            data-testid="attachment-save"
+            disabled={saving}
+            className="glass rounded-lg px-3 py-1"
+            onClick={() => {
+              setSaving(true);
+              actions.onAttachmentSave(item.id, folder);
+            }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      )}
+      {item.saved && (
+        <div data-testid="attachment-saved" className="mt-2 text-sm" style={{ color: item.saved.startsWith("Didn't") ? 'var(--danger)' : 'var(--muted)' }}>
+          {item.saved.startsWith("Didn't") ? item.saved : `✓ Saved as ${item.saved}`}
+        </div>
+      )}
       {open && <AttachmentViewer item={item} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+type FileChangeItem = Extract<ChatItem, { kind: 'file_change' }>;
+
+const FILE_CHANGE_TEXT: Record<FileChangeItem['change'], { heading: string; confirm: string }> = {
+  rename: { heading: 'Rename this file?', confirm: 'Rename' },
+  copy: { heading: 'Copy this file?', confirm: 'Copy' },
+  folder: { heading: 'Create this folder?', confirm: 'Create' },
+  note: { heading: 'Create this file?', confirm: 'Create' },
+};
+
+const FILE_CHANGE_STATE_TEXT: Record<FileChangeItem['state'], string> = { pending: '', running: 'Working…', done: '✓ Done', discarded: 'Discarded. Nothing changed.', failed: '' };
+
+/** A file change waiting for a click (F1). Names and note text can come from files or the model: plain text only. */
+function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: MessageActions }) {
+  const t = FILE_CHANGE_TEXT[item.change];
+  const open = item.state === 'pending' || item.state === 'failed';
+  const row = (label: string, value: string, testid: string) => (
+    <div className="flex gap-2 text-[15px]">
+      <span className="w-12 shrink-0" style={{ color: 'var(--muted)' }}>
+        {label}
+      </span>
+      <span data-testid={testid} className="min-w-0 break-all">
+        {value}
+      </span>
+    </div>
+  );
+  return (
+    <div data-kind="file_change" data-change={item.change} data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {t.heading}
+      </div>
+      <div className="mt-1 space-y-0.5">
+        {item.from !== undefined && row('From', item.from, 'file-change-from')}
+        {row(item.from !== undefined ? 'To' : 'New', item.to, 'file-change-to')}
+      </div>
+      {item.preview !== undefined && (
+        <div data-testid="file-change-preview" className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md px-2 py-1 text-[14px]" style={{ background: 'var(--panel)' }}>
+          {item.preview || '(empty)'}
+        </div>
+      )}
+      {item.warnings.map((w) => (
+        <div key={w} data-testid="file-change-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          {w}
+        </div>
+      ))}
+      {item.state === 'failed' && item.result && (
+        <div data-testid="file-change-state" className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.result}
+        </div>
+      )}
+      {open ? (
+        <div className="mt-3 flex gap-2">
+          <button type="button" data-testid="file-change-confirm" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onFileChangeConfirm(item.id, item.hash)}>
+            {item.state === 'failed' ? `Try again: ${t.confirm}` : t.confirm}
+          </button>
+          <button type="button" data-testid="file-change-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onFileChangeDiscard(item.id)}>
+            Discard
+          </button>
+        </div>
+      ) : (
+        <div data-testid="file-change-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.result ?? FILE_CHANGE_STATE_TEXT[item.state]}
+        </div>
+      )}
     </div>
   );
 }
@@ -561,8 +672,10 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <EventCard item={item} actions={actions} />;
     case 'doc_change':
       return <DocChangeCard item={item} actions={actions} />;
+    case 'file_change':
+      return <FileChangeCard item={item} actions={actions} />;
     case 'attachment':
-      return <AttachmentCard item={item} />;
+      return <AttachmentCard item={item} actions={actions} />;
     case 'document':
       return <DocumentCard item={item} />;
     case 'build_result':

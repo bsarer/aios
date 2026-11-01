@@ -60,7 +60,7 @@ export const ALPHA_TOOLS = [
   def({
     name: 'mail_attachment_show',
     tier: 'read',
-    description: 'Show one attachment of a message (a PDF, text file or image) to the user as a card with an Open button, so they can look at it. Use when the user wants to open, see or view an attachment.',
+    description: 'Show one attachment of a message to the user as a card: PDFs, text files and images get an Open button, and every attachment gets a Save button that saves it into one of their folders. Use when the user wants to open, see, view or save an attachment. You cannot save it yourself; only their click on Save does.',
     input: z.strictObject({
       id: z.string().describe('Message id, e.g. INBOX:37'),
       attachment: z.int().min(1).max(50).describe('Attachment number from mail_read, starting at 1'),
@@ -249,6 +249,67 @@ export const ALPHA_TOOLS = [
       'Open a Word file in WordCraft or an Excel file in GridCraft, in its own window. The chat shrinks to a red orb at the top of the screen and comes back when the app is closed.',
     input: z.strictObject({ path: z.string().min(1).max(1000) }),
   }),
+  // ── Files (F1) ──
+  def({
+    name: 'files_list',
+    tier: 'read',
+    description:
+      "Files and folders in the user's allowed folders (by default ~/Documents and ~/Downloads): name, type, size and date, folders first, newest first. With `folder`, that folder's contents; with `query`, every file whose path contains it, anywhere below. Gives the paths the other file tools take.",
+    input: z.strictObject({
+      folder: z.string().min(1).max(1000).optional().describe('e.g. "~/Downloads" or "Documents/Legal"; all allowed folders when left out'),
+      query: z.string().min(1).max(200).optional().describe('Part of a name, e.g. "invoice" or ".pdf"'),
+    }),
+  }),
+  def({
+    name: 'file_info',
+    tier: 'read',
+    description: 'Facts about one file or folder: type (from its contents), size, created and modified dates.',
+    input: z.strictObject({ path: z.string().min(1).max(1000) }),
+  }),
+  def({
+    name: 'file_show',
+    tier: 'read',
+    description: 'Show a file to the user as a card whose Open button views it in the chat: PDFs, pictures, text files, Word and Excel files. Returns no file contents.',
+    input: z.strictObject({ path: z.string().min(1).max(1000) }),
+  }),
+  def({
+    name: 'file_read',
+    tier: 'read',
+    description: 'Read the text of a PDF or text file (for Word use doc_read, for Excel sheet_read). Long files come in parts: pass `from` for the next part.',
+    input: z.strictObject({ path: z.string().min(1).max(1000), from: z.int().min(0).optional() }),
+  }),
+  def({
+    name: 'file_rename',
+    tier: 'write',
+    description: 'Propose renaming a file inside its folder. Shows a card with the old and new name; nothing changes until the user clicks Rename. Never replaces another file. Keep the extension unless the user asks otherwise.',
+    input: z.strictObject({ path: z.string().min(1).max(1000), newName: z.string().min(1).max(200).describe('Just the new name, e.g. "2026-10 Hydro invoice.pdf"') }),
+  }),
+  def({
+    name: 'file_copy',
+    tier: 'write',
+    description: 'Propose copying a file into an allowed folder. Shows a card; the copy is made only when the user clicks Copy, and never over another file.',
+    input: z.strictObject({
+      path: z.string().min(1).max(1000),
+      toFolder: z.string().min(1).max(1000).describe('e.g. "~/Documents/Legal"'),
+      newName: z.string().min(1).max(200).optional().describe('A name for the copy; the same name when left out'),
+    }),
+  }),
+  def({
+    name: 'folder_create',
+    tier: 'write',
+    description: 'Propose a new folder inside an allowed folder. Shows a card; it is created only when the user clicks Create.',
+    input: z.strictObject({ in: z.string().min(1).max(1000).describe('The folder to create it in, e.g. "~/Documents"'), name: z.string().min(1).max(200) }),
+  }),
+  def({
+    name: 'note_create',
+    tier: 'write',
+    description: 'Propose a new plain-text (.txt) or Markdown (.md) file with the text you give. Shows a card with the start of the text; it is created only when the user clicks Create, and never over another file.',
+    input: z.strictObject({
+      folder: z.string().min(1).max(1000).optional().describe('Where it goes; ~/Documents when left out'),
+      name: z.string().min(1).max(200).describe('e.g. "Packing list.md"; .txt is added when there is no .txt or .md'),
+      text: z.string().max(200_000),
+    }),
+  }),
   // ── Editing documents (D2) ──
   def({
     name: 'doc_edit',
@@ -277,11 +338,12 @@ export const ALPHA_TOOLS = [
     name: 'doc_create',
     tier: 'write',
     description:
-      'Propose a new Word or Excel file in the first document folder. Word: give `word` changes (usually one append with the paragraphs). Excel: give `sheet` changes (usually set with the rows, then format). Shows a card; the file is created only when the user clicks Save, and never over an existing file.',
+      'Propose a new Word or Excel file, in `folder` or the first document folder. Word: give `word` changes (usually one append with the paragraphs). Excel: give `sheet` changes (usually set with the rows, then format). Shows a card; the file is created only when the user clicks Save, and never over an existing file.',
     input: z
       .strictObject({
         name: z.string().min(1).max(120).describe('File name without folder, e.g. "Trip budget"'),
         kind: z.enum(['word', 'sheet']),
+        folder: z.string().min(1).max(1000).optional().describe('An allowed folder, e.g. "~/Documents/Home"; the first document folder when left out'),
         word: z.array(WordChange).min(1).max(MAX_CHANGES).optional(),
         sheet: z.array(SheetChange).min(1).max(MAX_CHANGES).optional(),
       })

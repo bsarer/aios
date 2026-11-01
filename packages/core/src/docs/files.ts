@@ -166,8 +166,28 @@ export class DocFiles {
     throw new DocPathError('there are too many edited copies of this file already');
   }
 
-  /** D2: where a new document goes: the first folder, under a plain name that isn't taken. */
-  async newFilePath(name: string, kind: DocKind): Promise<string> {
+  /** F1: a folder from the chat, inside (or one of) the document folders, not hidden. */
+  async resolveFolder(input: string): Promise<string> {
+    const raw = input.trim();
+    if (!raw || raw.includes('\0') || raw.length > 1000) throw new DocPathError('that is not a folder path');
+    const roots = await this.realRoots();
+    const expanded = this.expand(raw);
+    const candidates = expanded ? [expanded] : this.roots.map((r) => join(r, raw));
+    let real: string | null = null;
+    for (const c of candidates) {
+      real = await realpath(c).catch(() => null);
+      if (real) break;
+    }
+    if (!real) throw new DocPathError(`there is no folder ${raw}; folder_create can make it`);
+    const root = roots.find((r) => r === real || inside(r, real));
+    if (!root) throw new DocPathError(`new documents can only go in ${this.rootsText()}`);
+    if (real !== root && hiddenBelow(root, real)) throw new DocPathError('hidden folders are left alone');
+    if (!(await lstat(real)).isDirectory()) throw new DocPathError(`${basename(real)} is not a folder`);
+    return real;
+  }
+
+  /** D2: where a new document goes: `folder` (F1) or the first folder, under a plain name that isn't taken. */
+  async newFilePath(name: string, kind: DocKind, folder?: string): Promise<string> {
     const ext = kind === 'word' ? '.docx' : '.xlsx';
     const clean = name
       .replace(/\.(docx|xlsx)$/i, '')
@@ -178,7 +198,7 @@ export class DocFiles {
       .replace(/^[.\s-]+/, '')
       .slice(0, 100);
     if (!clean) throw new DocPathError('give the new file a name made of letters, numbers and spaces');
-    const [root] = await this.realRoots();
+    const root = folder ? await this.resolveFolder(folder) : (await this.realRoots())[0];
     if (!root) throw new DocPathError(`none of the document folders (${this.rootsText()}) exist on this computer`);
     const p = join(root, `${clean}${ext}`);
     if (await exists(p)) throw new DocPathError(`${this.display(p)} exists already; pick another name, or edit that file`);

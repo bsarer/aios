@@ -12,6 +12,8 @@ import { HELP_TEXT, parseCommand } from './commands.js';
 import { cleanFact } from './memory/files.js';
 import type { CalendarActions } from './calendar/actions.js';
 import type { DocActions } from './docs/actions.js';
+import type { FileActions } from './files/actions.js';
+import type { AttachmentFiles } from './mail/attachments.js';
 import type { ApprovalBroker } from './mail/approvals.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
@@ -46,6 +48,10 @@ export interface ShellOptions {
   calendarActions?: CalendarActions;
   /** Word and Excel change cards and their clicks (D2). Without it, doc_change messages are ignored. */
   docActions?: DocActions;
+  /** File change cards and their clicks (F1). Without it, file_change messages are ignored. */
+  fileActions?: FileActions;
+  /** Save buttons on attachment cards (F1). Without it, attachment_save is ignored. */
+  attachments?: Pick<AttachmentFiles, 'save'>;
   /** Where the chat window sits (S3). Without it, window messages are ignored and the chat stays full screen. */
   chatWindow?: { readonly mode: WindowMode; request: (mode: WindowMode) => Promise<void> };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
@@ -166,6 +172,9 @@ export class Shell {
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
     if (msg.type === 'event_confirm' || msg.type === 'event_discard') return this.calendarAction(msg);
     if (msg.type === 'doc_change_confirm' || msg.type === 'doc_change_discard') return this.docChangeAction(msg);
+    if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
+    // The user's own click on Save, so like Send on a draft it works while paused.
+    if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
     // The user's own click on a build they started, so like the window it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
@@ -252,6 +261,17 @@ export class Shell {
     const actions = this.o.docActions;
     if (!actions) return;
     if (msg.type === 'doc_change_discard') {
+      actions.discard(msg.id);
+      return;
+    }
+    await actions.confirm(msg.id, msg.hash);
+  }
+
+  /** Clicks on a file change card (F1): the user's own action; the broker checks hash, state and the file. */
+  private async fileChangeAction(msg: Extract<ClientMessage, { type: 'file_change_confirm' | 'file_change_discard' }>): Promise<void> {
+    const actions = this.o.fileActions;
+    if (!actions) return;
+    if (msg.type === 'file_change_discard') {
       actions.discard(msg.id);
       return;
     }

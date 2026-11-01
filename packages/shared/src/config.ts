@@ -35,8 +35,11 @@ export type ModelRoleConfig = z.infer<typeof ModelRoleConfig>;
 export const MODEL_ROLES = ['chat', 'triage', 'nightly'] as const;
 export type ModelRole = (typeof MODEL_ROLES)[number];
 
+/** A bare server name or IPv4 address: no scheme, port, spaces or commas. */
+export const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+
 const Endpoint = z.strictObject({
-  host: z.string().min(1),
+  host: z.string().regex(HOSTNAME, 'must be a server name only, like imap.example.com (the port goes in port)'),
   port: z.int().min(1).max(65_535),
   // false only for the local GreenMail stack.
   tls: z.boolean().default(true),

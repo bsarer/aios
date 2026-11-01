@@ -9,6 +9,7 @@
 import { type FSWatcher, watch } from 'node:fs';
 import { lstat, opendir } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import type { ModelRole } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import { ModelError } from '../model.js';
 import { type Store, startOfDay } from '../store.js';
@@ -53,6 +54,8 @@ export interface FileIndexerOptions {
   facts: Pick<FactReader, 'read'>;
   /** The summary worker's model; without it, files get facts only. */
   model?: SummaryModel | undefined;
+  /** L1: 'local' when file summaries run on the local model. Default 'triage'. */
+  summaryRole?: ModelRole | undefined;
   store: Store;
   audit: AuditLog;
   timeZone: string;
@@ -127,9 +130,9 @@ export class FileIndexer {
     this.soon();
   }
 
-  private seenFile(path: string, st: { size: number; mtimeMs: number; birthtimeMs: number }): SeenFile {
+  private seenFile(path: string, st: { size: number; mtimeMs: number; birthtimeMs: number; atimeMs?: number }): SeenFile {
     const name = basename(path);
-    return { path, name, folder: this.o.roots.display(dirname(path)), kind: kindByName(name), bytes: st.size, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs };
+    return { path, name, folder: this.o.roots.display(dirname(path)), kind: kindByName(name), bytes: st.size, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs, atimeMs: st.atimeMs };
   }
 
   /** Walks the folders; concurrent calls share a scan and one more follows if asked meanwhile. */
@@ -258,7 +261,7 @@ export class FileIndexer {
     const day = this.summariesToday();
     this.o.store.setSetting(day.key, String(day.n + 1));
     try {
-      const s = await summarizeFile(this.o.model!, { display: this.o.roots.display(f.path), kind: reading.kind, facts: reading.facts, excerpt: reading.excerpt });
+      const s = await summarizeFile(this.o.model!, { display: this.o.roots.display(f.path), kind: reading.kind, facts: reading.facts, excerpt: reading.excerpt }, this.o.summaryRole);
       this.o.catalog.setSummary(f, s, 'done');
       this.o.audit.append({ kind: 'files', event: 'summarized', path: f.path, keywords: s.keywords.length });
     } catch (err) {

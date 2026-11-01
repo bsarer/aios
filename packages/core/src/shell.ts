@@ -59,6 +59,10 @@ export interface ShellOptions {
   chatWindow?: { readonly mode: WindowMode; request: (mode: WindowMode) => Promise<void> };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
   openBuiltApp?: (actionId: string) => Promise<void>;
+  /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
+  cleanup?: { act: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => Promise<void>; run: () => Promise<'nothing' | 'posted'> };
+  /** L1: the system numbers, written by code, for /checkup. */
+  resources?: () => Promise<string[]>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -178,6 +182,8 @@ export class Shell {
     if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
     // The user's own click on Save, so like Send on a draft it works while paused.
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
+    // L1: the user's own click on a morning review row; the review checks its hash and the file or window first.
+    if (msg.type === 'cleanup_action') return this.o.cleanup?.act(msg.id, msg.list, msg.n, msg.action, msg.hash);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
     // The user's own click on a build they started, so like the window it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
@@ -387,6 +393,16 @@ export class Shell {
         if (!idx) return say('File search is off. Turn it on with index = true under [files] in your config.');
         void idx.reindex();
         return say(`Reading your files again in the background. ${indexStatusText(idx.status())}`);
+      }
+      case 'checkup': {
+        if (!this.o.resources && !this.o.cleanup) return say('The system assistant is off. Turn it on with enabled = true under [assistant] in your config.');
+        const lines = (await this.o.resources?.()) ?? [];
+        if (lines.length) say(lines.join('\n'));
+        if (!this.o.cleanup) return;
+        if (this.paused) return say('I am paused, so the tidy-up suggestions wait. Type /resume to continue.');
+        const r = await this.o.cleanup.run();
+        if (r === 'nothing') say('Nothing to tidy up right now: no big unused files in your folders and no idle windows.');
+        return;
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

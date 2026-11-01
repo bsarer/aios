@@ -32,6 +32,11 @@ export interface IndexedFile {
   summary: string | null;
   keywords: string[];
   tags: string[];
+  /**
+   * L1: when the file was last opened or changed, as far as access times tell, not counting the
+   * indexer's own read (which moves the access time too). Null for rows from before L1.
+   */
+  usedMs: number | null;
 }
 
 export type StepState = 'pending' | 'done' | 'failed' | 'skipped';
@@ -52,6 +57,8 @@ interface Row {
   summary_attempts: number;
   tags: string;
   seen_at: number;
+  used_ms: number | null;
+  read_at: number | null;
 }
 
 export interface SeenFile {
@@ -62,7 +69,12 @@ export interface SeenFile {
   bytes: number;
   mtimeMs: number;
   birthtimeMs: number;
+  /** L1: the access time the scan saw. */
+  atimeMs?: number | undefined;
 }
+
+/** An access time this soon after the indexer read the file is the indexer's own. */
+const OWN_READ_MS = 60_000;
 
 export interface SearchQuery {
   query?: string | undefined;
@@ -112,6 +124,7 @@ export class FileCatalog {
       summary: r.summary,
       keywords: splitList(r.keywords),
       tags: splitList(r.tags),
+      usedMs: r.used_ms ?? null,
     };
   }
 
@@ -139,17 +152,19 @@ export class FileCatalog {
   seen(f: SeenFile, now: number): 'new' | 'changed' | 'same' {
     const r = this.row(f.path);
     if (r && r.bytes === f.bytes && r.mtime_ms === f.mtimeMs) {
-      this.db.prepare('UPDATE file_index SET seen_at = ? WHERE path = ?').run(now, f.path);
+      // Opened since: an access time well after the indexer's own read of it.
+      const opened = f.atimeMs !== undefined && f.atimeMs > (r.used_ms ?? 0) && (r.read_at === null || f.atimeMs > r.read_at + OWN_READ_MS);
+      this.db.prepare(`UPDATE file_index SET seen_at = ?${opened ? ', used_ms = ?' : ''} WHERE path = ?`).run(...(opened ? [now, f.atimeMs, f.path] : [now, f.path]));
       return 'same';
     }
     this.db
       .prepare(
-        `INSERT INTO file_index (path, name, folder, kind, bytes, mtime_ms, birthtime_ms, facts, facts_state, summary, keywords, summary_state, summary_attempts, seen_at)
-         VALUES (@path, @name, @folder, @kind, @bytes, @mtimeMs, @birthtimeMs, NULL, 'pending', NULL, NULL, 'pending', 0, @now)
+        `INSERT INTO file_index (path, name, folder, kind, bytes, mtime_ms, birthtime_ms, facts, facts_state, summary, keywords, summary_state, summary_attempts, seen_at, used_ms, read_at)
+         VALUES (@path, @name, @folder, @kind, @bytes, @mtimeMs, @birthtimeMs, NULL, 'pending', NULL, NULL, 'pending', 0, @now, @usedMs, NULL)
          ON CONFLICT(path) DO UPDATE SET name = @name, folder = @folder, kind = @kind, bytes = @bytes, mtime_ms = @mtimeMs, birthtime_ms = @birthtimeMs,
-           facts = NULL, facts_state = 'pending', summary = NULL, keywords = NULL, summary_state = 'pending', summary_attempts = 0, seen_at = @now`,
+           facts = NULL, facts_state = 'pending', summary = NULL, keywords = NULL, summary_state = 'pending', summary_attempts = 0, seen_at = @now, used_ms = @usedMs, read_at = NULL`,
       )
-      .run({ ...f, now });
+      .run({ path: f.path, name: f.name, folder: f.folder, kind: f.kind, bytes: f.bytes, mtimeMs: f.mtimeMs, birthtimeMs: f.birthtimeMs, now, usedMs: Math.max(f.atimeMs ?? 0, f.mtimeMs) });
     this.syncFts(f.path);
     return r ? 'changed' : 'new';
   }
@@ -221,8 +236,8 @@ export class FileCatalog {
   /** Stored only if the file is still the one the facts were read from. */
   setFacts(f: Pick<IndexedFile, 'path' | 'bytes' | 'mtimeMs'>, kind: FileKind, facts: FileFacts | null, state: 'done' | 'failed'): boolean {
     const r = this.db
-      .prepare('UPDATE file_index SET kind = ?, facts = ?, facts_state = ? WHERE path = ? AND bytes = ? AND mtime_ms = ?')
-      .run(kind, facts ? JSON.stringify(facts) : null, state, f.path, f.bytes, f.mtimeMs);
+      .prepare('UPDATE file_index SET kind = ?, facts = ?, facts_state = ?, read_at = ? WHERE path = ? AND bytes = ? AND mtime_ms = ?')
+      .run(kind, facts ? JSON.stringify(facts) : null, state, Date.now(), f.path, f.bytes, f.mtimeMs);
     if (r.changes !== 1) return false;
     this.syncFts(f.path);
     return true;
@@ -255,6 +270,11 @@ export class FileCatalog {
   resetForReindex(): void {
     this.db.prepare("UPDATE file_index SET facts_state = 'pending'").run();
     this.db.prepare("UPDATE file_index SET summary_state = 'pending', summary_attempts = 0 WHERE summary_state = 'failed'").run();
+  }
+
+  /** L1: the biggest files, at least `minBytes`, biggest first. */
+  largest(minBytes: number, limit: number): IndexedFile[] {
+    return (this.db.prepare("SELECT * FROM file_index WHERE bytes >= ? AND kind != 'folder' ORDER BY bytes DESC LIMIT ?").all(minBytes, limit) as Row[]).map((r) => this.file(r));
   }
 
   stats(): CatalogStats {

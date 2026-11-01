@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is merged. F2 (file search by metadata) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. L1 (the local system assistant on Ollama) is in review.
 
 ## Mail
 
@@ -130,6 +130,33 @@ The chat looks after files in your folders (F1), by default `~/Documents` and `~
 
 Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`), `saveTo` (default `~/Downloads`), `index` (default true), `summaries` (default true; false keeps facts and tags only, with no model calls), `summariesPerDay` (default 200), `maxIndexedFiles` (default 20000).
 
+## System assistant (local model)
+
+A small model running on this computer through [Ollama](https://ollama.com) keeps an eye on the machine in the background (L1). Nothing it sees leaves the computer, and it costs nothing, so the daily cost cap doesn't apply to it (`/pause` still does).
+
+- **Low resources:** every 30 seconds code checks free disk space on the drives holding `/` and your home folder, available memory and how busy the processor is. When a drive drops below 10% or 10 GB free, memory below 10% available (twice in a row), or the processor stays above 90% for 5 minutes, an alert appears in the chat (and as a desktop notification outside quiet hours) with the numbers and the biggest users. The local model then adds a sentence of advice. When things recover, the alert says "Back to normal". The same alert comes at most every 6 hours.
+- **Morning tidy-up:** each day after 09:00, a card lists big files in your folders (`[files] roots`) that haven't been opened or changed for 60 days, and windows that have been open but unused for 4 hours. The local model picks which to suggest and says why in a few words. Each file has **Move to Trash** and **Keep**; each window has **Close** and **Keep open**. Nothing happens without your click. Move to Trash puts the file in the normal Trash, where the file manager can restore it, and only if it is exactly as the card showed. Close asks the window to close like its close button, so an app with unsaved work asks you first. Keep stops the suggestion (a week for windows).
+- **`/checkup`:** shows disk, memory and processor now and runs the tidy-up straight away.
+- **Without Ollama** it still works: the alerts carry only the numbers, and code picks the biggest files and windows.
+- **Moving more jobs to the local model:** list them in `[assistant] localTasks`: `"mailTriage"`, `"fileSummaries"`, `"nightlySummary"`. Each job keeps its own prompt, limits and no-tools rule; only the model changes. Check the result on your own mail and files first: small models make more mistakes.
+- **Safety:** file names, window titles and process names can be chosen by anyone (a web page, a download), so they reach the local model inside `<untrusted>` tags. It has no tools, can only pick from the items code listed, and its words are shown as plain text. Paths and window addresses stay in core.
+
+Set it up:
+
+1. Install Ollama: `sudo pacman -S ollama` (or `ollama-cuda` / `ollama-rocm` for an NVIDIA or AMD graphics card), then `sudo systemctl enable --now ollama`. It listens on 127.0.0.1:11434 only.
+2. Pull a small instruct model from [ollama.com/library](https://ollama.com/library) (1 to 4 billion parameters is plenty): `ollama pull <model>`.
+3. Run `pnpm run setup` and answer yes to the Ollama question, or add to `~/.config/aios/config.toml`:
+
+```toml
+[models.local]
+model = "<the name ollama list shows>"
+# baseUrl = "http://127.0.0.1:11434/v1"   (the default; only this computer's addresses are accepted)
+```
+
+Settings: `[assistant]` `enabled`, `localTasks`; `[assistant.monitor]` `intervalSeconds` (30), `disks` (`["/", "~"]`), `diskFreePercent` (10), `diskFreeGb` (10), `memoryFreePercent` (10), `cpuPercent` (90), `cpuMinutes` (5), `cooldownHours` (6); `[assistant.review]` `at` ("09:00"), `minFileMb` (100), `unusedDays` (60), `idleAppHours` (4), `maxFiles` (5), `maxApps` (5), `trashButton` (true). `[models.local]` takes `timeoutMs` (default 120000, since a model on a laptop processor can be slow to load) and `maxTokens` (600).
+
+Limits: "last used" comes from the file's access time, which Linux updates at most once a day (relatime), so it means "not opened or changed". Window idle times start when AI OS starts. Files on another drive than your home folder can't go to the Trash from here; the card says so. A window's memory counts the program and everything it started, so shared memory may be counted twice.
+
 ## Limits, failures and logs
 
 - **Daily cost cap:** `[cost] dailyCapUsd` (default 2). Once today's spend (midnight to midnight in your timezone) reaches it, no model call is made by chat, mail triage or the nightly summary until tomorrow. The chat says so, `/cost` shows the numbers, and new mail is still listed by sender and subject without a summary. Spend is what the provider reports per call (OpenRouter does), so a provider that reports no cost is never capped.
@@ -200,6 +227,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in L1
+
+None in the code. Ollama is a separate program (MIT licence, actively maintained), reached over its OpenAI-compatible API on 127.0.0.1 through the same model adapter; checked against docs.ollama.com on 2026-11-01. The Trash follows the freedesktop.org Trash specification with Node's own file functions.
 
 ## Dependencies added in F2
 

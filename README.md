@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is in review.
 
 ## Mail
 
@@ -112,6 +112,17 @@ The chat reads, summarizes and shows `.docx` and `.xlsx` files from your documen
 
 **Install the apps.** GridCraft publishes Linux builds on its [releases page](https://github.com/storytold/gridcraft/releases) (AppImage, .deb, .rpm, Flatpak, .pkg.tar.zst, tarball). WordCraft had no published release on 31 October 2026, so build it from source (`cargo build --release -p wordcraft -p wordcraft-cli` in a clone) or use the AUR package. Put `wordcraft`, `wordcraft-cli`, `gridcraft` and `gridcraft-cli` on the service's PATH, or set their full paths in `[docs]` (`wordCli`, `sheetCli`, `wordApp`, `sheetApp`). Check with `wordcraft-cli text some.docx` and `gridcraft-cli version`. Settings: `[docs]` `enabled`, `roots`, `timeoutSeconds` (default 12).
 
+## Files
+
+The chat looks after files in your folders (F1), by default `~/Documents` and `~/Downloads`.
+
+- **Look around:** "what's in Downloads", "find the lease PDF", "how big is report.pdf", "show me photo.png", "what does notes.txt say". PDFs, pictures and text files open in the chat's viewer; Word and Excel files use the document card.
+- **Change things:** "rename it to lease-2026.pdf", "copy the invoice to Documents/Taxes", "make a folder Taxes in Documents", "write a note called packing with passport and charger", "make a new budget spreadsheet in Documents/Home". Each shows a card; nothing changes until you click it. Nothing is ever replaced or deleted: a taken name, or a file that changed after the card appeared, stops the change and the card says why.
+- **Save attachments:** an attachment card in the chat has a **Save** button with a folder choice (default `~/Downloads`). It never overwrites; a second `invoice.pdf` becomes `invoice (2).pdf`. Notifications don't have the button yet: ask the chat to show the attachment.
+- **Only your folders:** paths outside the folders, links leading out and hidden files are refused. File names and text can come from anyone, so they reach the model like an email does, and with an email or calendar event in view the chat can't propose file changes.
+
+Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`), `saveTo` (default `~/Downloads`). File search by metadata comes next (F2).
+
 ## Limits, failures and logs
 
 - **Daily cost cap:** `[cost] dailyCapUsd` (default 2). Once today's spend (midnight to midnight in your timezone) reaches it, no model call is made by chat, mail triage or the nightly summary until tomorrow. The chat says so, `/cost` shows the numbers, and new mail is still listed by sender and subject without a summary. Spend is what the provider reports per call (OpenRouter does), so a provider that reports no cost is never capped.
@@ -182,6 +193,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in F1
+
+None. F1 uses Node's own file functions.
 
 ## Dependencies added in D2
 

@@ -41,6 +41,10 @@ const MIGRATIONS = [
   `CREATE TABLE doc_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
                             result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
    CREATE INDEX doc_actions_state ON doc_actions(state);`,
+  // F1: file changes (rename, copy, new folder, new note) waiting for a click.
+  `CREATE TABLE file_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
+                             result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX file_actions_state ON file_actions(state);`,
 ];
 
 export interface UsageRow {

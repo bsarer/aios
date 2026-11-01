@@ -148,11 +148,17 @@ export const ChatItem = z.discriminatedUnion('kind', [
     id: z.string(),
     /** The file name from the email: show as plain text only. */
     name: z.string(),
-    /** What the sender says it is; the server checks the bytes again before serving it. */
-    fileKind: z.enum(['pdf', 'text', 'image']),
+    /** What the sender says it is; the server checks the bytes again before serving it. 'other' (F1) can be saved but not opened. */
+    fileKind: z.enum(['pdf', 'text', 'image', 'other']),
     /** Which attachment of which message, for the server. */
-    mailId: z.string(),
-    n: z.int().min(1),
+    mailId: z.string().optional(),
+    n: z.int().min(1).optional(),
+    /** F1: a file on disk instead (file_show), resolved inside an allowed folder; checked again on every open. */
+    path: z.string().optional(),
+    /** F1: the folders the Save button offers, as the user would write them; the click names one by its index. */
+    folders: z.array(z.string()).optional(),
+    /** F1: where the Save click saved it. */
+    saved: z.string().optional(),
     at: z.number(),
   }),
   z.strictObject({
@@ -164,6 +170,23 @@ export const ChatItem = z.discriminatedUnion('kind', [
     fileKind: z.enum(['word', 'sheet']),
     /** The file, as the server resolved it inside an allowed folder; checked again on every open. */
     path: z.string(),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('file_change'),
+    /** F1: renaming or copying a file, a new folder or a new note, waiting for a click. */
+    id: z.string(),
+    change: z.enum(['rename', 'copy', 'folder', 'note']),
+    /** The file it starts from (rename, copy), as the user would write it. Names can come from anyone: plain text only. */
+    from: z.string().optional(),
+    /** What the click creates or renames to. */
+    to: z.string(),
+    /** The start of a new note's text, as written by the model: plain text only. */
+    preview: z.string().optional(),
+    warnings: z.array(z.string()),
+    hash: z.string(),
+    state: z.enum(['pending', 'running', 'done', 'discarded', 'failed']),
+    result: z.string().optional(),
     at: z.number(),
   }),
   z.strictObject({
@@ -226,6 +249,11 @@ export const ClientMessage = z.discriminatedUnion('type', [
   /** D2: Save on a document change card, echoing the card's hash. */
   z.strictObject({ type: z.literal('doc_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('doc_change_discard'), id: z.string().max(100) }),
+  /** F1: clicks on a file change card. */
+  z.strictObject({ type: z.literal('file_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('file_change_discard'), id: z.string().max(100) }),
+  /** F1: Save on an attachment card, into one of the folders the card offers (by index). */
+  z.strictObject({ type: z.literal('attachment_save'), id: z.string().max(100), folder: z.int().min(0).max(20) }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */

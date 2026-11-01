@@ -186,7 +186,7 @@ export const ALPHA_TOOLS = [
       screen: z.string().min(1).max(40).optional().describe('For place "screen": a screen name from screens_list (e.g. "DP-2") or left, right, above, below'),
     }),
   }),
-  // ── Screens (S5) ──
+  // ── Screens (S6) ──
   def({
     name: 'screens_list',
     tier: 'read',

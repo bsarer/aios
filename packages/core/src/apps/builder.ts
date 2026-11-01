@@ -21,12 +21,13 @@
  */
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
 import { dataDir } from '../paths.js';
 import { cleanName } from '../system/controls.js';
-import { applicationDirs, onPath } from './desktop.js';
+import { LINK_PATH, linkOrigin, withChangeButton, withoutChangeButton } from './change-button.js';
+import { applicationDirs, onPath, parseDesktopEntry } from './desktop.js';
 
 export interface BuilderConfig {
   command: string;
@@ -68,6 +69,16 @@ const MAX_TURNS = 60;
 const SAFE_PATH = /^[A-Za-z0-9._/-]+$/;
 const BROWSERS = ['chromium', 'google-chrome-stable', 'brave'];
 
+/**
+ * The policy AI OS puts first in every built app. With a link port (S5), the app may reach
+ * http://127.0.0.1:<port>/app-link/ and nothing else, for its Change button; without one it
+ * reaches nothing at all.
+ */
+export function appCsp(port?: number): string {
+  const connect = port === undefined ? "connect-src 'none'" : `connect-src ${linkOrigin(port)}${LINK_PATH}`;
+  return APP_CSP.replace("connect-src 'none'", connect);
+}
+
 export const APP_CSP = [
   "default-src 'none'",
   "script-src 'self' 'unsafe-inline' file:",
@@ -81,7 +92,8 @@ export const APP_CSP = [
   "form-action 'none'",
   "base-uri 'none'",
 ].join('; ');
-const CSP_TAG = `<meta http-equiv="Content-Security-Policy" content="${APP_CSP}"><!-- AI OS: this app has no network access -->`;
+const cspTag = (port?: number) =>
+  `<meta http-equiv="Content-Security-Policy" content="${appCsp(port)}"><!-- AI OS: this app has no network access${port === undefined ? '' : ' except to AI OS'} -->`;
 
 /** A short app name for the launcher, or null when nothing usable is left. */
 export function appName(raw: string): string | null {
@@ -104,7 +116,8 @@ export function appSlug(name: string): string | null {
 export const appDesktopId = (slug: string) => `aios-app-${slug}.desktop`;
 
 /** index.html with AI OS's CSP as the first thing in <head>, and no other CSP meta tags. */
-export function withCsp(html: string): string {
+export function withCsp(html: string, port?: number): string {
+  const CSP_TAG = cspTag(port);
   const stripped = html.replace(/<meta\b[^>]*http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>(\s*<!-- AI OS:[^>]*-->)?/gi, '');
   const head = /<head\b[^>]*>/i.exec(stripped);
   if (head) return `${stripped.slice(0, head.index + head[0].length)}${CSP_TAG}${stripped.slice(head.index + head[0].length)}`;
@@ -123,6 +136,7 @@ export function systemPrompt(name: string): string {
     '- It opens in its own window of about 900x700 and may be made full screen; it should look clean at both sizes and follow the system light or dark theme (prefers-color-scheme).',
     `- Give index.html the <title> "${name}".`,
     '- If the app already exists here, change it as asked and keep everything else working.',
+    '- Leave the parts of index.html marked "AI OS" (a Content-Security-Policy and a "Change this app" button) alone, and don\'t copy or imitate them: AI OS puts its own back after you finish.',
     '- When done, answer with one short sentence saying what the app does now.',
   ].join('\n');
 }
@@ -210,6 +224,8 @@ export class BuildError extends Error {
 export interface AppBuilderOptions {
   config: BuilderConfig;
   env?: NodeJS.ProcessEnv;
+  /** S5: with this, every built app gets a Change button that reaches AI OS on this port. */
+  link?: { port: number; token: (slug: string) => string } | undefined;
 }
 
 export class AppBuilder {
@@ -303,12 +319,20 @@ export class AppBuilder {
         if (!SAFE_PATH.test(p)) throw new BuildError(`the folder ${p} has characters a launcher can't hold`);
       }
       await mkdir(dir, { recursive: true });
-      const { summary, costUsd } = await this.runClaude(dir, name, req.request, opts);
+      let ran: { summary: string; costUsd: number | null };
+      try {
+        ran = await this.runClaude(dir, name, req.request, opts);
+      } catch (err) {
+        // A change that stopped part-way may have left index.html without the policy.
+        await this.seal(slug).catch(() => undefined);
+        throw err;
+      }
+      const { summary, costUsd } = ran;
       const index = join(dir, 'index.html');
       const st = await lstat(index).catch(() => null);
       if (!st?.isFile()) throw new BuildError("Claude Code finished without writing index.html, so there's no app to open");
       if (st.size > MAX_INDEX_BYTES) throw new BuildError('index.html came out larger than 2 MB');
-      await writeFile(index, withCsp(await readFile(index, 'utf8')));
+      await this.seal(slug);
       const browser = await this.browser();
       if (!browser) throw new BuildError('no Chromium-based browser is installed to open the app in');
       await this.writeDesktopEntry(slug, name, browser);
@@ -316,6 +340,45 @@ export class AppBuilder {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * Puts AI OS's policy, and with a link its Change button, into an app's index.html, replacing
+   * any earlier ones. Does nothing when there's no index.html (or it isn't a plain file).
+   */
+  async seal(slug: string): Promise<boolean> {
+    if (!APP_SLUG.test(slug)) return false;
+    const index = join(this.appDir(slug), 'index.html');
+    const st = await lstat(index).catch(() => null);
+    if (!st?.isFile() || st.size > MAX_INDEX_BYTES) return false;
+    const html = await readFile(index, 'utf8');
+    const link = this.o.link;
+    const out = link ? withChangeButton(withCsp(html, link.port), { port: link.port, slug, token: link.token(slug) }) : withoutChangeButton(withCsp(html));
+    if (out !== html) await writeFile(index, out);
+    return true;
+  }
+
+  /** The launcher name of an app AI OS built (its desktop entry is AI OS's own), or null. */
+  async builtName(slug: string): Promise<string | null> {
+    if (!APP_SLUG.test(slug) || !this.exists(slug)) return null;
+    const text = await readFile(this.desktopFile(slug), 'utf8').catch(() => null);
+    if (text === null) return null;
+    const e = parseDesktopEntry(text);
+    return e.get('X-AIOS-Built') === 'true' ? (e.get('Name') ?? null) : null;
+  }
+
+  /**
+   * At startup: re-seals every app AI OS built, so apps from before S5 get the Change button and
+   * a changed port reaches them all. Returns the slugs it sealed.
+   */
+  async sealAll(): Promise<string[]> {
+    const names = await readdir(join(dataDir(this.env), 'apps')).catch(() => [] as string[]);
+    const done: string[] = [];
+    for (const slug of names.sort()) {
+      if (!(await this.builtName(slug))) continue;
+      if (await this.seal(slug).catch(() => false)) done.push(slug);
+    }
+    return done;
   }
 
   private async writeDesktopEntry(slug: string, name: string, browser: string): Promise<void> {

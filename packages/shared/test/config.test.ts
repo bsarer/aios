@@ -40,7 +40,7 @@ describe('config schema', () => {
     expect(c.calendar).toBeUndefined();
   });
 
-  it('S5: the screen is a Hyprland monitor name and nothing else', () => {
+  it('S6: the screen is a Hyprland monitor name and nothing else', () => {
     expect(parseConfig(`${valid}\n[screen]\nmonitor = "DP-2"\ndefaultPlace = "beside"\n`).screen).toEqual({ monitor: 'DP-2', defaultPlace: 'beside' });
     expect(() => parseConfig(`${valid}\n[screen]\nmonitor = "DP-2; rm -rf"\n`)).toThrow(/monitor name/);
     expect(() => parseConfig(`${valid}\n[screen]\ndefaultPlace = "everywhere"\n`)).toThrow(ConfigError);

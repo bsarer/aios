@@ -235,7 +235,7 @@ describe('hostile mail', () => {
       expect(tools.specs({ untrustedInContext: false }).map((t) => t.name).filter((n) => /config|setting|setup|keyring/i.test(n))).toEqual([]);
 
       expect(sent).toEqual([]);
-      // No app started and no window moved (S5: not even looked up); a link can't even be passed.
+      // No app started and no window moved (S6: not even looked up); a link can't even be passed.
       expect(opened).toEqual([]);
       expect(moved).toEqual([]);
       // No app was built, and no Build card was shown.

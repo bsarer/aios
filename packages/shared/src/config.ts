@@ -164,7 +164,7 @@ export const AiosConfig = z.strictObject({
       kiosk: z.boolean().default(true),
     })
     .default({ port: 7777, kiosk: true }),
-  /** S5: the screen AI OS takes over, and where apps open when the user doesn't say. */
+  /** S6: the screen AI OS takes over, and where apps open when the user doesn't say. */
   screen: z
     .strictObject({
       /** Hyprland output name, e.g. "eDP-1". Empty: the screen the chat window is on. */
@@ -198,8 +198,13 @@ export const AiosConfig = z.strictObject({
       /** The caps a Build card offers to pick from; any above maxBudgetUsd are left out. */
       budgetChoicesUsd: z.array(z.number().positive().max(50)).min(1).max(4).default([1, 2, 5]),
       timeoutMinutes: z.int().min(1).max(60).default(15),
+      /**
+       * S5: every built app gets a "Change this app" button that sends a change request to the
+       * chat as a Change card. Off takes the button out of all built apps at the next start.
+       */
+      changeButton: z.boolean().default(true),
     })
-    .default({ enabled: true, command: 'claude', maxBudgetUsd: 5, budgetChoicesUsd: [1, 2, 5], timeoutMinutes: 15 }),
+    .default({ enabled: true, command: 'claude', maxBudgetUsd: 5, budgetChoicesUsd: [1, 2, 5], timeoutMinutes: 15, changeButton: true }),
 });
 export type AiosConfig = z.infer<typeof AiosConfig>;
 

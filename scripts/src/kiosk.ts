@@ -161,7 +161,7 @@ const lua = (s: string) => JSON.stringify(s);
 
 /**
  * ~/.config/hypr/aios.lua: Hyprland 0.55+ Lua API (hl.window_rule, hl.workspace_rule, hl.on,
- * hl.bind, hl.dsp.exec_cmd). S5: with a monitor (config [screen] monitor), the chat's
+ * hl.bind, hl.dsp.exec_cmd). S6: with a monitor (config [screen] monitor), the chat's
  * workspace 1 lives on that screen and the chat window opens there.
  */
 export function hyprlandModule(o: { launcher: string; autostart: boolean; monitor?: string }): string {
@@ -192,7 +192,7 @@ hl.bind(${lua(OPEN_KEYS)}, hl.dsp.exec_cmd(${open}), { description = "Open AI OS
 `;
 }
 
-/** S5: a screen setup can offer AI OS, from `hyprctl -j monitors`. */
+/** S6: a screen setup can offer AI OS, from `hyprctl -j monitors`. */
 export interface ScreenChoice {
   name: string;
   width: number;
@@ -242,7 +242,7 @@ export interface InstallOptions {
   autostart: boolean;
   /** Edit hyprland.lua. False leaves Hyprland untouched and only prints what to add. */
   hyprland: boolean;
-  /** S5: the screen AI OS owns (config [screen] monitor); empty for the one it opens on. */
+  /** S6: the screen AI OS owns (config [screen] monitor); empty for the one it opens on. */
   monitor?: string;
 }
 

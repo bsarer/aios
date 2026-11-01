@@ -85,7 +85,7 @@ describe('install and uninstall', () => {
   });
 });
 
-describe('S5: the screen AI OS takes over', () => {
+describe('S6: the screen AI OS takes over', () => {
   it('writes the screen into the Lua module, and only a real monitor name', () => {
     const lua = hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false, monitor: 'HDMI-A-1' });
     expect(lua).toContain('hl.workspace_rule({ workspace = "1", monitor = "HDMI-A-1", default = true, persistent = true })');
@@ -139,7 +139,7 @@ package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
     ]);
   });
 
-  it('S5: with a screen chosen, workspace 1 and the chat window live on it', () => {
+  it('S6: with a screen chosen, workspace 1 and the chat window live on it', () => {
     const dir = mkdtempSync(join(tmpdir(), 'aios-lua-'));
     mkdirSync(join(dir, '.config', 'hypr'), { recursive: true });
     writeFileSync(join(dir, '.config', 'hypr', 'aios.lua'), hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false, monitor: 'DP-2' }));

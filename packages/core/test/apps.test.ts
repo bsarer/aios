@@ -334,6 +334,17 @@ describe('chat window', () => {
     expect(modes).toEqual(['orb', 'half', 'orb', 'full']);
   });
 
+  it("opens the orb to half screen when an app's Change button posts a card, and leaves full screen alone", async () => {
+    const { w, modes, log } = windowRig();
+    await w.bringForward('Snake');
+    expect(modes).toEqual([]);
+    await w.appStarting('Snake');
+    await w.bringForward('Snake');
+    await w.bringForward('Snake');
+    expect(modes).toEqual(['orb', 'half']);
+    expect(log().at(-1)).toMatchObject({ kind: 'window', from: 'orb', to: 'half', reason: 'app_change', app: 'Snake' });
+  });
+
   it('comes back full screen when the app closes while the chat is half screen', async () => {
     const { w, hypr, settle } = windowRig();
     await w.appStarting('Firefox');
@@ -524,7 +535,7 @@ describe('shell and the chat window', () => {
   });
 });
 
-// ── S5: one screen for the chat; apps over it, beside it or on another screen ──
+// ── S6: one screen for the chat; apps over it, beside it or on another screen ──
 
 /** The laptop (eDP-1, 1920×1200 in layout pixels) with a 2560×1440 screen to its right and one to its left. */
 const laptop = monitor();

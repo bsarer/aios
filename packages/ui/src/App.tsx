@@ -76,7 +76,7 @@ export function App() {
       <StatusStrip status={state.status} conn={conn} />
       {(mode === 'half' || mode === 'side') && (
         <div className="mx-auto mt-2 flex gap-2" data-testid="window-controls">
-          {/* S5: beside an app the chat has its own half; only half floats over one and can shrink back. */}
+          {/* S6: beside an app the chat has its own half; only half floats over one and can shrink back. */}
           {mode === 'half' && (
             <button type="button" data-testid="window-orb" className="glass rounded-lg px-3 py-1 text-[14px]" onClick={() => send({ type: 'window', mode: 'orb' })}>
               Back to the orb

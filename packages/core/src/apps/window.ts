@@ -14,7 +14,7 @@
  * back full screen. An app that opens no new window (one that was already running and
  * only raised itself) leaves the chat as the orb.
  *
- * S5 makes one screen the chat's own (the home screen: config [screen] monitor, else the one
+ * S6 makes one screen the chat's own (the home screen: config [screen] monitor, else the one
  * the chat is on) and lets an app open in one of three places:
  *
  *   over    on the home screen; the chat becomes the orb, as above.
@@ -39,9 +39,9 @@ const OPEN_WINDOW_MS = 20_000;
 export interface ChatWindowOptions {
   /** Null outside Hyprland: nothing can move, so the chat stays full screen. */
   hypr: HyprIpc | null;
-  /** S5: the monitor the chat owns (config [screen] monitor); empty for the one it is on. */
+  /** S6: the monitor the chat owns (config [screen] monitor); empty for the one it is on. */
   home?: string;
-  /** S5: where an app opens when the user didn't say. auto: another screen if there is one, else over. */
+  /** S6: where an app opens when the user didn't say. auto: another screen if there is one, else over. */
   defaultPlace?: AppPlace | 'auto';
   audit: AuditLog;
   onMode: (mode: WindowMode) => void;
@@ -76,7 +76,7 @@ export function halfRect(m: HyprMonitor): Rect {
   return { x: a.x + a.w - GAP - w, y: a.y + GAP, w, h: a.h - 2 * GAP };
 }
 
-/** S5: the left half, where the chat sits with an app beside it (which gets halfRect). */
+/** S6: the left half, where the chat sits with an app beside it (which gets halfRect). */
 export function sideRect(m: HyprMonitor): Rect {
   const r = halfRect(m);
   return { ...r, x: usableArea(m).x + GAP };
@@ -120,7 +120,7 @@ export function dispatchesFor(mode: WindowMode, win: HyprClient, mon: HyprMonito
   const w = addressOf(win);
   const prop = (p: string, v: string | number) => `hl.dsp.window.set_prop({ prop = "${p}", value = "${v}", ${w} })`;
   const out: string[] = [];
-  // S5: the chat always goes back to its own screen first.
+  // S6: the chat always goes back to its own screen first.
   if (win.monitor !== mon.id && mon.name) out.push(toMonitor(mon, w));
   if (mode === 'full') {
     if (win.pinned) out.push(`hl.dsp.window.pin({ action = "off", ${w} })`);
@@ -154,7 +154,7 @@ export function dispatchesFor(mode: WindowMode, win: HyprClient, mon: HyprMonito
 }
 
 /**
- * S5: the dispatches that put an app's window in a place, in order. Pure, for tests.
+ * S6: the dispatches that put an app's window in a place, in order. Pure, for tests.
  * `target` is the other screen for "screen"; `unfloat` drops the floating that "beside" gave it.
  */
 export function placeDispatches(place: AppPlace, app: HyprClient, home: HyprMonitor, o: { target?: HyprMonitor; unfloat?: boolean } = {}): string[] {
@@ -241,7 +241,15 @@ export class ChatWindow {
   }
 
   /**
-   * S5: where an app should go, from what the model asked (or the default), checked against
+   * S5: an app's Change button posted a card. The orb opens to half screen beside the app so the
+   * card can be clicked; a full-screen chat already shows it.
+   */
+  async bringForward(app: string): Promise<void> {
+    if (this.current === 'orb') await this.set('half', 'app_change', app);
+  }
+
+  /**
+   * S6: where an app should go, from what the model asked (or the default), checked against
    * the screens connected now. A string is an error to hand back to the model.
    */
   async placement(want?: AppPlace, screen?: string): Promise<Placement | string> {
@@ -293,7 +301,7 @@ export class ChatWindow {
     if (!this.homeApps()) await this.set('full', 'app_failed');
   }
 
-  /** S5: the screens and what is open on each, for screens_list. */
+  /** S6: the screens and what is open on each, for screens_list. */
   async screens(): Promise<ScreenInfo[]> {
     const hypr = this.o.hypr;
     if (!hypr) return [];
@@ -318,7 +326,7 @@ export class ChatWindow {
   }
 
   /**
-   * S5: moves an app's open window to a place. The window is one the chat started under one of
+   * S6: moves an app's open window to a place. The window is one the chat started under one of
    * `match.names`, else one whose class is one of `match.classes`, the most recently used first.
    * Returns the app's name; throws when there is no such window.
    */

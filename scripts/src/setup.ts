@@ -58,7 +58,7 @@ async function writeConfig(path: string, config: AiosConfig): Promise<void> {
 }
 
 /**
- * S5: with more than one screen, ask which one AI OS takes over and keep the answer in
+ * S6: with more than one screen, ask which one AI OS takes over and keep the answer in
  * config [screen] monitor. With one screen, or outside Hyprland, nothing is asked.
  */
 async function chooseScreen(config: AiosConfig, p: Prompter, save: (c: AiosConfig) => Promise<void>): Promise<AiosConfig> {

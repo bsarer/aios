@@ -6,6 +6,10 @@
  * - `hyprctl -j clients` / `hyprctl -j monitors` print JSON; window addresses look like 0x55d0c1f4a2b0.
  * - With a Lua config, `hyprctl dispatch <expr>` evaluates `hl.dispatch(<expr>)` and prints
  *   "ok" or an error, with exit code 0 either way, so the text is what tells.
+ * - S5: `hl.dsp.window.move({ monitor = "DP-2", window = … })` moves a window to that monitor's
+ *   current workspace and `hl.dsp.focus({ monitor = "DP-2" })` focuses a monitor (Lua bindings,
+ *   LuaBindingsDispatchers.cpp, November 2026); monitors are named by their output name, as
+ *   `hyprctl -j monitors` prints it.
  * - The event socket, $XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock,
  *   sends lines like `openwindow>>55d0c1f4a2b0,1,firefox,Mozilla Firefox` and
  *   `closewindow>>55d0c1f4a2b0` (address without 0x).
@@ -23,11 +27,21 @@ export const HyprClient = z.looseObject({
   /** 0 none, 1 maximized, 2 fullscreen. */
   fullscreen: z.number(),
   monitor: z.number(),
+  /** S5: the workspace it is on; id is negative for special workspaces. */
+  workspace: z.looseObject({ id: z.number(), name: z.string() }).optional(),
+  /** S5: 0 is the window focused last; used to pick between two windows of one app. */
+  focusHistoryID: z.number().optional(),
+  mapped: z.boolean().optional(),
+  hidden: z.boolean().optional(),
 });
 export type HyprClient = z.infer<typeof HyprClient>;
 
 export const HyprMonitor = z.looseObject({
   id: z.number(),
+  /** S5: the output name dispatches use, e.g. eDP-1. */
+  name: z.string().default(''),
+  /** S5: switched off in the monitor settings; nothing goes there. */
+  disabled: z.boolean().default(false),
   width: z.number(),
   height: z.number(),
   x: z.number(),

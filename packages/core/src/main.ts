@@ -171,6 +171,9 @@ async function main(): Promise<void> {
   });
   const chatWindow = new ChatWindow({
     hypr: hyprlandIpc(),
+    // S5: the screen the chat owns, and where apps open when the user doesn't say.
+    home: config.screen.monitor,
+    defaultPlace: config.screen.defaultPlace,
     audit,
     // The shell is created below; the UI hears about moves once it exists.
     onMode: (mode) => shell?.broadcast({ type: 'window', mode }),

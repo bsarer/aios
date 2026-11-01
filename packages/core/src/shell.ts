@@ -9,6 +9,7 @@ import { type ChatItem, type ClientMessage, type ServerEvent, type Status, type 
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
+import { type FileIndexer, indexStatusText } from './files/indexer.js';
 import { cleanFact } from './memory/files.js';
 import type { CalendarActions } from './calendar/actions.js';
 import type { DocActions } from './docs/actions.js';
@@ -50,6 +51,8 @@ export interface ShellOptions {
   docActions?: DocActions;
   /** File change cards and their clicks (F1). Without it, file_change messages are ignored. */
   fileActions?: FileActions;
+  /** The file index (F2). Without it, /reindex says file search is off. */
+  fileIndex?: Pick<FileIndexer, 'reindex' | 'status'>;
   /** Save buttons on attachment cards (F1). Without it, attachment_save is ignored. */
   attachments?: Pick<AttachmentFiles, 'save'>;
   /** Where the chat window sits (S3). Without it, window messages are ignored and the chat stays full screen. */
@@ -379,6 +382,12 @@ export class Shell {
       case 'export':
       case 'remember':
         return this.memoryCommand(cmd, say);
+      case 'reindex': {
+        const idx = this.o.fileIndex;
+        if (!idx) return say('File search is off. Turn it on with index = true under [files] in your config.');
+        void idx.reindex();
+        return say(`Reading your files again in the background. ${indexStatusText(idx.status())}`);
+      }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);
     }

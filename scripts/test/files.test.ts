@@ -339,6 +339,6 @@ smtp = { host = "127.0.0.1", port = 3025, tls = false }
 describe('config', () => {
   it('defaults to Documents and Downloads, saving to Downloads', () => {
     const c = parseConfig(BASE_CONFIG);
-    expect(c.files).toEqual({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads' });
+    expect(c.files).toEqual({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 });
   });
 });

@@ -51,6 +51,13 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
   const body = JSON.parse(raw) as { stream?: boolean; response_format?: unknown; messages: { role: string; content: string | null }[] };
   const last = body.messages.at(-1)!;
   const lastUser = [...body.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  if (body.response_format && /^Describe this file\./.test(last.content ?? '')) {
+    // F2: the file summary worker. The description repeats the start of the file. It costs nothing
+    // here, so the cost checks below don't depend on when the background index runs.
+    const start = (last.content ?? '').split('Start of the file:\n')[1]?.replace(/<\/untrusted>[^]*$/, '').replace(/\s+/g, ' ').trim().slice(0, 200) ?? '';
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return void res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ summary: `Mock: ${start || 'a file'}`, keywords: ['mock'] }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 30, cost: 0 } }));
+  }
   if (body.response_format) {
     // Triage: one item per wrapped message; the first is urgent, the rest low priority.
     const ids = [...(last.content ?? '').matchAll(/id="([^"]+)"/g)].map((m) => m[1]!);
@@ -181,6 +188,16 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
           ? ['note_create', { name: 'packing', text: 'passport\ncharger' }]
           : null
       : null;
+  if (last.role === 'user' && /^find the file about the office lease$/i.test(lastUser)) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_search', function: { name: 'files_search', arguments: JSON.stringify({ query: 'office lease' }) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /^(\d+ files?|No indexed file)/.test(last.content ?? '')) {
+    const hits = (last.content ?? '').split('\n').filter((l) => l.startsWith('- ')).join('\n');
+    chunk(res, { choices: [{ delta: { content: hits ? `Found:\n${hits}` : 'Nothing found.' } }] });
+    return finish(0.0004);
+  }
   if (fileCall) {
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_file', function: { name: fileCall[0], arguments: JSON.stringify(fileCall[1]) } }] } }] });
     chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
@@ -573,7 +590,7 @@ async function main(): Promise<void> {
     check('/pause shows paused in status strip', await waitFor(async () => (await agentState.innerText()).includes('paused')));
     await input.fill('/cost');
     await input.press('Enter');
-    check('/cost reports spend', await waitFor(async () => /Today: \$0\.\d{4} across 4 model calls/.test(await page.locator('[data-kind="notice"]').last().innerText())));
+    check('/cost reports spend', await waitFor(async () => /Today: \$0\.\d{4} across \d+ model calls/.test(await page.locator('[data-kind="notice"]').last().innerText())));
     await shot(page, '5-commands');
     await input.fill('/resume');
     await input.press('Enter');
@@ -881,6 +898,13 @@ async function main(): Promise<void> {
     check('the note shows a card with its text', await waitFor(async () => (await page.locator('[data-kind="file_change"]').count()) === 2 && (await noteCard.getByTestId('file-change-preview').innerText()).includes('charger'), 15_000));
     await noteCard.getByTestId('file-change-discard').click();
     check('Discard writes nothing', await waitFor(async () => (await noteCard.getAttribute('data-state')) === 'discarded') && !existsSync(join(docs.documents, 'packing.txt')));
+    // 14. File search (F2): the index found the files at start and the worker described them.
+    await input.fill('find the file about the office lease');
+    await input.press('Enter');
+    check('files_search finds the report by what it says', await waitFor(async () => (await lastAssistant().innerText()).includes('report.docx'), 15_000));
+    await input.fill('/reindex');
+    await input.press('Enter');
+    check('/reindex says how far the index is', await waitFor(async () => (await page.locator('body').innerText()).includes('Reading your files again in the background'), 10_000));
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

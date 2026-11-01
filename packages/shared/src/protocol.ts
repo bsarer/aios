@@ -174,15 +174,17 @@ export const ChatItem = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     kind: z.literal('file_change'),
-    /** F1: renaming or copying a file, a new folder or a new note, waiting for a click. */
+    /** F1: renaming or copying a file, a new folder or a new note, waiting for a click. F2: tags for a file. */
     id: z.string(),
-    change: z.enum(['rename', 'copy', 'folder', 'note']),
+    change: z.enum(['rename', 'copy', 'folder', 'note', 'tag']),
     /** The file it starts from (rename, copy), as the user would write it. Names can come from anyone: plain text only. */
     from: z.string().optional(),
     /** What the click creates or renames to. */
     to: z.string(),
     /** The start of a new note's text, as written by the model: plain text only. */
     preview: z.string().optional(),
+    /** F2: the file's tags after the click (tag). */
+    tags: z.array(z.string()).optional(),
     warnings: z.array(z.string()),
     hash: z.string(),
     state: z.enum(['pending', 'running', 'done', 'discarded', 'failed']),

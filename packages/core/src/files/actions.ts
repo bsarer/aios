@@ -26,7 +26,9 @@ export type FileChangeSpec =
   | { op: 'rename'; from: { path: string; mtimeMs: number; bytes: number }; to: string }
   | { op: 'copy'; from: { path: string; mtimeMs: number; bytes: number }; to: string }
   | { op: 'folder'; to: string }
-  | { op: 'note'; to: string; content: string };
+  | { op: 'note'; to: string; content: string }
+  /** F2: the file's tags in the index become exactly these. Changes nothing on disk. */
+  | { op: 'tag'; to: string; tags: string[] };
 
 /** What happened, for whoever keeps track of files (F2's index). */
 export type FileChanged = { op: 'renamed'; from: string; to: string } | { op: 'copied'; from: string; to: string } | { op: 'created'; path: string; folder: boolean };
@@ -49,13 +51,15 @@ export interface FileActionsOptions {
   audit: AuditLog;
   show: (item: ChatItem, isNew: boolean) => void;
   onChanged?: (change: FileChanged) => void;
+  /** F2: sets a file's tags in the index; false when the file isn't indexed. Without it, tag cards fail. */
+  setTags?: (path: string, tags: string[]) => boolean;
   clock?: () => number;
   newId?: () => string;
 }
 
 export type FileConfirmResult = 'done' | 'failed' | 'refused';
 
-const TOOL: Record<FileChangeSpec['op'], string> = { rename: 'file_rename', copy: 'file_copy', folder: 'folder_create', note: 'note_create' };
+const TOOL: Record<FileChangeSpec['op'], string> = { rename: 'file_rename', copy: 'file_copy', folder: 'folder_create', note: 'note_create', tag: 'file_tag' };
 
 class ChangeError extends Error {}
 
@@ -105,6 +109,7 @@ export class FileActions {
       ...(spec.op === 'rename' || spec.op === 'copy' ? { from: this.o.roots.display(spec.from.path) } : {}),
       to: this.o.roots.display(spec.to),
       ...(spec.op === 'note' ? { preview: spec.content.length > 1200 ? `${spec.content.slice(0, 1200)}…` : spec.content } : {}),
+      ...(spec.op === 'tag' ? { tags: spec.tags } : {}),
       warnings,
     };
     const specJson = JSON.stringify(spec);
@@ -114,7 +119,7 @@ export class FileActions {
     this.db
       .prepare(`INSERT INTO file_actions (id, spec, card, hash, state, result, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', NULL, ?, ?)`)
       .run(id, specJson, cardJson, hash, now, now);
-    this.o.audit.append({ kind: 'files', event: 'proposed', cardId: id, op: spec.op, from: 'from' in spec ? spec.from.path : null, to: spec.to, chars: spec.op === 'note' ? spec.content.length : undefined, warnings: warnings.length });
+    this.o.audit.append({ kind: 'files', event: 'proposed', cardId: id, op: spec.op, from: 'from' in spec ? spec.from.path : null, to: spec.to, chars: spec.op === 'note' ? spec.content.length : undefined, tags: spec.op === 'tag' ? spec.tags.length : undefined, warnings: warnings.length });
     const item = this.item(this.row(id)!);
     this.o.show(item, true);
     return item;
@@ -187,6 +192,12 @@ export class FileActions {
 
   private async run(spec: FileChangeSpec): Promise<string> {
     const to = this.o.roots.display(spec.to);
+    if (spec.op === 'tag') {
+      const f = await this.o.roots.resolve(spec.to, 'file');
+      if (f.path !== spec.to) throw new ChangeError('that file moved since this card was made. Ask again.');
+      if (!this.o.setTags?.(spec.to, spec.tags)) throw new ChangeError("that file isn't in the file index yet. Try again in a minute.");
+      return spec.tags.length ? `✓ Tagged ${to}: ${spec.tags.join(', ')}.` : `✓ Removed the tags from ${to}.`;
+    }
     await this.folderAllowed(spec.to);
     switch (spec.op) {
       case 'rename':

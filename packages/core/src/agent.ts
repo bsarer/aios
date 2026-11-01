@@ -26,7 +26,7 @@ export const SETTINGS_BLOCKED_NOTE =
 
 /** D1: tools whose results carry text from a Word or Excel file. */
 /** Tools whose output is text from files on disk (D1 documents, F1 files): source "document". */
-const isDocumentTool = (name: string) => name === 'docs_list' || name.startsWith('doc_') || name.startsWith('sheet_') || name === 'files_list' || name.startsWith('file_');
+const isDocumentTool = (name: string) => name === 'docs_list' || name.startsWith('doc_') || name.startsWith('sheet_') || name === 'files_list' || name === 'files_search' || name.startsWith('file_');
 
 const UNTRUSTED_SOURCE = /<untrusted source="([a-z]+)"/g;
 

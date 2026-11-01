@@ -19,4 +19,5 @@
 - `pnpm calendar:login` signs in to Google Calendar (C1). Tests never do: they use the pretend Google Calendar in `fixtures/calendar.ts`.
 - Word and Excel files (D1 read, D2 edit) go through WordCraft's and GridCraft's CLIs. Tests never run the real apps: they use the pretend CLIs in `fixtures/documents.ts`. D2 edits only run from a hash-checked click and write a new file unless the user's own words ask to overwrite (then after a backup); change types map to app commands only in `packages/core/src/docs/recipes.ts`.
 - Files (F1) are only those inside `[files] roots`, resolved in `packages/core/src/files/roots.ts`; changes run only from a hash-checked click (`files/actions.ts`) and never replace or delete a file. Tests use temporary folders, never the real home folder.
+- The file summary worker (F2, `files/summarizer.ts`) has no tools, like triage, with a test; file descriptions are stored as plain text and shown only inside <untrusted> tags.
 - Test mailbox: `john@aios.test` / `test-only-password` on IMAP 127.0.0.1:3143, SMTP 127.0.0.1:3025 (plain, local only).

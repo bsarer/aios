@@ -59,3 +59,8 @@ export * from './docs/viewer.js';
 export * from './files/actions.js';
 export * from './files/roots.js';
 export * from './files/tools.js';
+export * from './files/catalog.js';
+export * from './files/facts.js';
+export * from './files/indexer.js';
+export * from './files/search-tools.js';
+export * from './files/summarizer.js';

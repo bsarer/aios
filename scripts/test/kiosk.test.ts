@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { REQUIRE_LINE, addRequire, hyprlandModule, installKiosk, kioskPaths, launcherScript, removeRequire, uninstallKiosk, unitFile } from '../src/kiosk.js';
+import { REQUIRE_LINE, addRequire, hyprlandModule, installKiosk, kioskPaths, launcherScript, parseMonitors, removeRequire, uninstallKiosk, unitFile } from '../src/kiosk.js';
 
 const has = (cmd: string) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
 
@@ -85,11 +85,37 @@ describe('install and uninstall', () => {
   });
 });
 
+describe('S5: the screen AI OS takes over', () => {
+  it('writes the screen into the Lua module, and only a real monitor name', () => {
+    const lua = hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false, monitor: 'HDMI-A-1' });
+    expect(lua).toContain('hl.workspace_rule({ workspace = "1", monitor = "HDMI-A-1", default = true, persistent = true })');
+    expect(lua).toContain('  workspace = "1",\n  monitor = "HDMI-A-1",\n})');
+    expect(hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false })).not.toMatch(/monitor|workspace_rule/);
+    expect(() => hyprlandModule({ launcher: '/x', autostart: false, monitor: 'DP-2") os.execute("x' })).toThrow(/not a monitor name/);
+  });
+
+  it('offers only enabled monitors with names Hyprland takes', () => {
+    const json = JSON.stringify([
+      { id: 0, name: 'eDP-1', width: 2880, height: 1800, focused: true, disabled: false },
+      { id: 1, name: 'DP-2', width: 2560, height: 1440, focused: false },
+      { id: 2, name: 'HDMI-A-1', width: 1920, height: 1080, disabled: true },
+      { id: 3, name: 'bad name"', width: 1, height: 1 },
+    ]);
+    expect(parseMonitors(json)).toEqual([
+      { name: 'eDP-1', width: 2880, height: 1800, focused: true },
+      { name: 'DP-2', width: 2560, height: 1440, focused: false },
+    ]);
+    expect(parseMonitors('not json')).toEqual([]);
+    expect(parseMonitors('{"name":"eDP-1"}')).toEqual([]);
+  });
+});
+
 describe.skipIf(!has('lua5.4'))('generated Lua against a stub of the Hyprland API', () => {
   const STUB = `
 calls = {}
 hl = {
-  window_rule = function(r) table.insert(calls, "rule " .. r.name .. " " .. r.match.class .. " fullscreen=" .. tostring(r.fullscreen) .. " ws=" .. r.workspace) end,
+  window_rule = function(r) table.insert(calls, "rule " .. r.name .. " " .. r.match.class .. " fullscreen=" .. tostring(r.fullscreen) .. " ws=" .. r.workspace .. (r.monitor and (" mon=" .. r.monitor) or "")) end,
+  workspace_rule = function(r) table.insert(calls, "wsrule " .. r.workspace .. " mon=" .. r.monitor .. " default=" .. tostring(r.default) .. " persistent=" .. tostring(r.persistent)) end,
   on = function(ev, fn) table.insert(calls, "on " .. ev); fn() end,
   exec_cmd = function(c) table.insert(calls, "exec " .. c) end,
   bind = function(keys, d, o) table.insert(calls, "bind " .. keys .. " -> " .. d .. " (" .. o.description .. ")") end,
@@ -110,6 +136,16 @@ package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
       'exec /home/j/.local/bin/aios-kiosk open',
       'bind SUPER + SHIFT + ESCAPE -> exec_cmd:/home/j/.local/bin/aios-kiosk exit (Exit AI OS)',
       'bind SUPER + SHIFT + H -> exec_cmd:/home/j/.local/bin/aios-kiosk open (Open AI OS)',
+    ]);
+  });
+
+  it('S5: with a screen chosen, workspace 1 and the chat window live on it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aios-lua-'));
+    mkdirSync(join(dir, '.config', 'hypr'), { recursive: true });
+    writeFileSync(join(dir, '.config', 'hypr', 'aios.lua'), hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false, monitor: 'DP-2' }));
+    expect(runLua(dir, REQUIRE_LINE).slice(0, 2)).toEqual([
+      'wsrule 1 mon=DP-2 default=true persistent=true',
+      'rule aios-kiosk ^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$ fullscreen=true ws=1 mon=DP-2',
     ]);
   });
 

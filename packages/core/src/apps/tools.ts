@@ -3,9 +3,14 @@
  * the user's own message, is rate limited and refused while paused, and while an email is
  * in view it becomes a card the user confirms (systemTools wires that). It takes only an
  * app from the installed list: no command, file, link or option ever reaches the launcher.
+ *
+ * S5: open_app takes a place (over, beside, screen) and a screen; screens_list (read) shows
+ * the screens and the apps open on each; move_app (device, like open_app) moves an open
+ * app's window between those places. Only window classes are shown, never window titles,
+ * which web pages and documents set.
  */
 import { randomUUID } from 'node:crypto';
-import type { ChatItem } from '@aios/shared';
+import type { AppPlace, ChatItem } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import { StoppedError, type SystemActions } from '../system/actions.js';
 import { toolByName } from '../tools/definitions.js';
@@ -14,7 +19,7 @@ import { type AppBuilder, BuildError, type ClaudeLogin, appDesktopId, appName, a
 import type { BuildLog } from './history.js';
 import { type DesktopApp, findApp, searchApps, shortId } from './desktop.js';
 import type { Launch } from './launcher.js';
-import type { ChatWindow } from './window.js';
+import type { ChatWindow, Placement, ScreenInfo } from './window.js';
 
 const MAX_LISTED = 80;
 const q = (s: string) => `“${s}”`;
@@ -22,7 +27,44 @@ const q = (s: string) => `“${s}”`;
 export interface AppToolsOptions {
   scan: () => Promise<DesktopApp[]>;
   launch: Launch;
-  window: Pick<ChatWindow, 'appStarting' | 'appFailed'>;
+  window: Pick<ChatWindow, 'appStarting' | 'appFailed' | 'placement' | 'screens' | 'moveApp'>;
+}
+
+/** A window class as it may be shown: letters, digits and a few marks, at most 40 characters. */
+export const cleanClass = (c: string) => c.replace(/[^A-Za-z0-9._ -]/g, '').trim().slice(0, 40);
+
+/** What to call an open window: the name the chat started it under, an installed app with its class as id, or the class. */
+function windowLabel(w: ScreenInfo['windows'][number], apps: DesktopApp[]): string {
+  if (w.app) return w.place === 'beside' ? `${w.app} (beside the chat)` : w.app;
+  const c = w.className.toLowerCase();
+  const app = apps.find((a) => shortId(a.id).toLowerCase() === c);
+  return app?.name ?? (cleanClass(w.className) || 'a window without a name');
+}
+
+const SIDE: Record<string, string> = { left: 'to the left', right: 'to the right', above: 'above', below: 'below' };
+
+function screenLine(s: ScreenInfo, apps: DesktopApp[]): string {
+  const where = s.home ? "the chat's own screen" : s.position ? SIDE[s.position] : 'another screen';
+  const labels = new Map<string, number>();
+  for (const w of s.windows) {
+    const l = windowLabel(w, apps);
+    labels.set(l, (labels.get(l) ?? 0) + 1);
+  }
+  const open = [...labels].slice(0, 15).map(([l, n]) => (n > 1 ? `${l} (${n} windows)` : l));
+  return `- ${s.name || 'unnamed'}, ${where}${s.focused ? ', focused' : ''}: ${s.w}×${s.h}. ${open.length ? `Open: ${open.join(', ')}.` : 'Nothing open.'}`;
+}
+
+/** The one-line answer after an app opened somewhere. */
+function placedText(name: string, at: Placement, started: boolean): string {
+  const verb = started ? 'Started' : 'Moved';
+  switch (at.place) {
+    case 'over':
+      return `${verb} ${name}${started ? '' : ' onto the chat\'s screen'}. The chat is now the red orb at the top of the screen; it comes back full screen when ${name} is closed, and the user can click the orb to talk to you meanwhile. Say it in one short line.`;
+    case 'beside':
+      return `${verb} ${name} beside the chat: the chat is on the left half of its screen and ${name} on the right. The chat comes back full screen when ${name} is closed. Say it in one short line.`;
+    case 'screen':
+      return `${verb} ${name} ${started ? 'on' : 'to'} screen ${at.screen ?? ''}; the chat stays on its own screen. Say it in one short line.`;
+  }
 }
 
 const line = (a: DesktopApp) => `- ${a.name} (id: ${shortId(a.id)})${a.terminal ? ', runs in a terminal' : ''}${a.comment ? `: ${a.comment}` : ''}`;
@@ -46,11 +88,13 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
       def: toolByName('open_app')!,
       label: 'Opening the app…',
       handler: async (args) => {
-        const want = (args as { app: string }).app;
+        const { app: want, place, screen } = args as { app: string; place?: AppPlace; screen?: string };
         const found = findApp(await o.scan(), want);
         if (!found) return `Error: no installed app is called ${q(want)}. Call apps_list to find its id.`;
         if (Array.isArray(found)) return `Error: several apps are called ${q(want)}: ${found.map((a) => shortId(a.id)).join(', ')}. Ask the user which one, then use its id.`;
-        await o.window.appStarting(found.name);
+        const at = await o.window.placement(place, screen);
+        if (typeof at === 'string') return at;
+        await o.window.appStarting(found.name, at);
         try {
           await o.launch(found.id);
         } catch (err) {
@@ -58,9 +102,39 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
           throw new Error(`${found.name} didn't start: ${(err as Error).message}`);
         }
         return {
-          content: `Started ${found.name}. The chat is now the red orb at the top of the screen; it comes back full screen when ${found.name} is closed, and the user can click the orb to talk to you meanwhile. Say it in one short line.`,
-          audit: { app: found.id, name: found.name },
+          content: placedText(found.name, at, true),
+          audit: { app: found.id, name: found.name, place: at.place, ...(at.screen ? { screen: at.screen } : {}) },
         };
+      },
+    },
+    {
+      def: toolByName('screens_list')!,
+      label: 'Looking at your screens…',
+      handler: async () => {
+        const screens = await o.window.screens();
+        if (!screens.length) return "Screens are unknown: AI OS isn't running inside Hyprland here, so apps can only open over the chat.";
+        const apps = await o.scan();
+        const lines = screens.map((s) => screenLine(s, apps));
+        return `${screens.length} screen${screens.length === 1 ? '' : 's'}:\n${lines.join('\n')}${screens.length === 1 ? '\nWith one screen, apps open over the chat or beside it.' : ''}`;
+      },
+    },
+    {
+      def: toolByName('move_app')!,
+      label: 'Moving the app…',
+      handler: async (args) => {
+        const { app: want, place, screen } = args as { app: string; place: AppPlace; screen?: string };
+        const at = await o.window.placement(place, screen);
+        if (typeof at === 'string') return at;
+        const found = findApp(await o.scan(), want);
+        const installed = found ? (Array.isArray(found) ? found : [found]) : [];
+        const match = { names: [want.trim(), ...installed.map((a) => a.name)], classes: [want.trim(), ...installed.map((a) => shortId(a.id))] };
+        let name: string;
+        try {
+          name = await o.window.moveApp(match, at);
+        } catch (err) {
+          return `Error: ${(err as Error).message}. Call screens_list to see what is open where.`;
+        }
+        return { content: placedText(name, at, false), audit: { app: cleanClass(name), place: at.place, ...(at.screen ? { screen: at.screen } : {}) } };
       },
     },
   ];

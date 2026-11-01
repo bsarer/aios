@@ -23,6 +23,10 @@ import { editTools } from './docs/edit.js';
 import { DocEngine } from './docs/engine.js';
 import { FileActions } from './files/actions.js';
 import { FileRoots } from './files/roots.js';
+import { FileCatalog } from './files/catalog.js';
+import { FactReader } from './files/facts.js';
+import { FileIndexer } from './files/indexer.js';
+import { fileSearchTools } from './files/search-tools.js';
 import { fileTools } from './files/tools.js';
 import { DocFiles } from './docs/files.js';
 import { createDocumentOpener } from './docs/open.js';
@@ -104,6 +108,7 @@ async function main(): Promise<void> {
   // The shell is created below; cards only appear once it exists.
   // F1: the folders files may be managed in. Word and Excel tools see them too.
   const fileRoots = config.files.enabled ? new FileRoots({ roots: config.files.roots }) : undefined;
+  let fileIndexer: FileIndexer | undefined;
   const attachmentFiles = new AttachmentFiles({
     store,
     mail: mailClient,
@@ -111,6 +116,7 @@ async function main(): Promise<void> {
     post: (item) => shell?.agent.post(item),
     patch: (item) => shell?.patchItem(item),
     ...(fileRoots ? { roots: fileRoots, saveTo: config.files.saveTo } : {}),
+    onSaved: () => fileIndexer?.soon(),
   });
   for (const t of attachmentTools({ mail: mailClient, files: attachmentFiles })) tools.register(t);
   const outbox = new ImapSmtpOutbox(mailClient, {
@@ -174,6 +180,7 @@ async function main(): Promise<void> {
   const apps = appTools({ scan: () => scanApps(), launch, window: chatWindow });
   // D1: Word and Excel files, read through WordCraft's and GridCraft's command-line tools.
   let documentFiles: DocumentFiles | undefined;
+  let docEngine: DocEngine | undefined;
   let docFilesForShow: DocFiles | undefined;
   let docActions: DocActions | undefined;
   if (config.docs.enabled) {
@@ -181,6 +188,7 @@ async function main(): Promise<void> {
     const docFiles = new DocFiles({ roots: [...new Set([...d.roots, ...(config.files.enabled ? config.files.roots : [])])] });
     docFilesForShow = docFiles;
     const engine = new DocEngine({ wordCli: d.wordCli, sheetCli: d.sheetCli, timeoutMs: d.timeoutSeconds * 1000 });
+    docEngine = engine;
     documentFiles = new DocumentFiles({ store, files: docFiles, engine, audit, post: (item) => shell?.agent.post(item) });
     const open = createDocumentOpener({ word: d.wordApp, sheet: d.sheetApp });
     // doc_open_app is device tier like open_app, so it shares open_app's confirm card.
@@ -200,7 +208,31 @@ async function main(): Promise<void> {
   // F1: managing files. Changes go on a card; the click renames, copies or creates, never replacing anything.
   let fileActions: FileActions | undefined;
   if (fileRoots) {
-    fileActions = new FileActions({ store, roots: fileRoots, audit, show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)) });
+    // F2: the file index for files_search, kept current by the indexer.
+    const catalog = config.files.index ? new FileCatalog(store) : undefined;
+    if (catalog) {
+      fileIndexer = new FileIndexer({
+        roots: fileRoots,
+        catalog,
+        facts: new FactReader({ engine: docEngine }),
+        model: config.files.summaries ? model : undefined,
+        store,
+        audit,
+        timeZone: config.user.timezone,
+        summariesPerDay: config.files.summariesPerDay,
+        maxFiles: config.files.maxIndexedFiles,
+      });
+    }
+    const indexer = fileIndexer;
+    fileActions = new FileActions({
+      store,
+      roots: fileRoots,
+      audit,
+      show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
+      onChanged: (c) => (c.op === 'renamed' ? void indexer?.renamed(c.from, c.to) : indexer?.soon()),
+      ...(catalog ? { setTags: (path: string, tags: string[]) => catalog.setTags(path, tags) } : {}),
+    });
+    if (catalog && indexer) for (const t of fileSearchTools({ roots: fileRoots, catalog, indexer, actions: fileActions, timeZone: config.user.timezone })) tools.register(t);
     const showDocument = documentFiles && docFilesForShow
       ? async (path: string) => {
           const card = documentFiles!.show(await docFilesForShow!.resolve(path));
@@ -266,6 +298,7 @@ async function main(): Promise<void> {
     ...(calendarActions ? { calendarActions } : {}),
     ...(docActions ? { docActions } : {}),
     ...(fileActions ? { fileActions } : {}),
+    ...(fileIndexer ? { fileIndex: fileIndexer } : {}),
     attachments: attachmentFiles,
     chatWindow,
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
@@ -317,6 +350,8 @@ async function main(): Promise<void> {
   calendarActions?.recover();
   docActions?.recover();
   fileActions?.recover();
+  // F2: the first scan runs in the background; search works on what it has found so far.
+  void fileIndexer?.start().catch((err: unknown) => audit.append({ kind: 'files', event: 'index_error', error: (err as Error).message }));
   shell.greet();
   // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
   await keyring.require(config.models.chat.apiKeyRef).catch((err: unknown) => {

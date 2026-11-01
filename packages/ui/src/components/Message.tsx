@@ -519,6 +519,7 @@ const FILE_CHANGE_TEXT: Record<FileChangeItem['change'], { heading: string; conf
   copy: { heading: 'Copy this file?', confirm: 'Copy' },
   folder: { heading: 'Create this folder?', confirm: 'Create' },
   note: { heading: 'Create this file?', confirm: 'Create' },
+  tag: { heading: 'Change the tags of this file?', confirm: 'Save tags' },
 };
 
 const FILE_CHANGE_STATE_TEXT: Record<FileChangeItem['state'], string> = { pending: '', running: 'Working…', done: '✓ Done', discarded: 'Discarded. Nothing changed.', failed: '' };
@@ -544,7 +545,8 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
       </div>
       <div className="mt-1 space-y-0.5">
         {item.from !== undefined && row('From', item.from, 'file-change-from')}
-        {row(item.from !== undefined ? 'To' : 'New', item.to, 'file-change-to')}
+        {row(item.change === 'tag' ? 'File' : item.from !== undefined ? 'To' : 'New', item.to, 'file-change-to')}
+        {item.tags !== undefined && row('Tags', item.tags.length ? item.tags.join(', ') : '(none)', 'file-change-tags')}
       </div>
       {item.preview !== undefined && (
         <div data-testid="file-change-preview" className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md px-2 py-1 text-[14px]" style={{ background: 'var(--panel)' }}>

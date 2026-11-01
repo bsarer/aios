@@ -172,6 +172,24 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: { content: 'The change is on a card; click Save as new file to keep it.' } }] });
     return finish(0.0004);
   }
+  // F1: file changes wait on a card.
+  const fileCall =
+    last.role === 'user'
+      ? /^rename shopping\.txt to groceries\.txt$/i.test(lastUser)
+        ? ['file_rename', { path: 'shopping.txt', newName: 'groceries.txt' }]
+        : /^write a note called packing saying passport and charger$/i.test(lastUser)
+          ? ['note_create', { name: 'packing', text: 'passport\ncharger' }]
+          : null
+      : null;
+  if (fileCall) {
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_file', function: { name: fileCall[0], arguments: JSON.stringify(fileCall[1]) } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
+  if (last.role === 'tool' && /^A card for the (rename|copy|new folder|new file) is in the chat/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'The change is on a card; click it to go ahead.' } }] });
+    return finish(0.0004);
+  }
   if (last.role === 'tool' && /^A card for the (Word|Excel) file/.test(last.content ?? '')) {
     chunk(res, { choices: [{ delta: { content: 'The card is in the chat; open it there.' } }] });
     return finish(0.0004);
@@ -453,6 +471,7 @@ async function main(): Promise<void> {
       `imap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n` +
       `[calendar]\nclientId = "${FAKE_CLIENT_ID}"\napiBaseUrl = "${gcal.apiBaseUrl}"\ntokenUrl = "${gcal.tokenUrl}"\n` +
       `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
+      `[files]\nroots = ["${docs.documents}"]\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -844,6 +863,24 @@ async function main(): Promise<void> {
     check('Save writes the new file', await waitFor(async () => (await changeCard.getAttribute('data-state')) === 'done', 15_000));
     check('the new file has the change', readFileSync(join(docs.documents, 'report-edited.docx')).toString('utf8').includes('30 November'));
     check('the original is unchanged', readFileSync(join(docs.documents, 'report.docx')).equals(reportBefore));
+    // 13. Files (F1): a rename and a new note each wait on a card; nothing changes before the click.
+    writeFileSync(join(docs.documents, 'shopping.txt'), 'milk\neggs\n');
+    await input.fill('rename shopping.txt to groceries.txt');
+    await input.press('Enter');
+    const renameCard = page.locator('[data-kind="file_change"]').last();
+    check('the rename shows a card', await waitFor(async () => (await renameCard.count()) === 1 && (await renameCard.getAttribute('data-state')) === 'pending', 15_000));
+    check('the card names both files', (await renameCard.getByTestId('file-change-from').innerText()).endsWith('shopping.txt') && (await renameCard.getByTestId('file-change-to').innerText()).endsWith('groceries.txt'));
+    check('nothing is renamed before the click', existsSync(join(docs.documents, 'shopping.txt')) && !existsSync(join(docs.documents, 'groceries.txt')));
+    await shot(page, '16-file-rename');
+    await renameCard.getByTestId('file-change-confirm').click();
+    check('the click renames the file', await waitFor(async () => (await renameCard.getAttribute('data-state')) === 'done', 15_000));
+    check('only the new name is left', !existsSync(join(docs.documents, 'shopping.txt')) && readFileSync(join(docs.documents, 'groceries.txt'), 'utf8') === 'milk\neggs\n');
+    await input.fill('write a note called packing saying passport and charger');
+    await input.press('Enter');
+    const noteCard = page.locator('[data-kind="file_change"]').last();
+    check('the note shows a card with its text', await waitFor(async () => (await page.locator('[data-kind="file_change"]').count()) === 2 && (await noteCard.getByTestId('file-change-preview').innerText()).includes('charger'), 15_000));
+    await noteCard.getByTestId('file-change-discard').click();
+    check('Discard writes nothing', await waitFor(async () => (await noteCard.getAttribute('data-state')) === 'discarded') && !existsSync(join(docs.documents, 'packing.txt')));
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

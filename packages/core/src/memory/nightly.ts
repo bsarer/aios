@@ -4,6 +4,7 @@
  * replies only, never tool results, so email bodies are not copied in. (Triage
  * metadata joins the input in A4.)
  */
+import type { ModelRole } from '@aios/shared';
 import type { ModelClient } from '../model.js';
 import { NIGHTLY_SYSTEM_PROMPT } from '../prompts.js';
 import { type Store, startOfDay } from '../store.js';
@@ -33,6 +34,8 @@ export interface NightlyOptions {
   timeZone: string;
   /** "HH:MM" local. */
   runAfter: string;
+  /** L1: 'local' when the nightly summary runs on the local model. Default 'nightly'. */
+  role?: ModelRole;
   onError?: (err: unknown) => void;
 }
 
@@ -69,7 +72,7 @@ export class Nightly {
         .join('\n\n');
       if (transcript.length > MAX_TRANSCRIPT_CHARS) transcript = transcript.slice(-MAX_TRANSCRIPT_CHARS);
       const r = await this.o.model.complete({
-        role: 'nightly',
+        role: this.o.role ?? 'nightly',
         messages: [
           { role: 'system', content: NIGHTLY_SYSTEM_PROMPT },
           { role: 'user', content: `Date: ${date}\nUser: ${this.o.userName}\n\n<transcript>\n${transcript}\n</transcript>` },

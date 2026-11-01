@@ -7,7 +7,7 @@
  * one repair retry, per-attempt timeouts, retries with backoff before any output
  * has reached the caller, provider error mapping and usage capture.
  */
-import type { ModelRole, ModelRoleConfig, SecretRef } from '@aios/shared';
+import type { CloudModelRole, LocalModelConfig, ModelRole, ModelRoleConfig, SecretRef } from '@aios/shared';
 import { z } from 'zod';
 import type { Secret } from './secrets/keyring.js';
 
@@ -100,7 +100,8 @@ export type ModelErrorKind =
   | 'aborted'
   | 'paused'
   | 'cost_cap'
-  | 'key_missing';
+  | 'key_missing'
+  | 'not_configured';
 
 const USER_MESSAGES: Record<ModelErrorKind, string> = {
   auth: 'The model provider rejected the API key. Run setup to update it.',
@@ -116,6 +117,7 @@ const USER_MESSAGES: Record<ModelErrorKind, string> = {
   aborted: 'Stopped.',
   paused: 'I am paused. Type /resume to continue.',
   cost_cap: "Today's model spending has reached your daily cap, so I've stopped calling the model until tomorrow. Type /cost to see the numbers, or raise cost.dailyCapUsd in your config.",
+  not_configured: 'No model is set up for this job.',
   key_missing: "I can't read the model API key from the keyring. If you just logged in, the keyring may still be locked; otherwise run `pnpm run setup`.",
 };
 
@@ -136,8 +138,11 @@ export class ModelError extends Error {
   }
 }
 
+/** What one role's calls need. A cloud role always has a key; the local model (L1) may have none. */
+type RoleConfig = ModelRoleConfig | LocalModelConfig;
+
 export interface ModelClientOptions {
-  models: Record<ModelRole, ModelRoleConfig>;
+  models: Record<CloudModelRole, ModelRoleConfig> & { local?: LocalModelConfig | undefined };
   resolveKey: (ref: SecretRef) => Promise<Secret>;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -212,8 +217,8 @@ export class ModelClient {
 
   /** Non-streaming call. */
   async complete(req: ModelRequest): Promise<ModelResult> {
+    const cfg = this.config(req.role);
     this.checkGate(req.role);
-    const cfg = this.opts.models[req.role];
     const started = this.now();
     try {
       const { json, attempts } = await this.withRetries(req, async (signal) => {
@@ -231,8 +236,8 @@ export class ModelClient {
 
   /** Streaming call. Retries only happen before the first delta is yielded. */
   async *stream(req: ModelRequest): AsyncGenerator<Delta, ModelResult> {
+    const cfg = this.config(req.role);
     this.checkGate(req.role);
-    const cfg = this.opts.models[req.role];
     const started = this.now();
     let attempts = 0;
     let yielded = false;
@@ -294,7 +299,18 @@ export class ModelClient {
     throw new ModelError('malformed_output', `structured output failed validation twice: ${reparsed.error}`);
   }
 
+  /** True when calls for this role can be made at all (the local model is optional). */
+  has(role: ModelRole): boolean {
+    return role !== 'local' || !!this.opts.models.local;
+  }
+
   // ── internals ──
+
+  private config(role: ModelRole): RoleConfig {
+    const cfg = role === 'local' ? this.opts.models.local : this.opts.models[role];
+    if (!cfg) throw new ModelError('not_configured', `no [models.${role}] in the config`);
+    return cfg;
+  }
 
   /** Refusals are not recorded as calls: nothing reached the provider and nothing was spent. */
   private checkGate(role: ModelRole): void {
@@ -303,7 +319,7 @@ export class ModelClient {
   }
 
   private async withRetries<T>(req: ModelRequest, fn: (signal: AbortSignal) => Promise<T>): Promise<{ json: T; attempts: number }> {
-    const cfg = this.opts.models[req.role];
+    const cfg = this.config(req.role);
     for (let attempt = 1; ; attempt++) {
       try {
         return { json: await fn(this.attemptSignal(cfg, req.signal)), attempts: attempt };
@@ -315,18 +331,21 @@ export class ModelClient {
     }
   }
 
-  private attemptSignal(cfg: ModelRoleConfig, outer?: AbortSignal): AbortSignal {
+  private attemptSignal(cfg: RoleConfig, outer?: AbortSignal): AbortSignal {
     const t = AbortSignal.timeout(cfg.timeoutMs);
     return outer ? AbortSignal.any([outer, t]) : t;
   }
 
   private async send(req: ModelRequest, stream: boolean, signal: AbortSignal): Promise<Response> {
-    const cfg = this.opts.models[req.role];
-    let key: Secret;
-    try {
-      key = await this.opts.resolveKey(cfg.apiKeyRef);
-    } catch (err) {
-      throw new ModelError('key_missing', (err as Error).message.slice(0, 300));
+    const cfg = this.config(req.role);
+    // The local model (Ollama) takes no key; a cloud role always names one.
+    let key: Secret | null = null;
+    if (cfg.apiKeyRef) {
+      try {
+        key = await this.opts.resolveKey(cfg.apiKeyRef);
+      } catch (err) {
+        throw new ModelError('key_missing', (err as Error).message.slice(0, 300));
+      }
     }
     const body = buildBody(cfg, req, stream);
     let res: Response;
@@ -336,7 +355,7 @@ export class ModelClient {
         headers: {
           ...cfg.extraHeaders,
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${key.reveal()}`,
+          ...(key ? { Authorization: `Bearer ${key.reveal()}` } : {}),
         },
         body: JSON.stringify(body),
         signal,
@@ -351,11 +370,11 @@ export class ModelClient {
     return res;
   }
 
-  private record(role: ModelRole, cfg: ModelRoleConfig, r: Omit<CallRecord, 'role' | 'baseUrl' | 'model'>): void {
+  private record(role: ModelRole, cfg: RoleConfig, r: Omit<CallRecord, 'role' | 'baseUrl' | 'model'>): void {
     this.opts.onCall?.({ role, baseUrl: cfg.baseUrl, model: cfg.model, ...r });
   }
 
-  private fail(role: ModelRole, cfg: ModelRoleConfig, err: unknown): ModelError {
+  private fail(role: ModelRole, cfg: RoleConfig, err: unknown): ModelError {
     const e = err instanceof ModelError ? err : toModelError(err);
     this.record(role, cfg, { ok: false, errorKind: e.kind, errorDetail: e.detail, ...(e.status !== null ? { errorStatus: e.status } : {}) });
     return e;
@@ -364,7 +383,7 @@ export class ModelClient {
 
 // ── Request building ─────────────────────────────────────────────────────────
 
-export function buildBody(cfg: ModelRoleConfig, req: ModelRequest, stream: boolean): Record<string, unknown> {
+export function buildBody(cfg: RoleConfig, req: ModelRequest, stream: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
     ...cfg.extraBody,
     model: cfg.model,

@@ -30,7 +30,7 @@ const firstRun: [string, string | boolean][] = [
   ['[chat] Model name', 'some/model'],
   ['[chat] API key', 'sk-test-123'],
   ['for triage', true],
-  ['for nightly', true],
+  ['for nightly', true], ['Ollama', false],
   ['Google Calendar', false],
 ];
 
@@ -51,7 +51,7 @@ describe('collectSetup', () => {
     const rerun = scripted([
       ['first name', ''], ['Timezone', ''], ['GreenMail', true],
       ['[chat] Provider', ''], ['[chat] Model name', ''], ['[chat] API key', ''],
-      ['for triage', true], ['for nightly', true], ['Google Calendar', false],
+      ['for triage', true], ['for nightly', true], ['Ollama', false], ['Google Calendar', false],
     ]);
     const { config, secrets } = await collectSetup(rerun, first, providers);
     expect(config).toEqual(first);
@@ -66,7 +66,7 @@ describe('collectSetup', () => {
     expect(JSON.stringify(config)).not.toContain('GOCSPX-test');
     expect(secretRefs(config)).toEqual(['keyring:mail', 'keyring:model-chat', 'keyring:calendar-client-secret', 'keyring:calendar-google']);
     const again = await collectSetup(
-      scripted([['first name', ''], ['Timezone', ''], ['GreenMail', true], ['[chat] Provider', ''], ['[chat] Model name', ''], ['[chat] API key', ''], ['for triage', true], ['for nightly', true], ['Google Calendar', true], ['client ID', ''], ['client secret', '']]),
+      scripted([['first name', ''], ['Timezone', ''], ['GreenMail', true], ['[chat] Provider', ''], ['[chat] Model name', ''], ['[chat] API key', ''], ['for triage', true], ['for nightly', true], ['Ollama', false], ['Google Calendar', true], ['client ID', ''], ['client secret', '']]),
       config,
       providers,
     );

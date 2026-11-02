@@ -242,17 +242,16 @@ export const AiosConfig = z.strictObject({
       kiosk: z.boolean().default(true),
     })
     .default({ port: 7777, kiosk: true }),
-  /** S6: the screen AI OS takes over, and where apps open when the user doesn't say. */
+  /** S6/S7: the screen AI OS takes over. The chat is always full screen there and apps open elsewhere. */
   screen: z
     .strictObject({
       /** Hyprland output name, e.g. "eDP-1". Empty: the screen the chat window is on. */
       monitor: z.union([z.literal(''), z.string().regex(MONITOR_NAME, 'must be a Hyprland monitor name such as eDP-1')]).default(''),
-      /** auto: on another screen when there is one, otherwise over the chat (the orb). */
-      defaultPlace: z.enum(['auto', 'over', 'beside', 'screen']).default('auto'),
-      /** Keep the screen: the chat never becomes the orb, and other windows and workspaces are moved off its screen. */
-      keep: z.boolean().default(true),
+      /** S6 settings, no longer used since S7; still accepted so an older config.toml loads. */
+      defaultPlace: z.enum(['auto', 'over', 'beside', 'screen']).optional(),
+      keep: z.boolean().optional(),
     })
-    .default({ monitor: '', defaultPlace: 'auto', keep: true }),
+    .default({ monitor: '' }),
   /** D1: reading Word and Excel files. */
   docs: DocsConfig.default({
     enabled: true,

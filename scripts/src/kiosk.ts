@@ -32,6 +32,10 @@ export interface KioskPaths {
   unitDir: string;
   unit: string;
   profileDir: string;
+  /** S7: Omarchy 4's shell config, where the top bar's layout lives. */
+  shellJson: string;
+  /** S7: Omarchy's own defaults for it, used when the user has no shell.json yet. */
+  shellDefaults: string;
 }
 
 export function kioskPaths(env: NodeJS.ProcessEnv = process.env): KioskPaths {
@@ -48,6 +52,8 @@ export function kioskPaths(env: NodeJS.ProcessEnv = process.env): KioskPaths {
     unitDir,
     unit: join(unitDir, 'aios-core.service'),
     profileDir: join(data, 'aios', 'chromium'),
+    shellJson: join(config, 'omarchy', 'shell.json'),
+    shellDefaults: join(env.OMARCHY_PATH || join(data, 'omarchy'), 'config', 'omarchy', 'shell.json'),
   };
 }
 
@@ -87,6 +93,7 @@ export function launcherScript(o: { port: number; profileDir: string }): string 
 # AI OS chat window: open (or focus), or exit. Written by \`pnpm run setup\`.
 #   aios-kiosk open    open the chat, or focus it if it is already open
 #   aios-kiosk exit    close the chat; force-kill it if it does not close (hung)
+#   aios-kiosk bar     the top bar's AI button text, with a dot while something new is waiting
 #   AIOS_KIOSK=0 aios-kiosk open   open in a normal window (development)
 set -u
 URL=${sh(`http://127.0.0.1:${o.port}/`)}
@@ -149,8 +156,16 @@ case "\${1:-open}" in
     pkill -KILL -f -- "--user-data-dir=$PROFILE"
     exit 0
     ;;
+  bar)
+    # S7: Omarchy's top bar runs this every few seconds. aios-core writes one character here.
+    if [ "$(cat "\${XDG_RUNTIME_DIR:-/nonexistent}/aios/unseen" 2>/dev/null)" = 1 ]; then
+      echo '{"text":"AI •","tooltip":"AI OS: something new","class":"active"}'
+    else
+      echo '{"text":"AI","tooltip":"AI OS"}'
+    fi
+    ;;
   *)
-    echo "usage: aios-kiosk open|exit" >&2
+    echo "usage: aios-kiosk open|exit|bar" >&2
     exit 2
     ;;
 esac
@@ -160,29 +175,24 @@ esac
 const lua = (s: string) => JSON.stringify(s);
 
 /**
- * ~/.config/hypr/aios.lua: Hyprland 0.55+ Lua API (hl.window_rule, hl.workspace_rule, hl.on,
- * hl.bind, hl.dsp.exec_cmd). S6: with a monitor (config [screen] monitor), the chat's
- * workspace 1 lives on that screen and the chat window opens there.
+ * ~/.config/hypr/aios.lua: Hyprland 0.55+ Lua API (hl.window_rule, hl.on, hl.bind,
+ * hl.dsp.exec_cmd). The chat window is full screen, on its own screen when one is configured
+ * (config [screen] monitor). S7: no workspace numbers are pinned to screens, because Omarchy 4
+ * gives every screen its own block of workspaces (laptop 1-10, next screen 11-20) and moves
+ * them itself; aios-core keeps other windows off the chat's workspace instead.
  */
 export function hyprlandModule(o: { launcher: string; autostart: boolean; monitor?: string }): string {
   const open = lua(`${o.launcher} open`);
   const exit = lua(`${o.launcher} exit`);
   if (o.monitor && !MONITOR_NAME.test(o.monitor)) throw new Error(`${JSON.stringify(o.monitor)} is not a monitor name`);
-  const screen = o.monitor
-    ? `
--- AI OS owns ${o.monitor}: workspace 1 stays on it, and the chat opens there.
-hl.workspace_rule({ workspace = "1", monitor = ${lua(o.monitor)}, default = true, persistent = true })
-`
-    : '';
   return `-- AI OS kiosk. Written by \`pnpm run setup\`; removed by \`pnpm --filter @aios/scripts uninstall\`.
 -- Edits here are overwritten when setup runs again.
-${screen}
--- The chat window is fullscreen on workspace 1.
+
+-- The chat window is full screen${o.monitor ? ` on ${o.monitor}, the screen AI OS owns` : ''}. Apps open elsewhere (aios-core).
 hl.window_rule({
   name = "aios-kiosk",
   match = { class = ${lua(CLASS_PATTERN)} },
-  fullscreen = true,
-  workspace = "1",${o.monitor ? `
+  fullscreen = true,${o.monitor ? `
   monitor = ${lua(o.monitor)},` : ''}
 })
 ${o.autostart ? `\n-- Open the chat at login.\nhl.on("hyprland.start", function()\n  hl.exec_cmd(${open})\nend)\n` : ''}
@@ -190,6 +200,60 @@ ${o.autostart ? `\n-- Open the chat at login.\nhl.on("hyprland.start", function(
 hl.bind(${lua(EXIT_KEYS)}, hl.dsp.exec_cmd(${exit}), { description = "Exit AI OS" })
 hl.bind(${lua(OPEN_KEYS)}, hl.dsp.exec_cmd(${open}), { description = "Open AI OS" })
 `;
+}
+
+/** S7: the top bar entry's id in Omarchy's shell.json. */
+export const BAR_ID = 'aios-home';
+
+/**
+ * S7: Omarchy 4's shell.json with the AI button added at the start of the bar's right section,
+ * as one of the shell's own "command" modules: every 2 s it runs `aios-kiosk bar` (through
+ * bash -lc) for its text, and a click runs `aios-kiosk open`. Null when the file isn't JSON
+ * Omarchy could have written. Unchanged text when the button is already there.
+ */
+export function addBarButton(json: string, launcher: string): string | null {
+  let cfg: unknown;
+  try {
+    cfg = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return null;
+  const c = cfg as { bar?: { layout?: Record<string, unknown> } };
+  c.bar ??= {};
+  if (typeof c.bar !== 'object' || Array.isArray(c.bar)) return null;
+  c.bar.layout ??= {};
+  if (typeof c.bar.layout !== 'object' || Array.isArray(c.bar.layout)) return null;
+  const layout = c.bar.layout;
+  for (const section of Object.values(layout)) {
+    if (Array.isArray(section) && section.some((e) => e && typeof e === 'object' && (e as { id?: unknown }).id === BAR_ID)) return json;
+  }
+  const right = Array.isArray(layout.right) ? layout.right : [];
+  const quoted = sh(launcher);
+  layout.right = [{ id: BAR_ID, type: 'command', exec: `${quoted} bar`, interval: 2, tooltip: 'AI OS', onClick: `${quoted} open` }, ...right];
+  return `${JSON.stringify(cfg, null, 2)}\n`;
+}
+
+/** S7: shell.json without the AI button; unchanged text when it isn't there or the file isn't JSON. */
+export function removeBarButton(json: string): string {
+  let cfg: { bar?: { layout?: Record<string, unknown> } };
+  try {
+    cfg = JSON.parse(json) as typeof cfg;
+  } catch {
+    return json;
+  }
+  const layout = cfg?.bar?.layout;
+  if (!layout || typeof layout !== 'object') return json;
+  let found = false;
+  for (const [k, section] of Object.entries(layout)) {
+    if (!Array.isArray(section)) continue;
+    const kept = section.filter((e) => !(e && typeof e === 'object' && (e as { id?: unknown }).id === BAR_ID));
+    if (kept.length !== section.length) {
+      found = true;
+      layout[k] = kept;
+    }
+  }
+  return found ? `${JSON.stringify(cfg, null, 2)}\n` : json;
 }
 
 /** S6: a screen setup can offer AI OS, from `hyprctl -j monitors`. */
@@ -244,6 +308,8 @@ export interface InstallOptions {
   hyprland: boolean;
   /** S6: the screen AI OS owns (config [screen] monitor); empty for the one it opens on. */
   monitor?: string;
+  /** S7: add the AI button to Omarchy's top bar (shell.json, with a backup). */
+  bar?: boolean;
 }
 
 /** What install did, for setup to print. */
@@ -289,7 +355,31 @@ export async function installKiosk(p: KioskPaths, o: InstallOptions, run: Run): 
     report.written.push(p.hyprlandLua);
     report.notes.push(`Backed up the previous version to ${p.hyprlandLua}.aios-backup.`);
   }
+  if (o.bar) await installBarButton(p, run, report);
   return report;
+}
+
+/** S7: the AI button in Omarchy 4's top bar. Starts from Omarchy's defaults when there is no shell.json yet. */
+async function installBarButton(p: KioskPaths, run: Run, report: InstallReport): Promise<void> {
+  const own = existsSync(p.shellJson);
+  const from = own ? p.shellJson : existsSync(p.shellDefaults) ? p.shellDefaults : null;
+  if (!from) {
+    report.notes.push(`No ${p.shellJson} (Omarchy 4's top bar); skipped the AI button.`);
+    return;
+  }
+  const before = await readFile(from, 'utf8');
+  const after = addBarButton(before, p.launcher);
+  if (after === null) {
+    report.notes.push(`${from} isn't plain JSON; skipped the AI button. Super+Shift+H still brings AI OS back.`);
+    return;
+  }
+  if (own && after === before) return;
+  if (own) await writeFile(`${p.shellJson}.aios-backup`, before);
+  await mkdir(dirname(p.shellJson), { recursive: true });
+  await writeFile(p.shellJson, after);
+  report.written.push(p.shellJson);
+  report.notes.push(own ? `Added the AI button to the top bar; the previous version is ${p.shellJson}.aios-backup.` : 'Added the AI button to the top bar.');
+  await run('omarchy-shell', ['shell', 'reloadConfig']).catch(() => report.notes.push('Restart the top bar (or log out and in) to see the AI button.'));
 }
 
 /** Undo installKiosk. Stops the service and closes the window first. */
@@ -305,6 +395,15 @@ export async function uninstallKiosk(p: KioskPaths, run: Run): Promise<string[]>
     if (after !== before) {
       await writeFile(p.hyprlandLua, after);
       removed.push(`AI OS line in ${p.hyprlandLua}`);
+    }
+  }
+  if (existsSync(p.shellJson)) {
+    const before = await readFile(p.shellJson, 'utf8');
+    const after = removeBarButton(before);
+    if (after !== before) {
+      await writeFile(p.shellJson, after);
+      removed.push(`AI button in ${p.shellJson}`);
+      await run('omarchy-shell', ['shell', 'reloadConfig']).catch(() => undefined);
     }
   }
   for (const f of [p.aiosLua, p.launcher, p.unit]) {

@@ -447,14 +447,17 @@ async function main(): Promise<void> {
       'exit 0',
     ].join('\n'),
   };
-  // S3: a pretend Hyprland. hyprctl reports one fullscreen chat window and one 1920x1200 monitor
-  // with a 26 px bar, and records every dispatch; gtk-launch records the app it was asked to start.
+  // S3/S7: a pretend Hyprland. hyprctl reports the windows in $S/clients (at first one fullscreen
+  // chat window on workspace 1) and one 1920x1200 monitor with a 26 px bar, and records every
+  // dispatch; gtk-launch records the app it was asked to start.
+  const CHAT_CLIENT = '{"address":"0xc4a7","class":"org.aios.home","floating":false,"pinned":false,"fullscreen":2,"monitor":0,"workspace":{"id":1,"name":"1"}}';
+  writeFileSync(join(state, 'clients'), `[${CHAT_CLIENT}]`);
   writeFileSync(join(state, 'dispatches'), '');
   writeFileSync(join(state, 'launched'), '');
   fakes.hyprctl = [
     'case "$1 $2" in',
-    `  "-j clients") echo '[{"address":"0xc4a7","class":"org.aios.home","floating":false,"pinned":false,"fullscreen":2,"monitor":0}]' ;;`,
-    `  "-j monitors") echo '[{"id":0,"width":1920,"height":1200,"x":0,"y":0,"scale":1,"transform":0,"focused":true,"reserved":[0,26,0,0]}]' ;;`,
+      '  "-j clients") cat "$S/clients" ;;',
+    `  "-j monitors") echo '[{"id":0,"name":"eDP-1","width":1920,"height":1200,"x":0,"y":0,"scale":1,"transform":0,"focused":true,"reserved":[0,26,0,0],"activeWorkspace":{"id":1,"name":"1"}}]' ;;`,
     '  dispatch*) printf "%s\\n" "$2" >> "$S/dispatches"; echo ok ;;',
     '  *) exit 1 ;;',
     'esac',
@@ -526,9 +529,7 @@ async function main(): Promise<void> {
       `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
       `[files]\nroots = ["${docs.documents}", "${downloads}"]\n` +
       `[assistant.monitor]\nenabled = false\n[assistant.review]\nenabled = false\nminFileMb = 1\n` +
-      `[ui]\nport = ${port}\nkiosk = false\n` +
-      // The S3 orb steps below need the chat to step aside; keep (S6) is covered by unit tests.
-      `[screen]\nkeep = false\n`,
+      `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
   let coreLog = '';
@@ -708,39 +709,27 @@ async function main(): Promise<void> {
     check('Discard leaves the lunch in the calendar', await waitFor(async () => (await cancelCard.getAttribute('data-state')) === 'discarded') && calWrites().length === 1);
     await shot(page, 'c1-discarded');
 
-    // S3: apps. The chat lists installed apps, starts one, and steps aside as the orb until it closes.
+    // S3/S7: apps. The chat lists installed apps and starts one away from its own workspace;
+    // the chat itself never moves, and a window that lands on its workspace is moved off it.
     await input.fill('what apps do I have?');
     await input.press('Enter');
     check('the chat lists installed apps', await waitFor(async () => /Firefox \(id: firefox\): Browse the web/.test(await lastAssistant().innerText())));
     check('hidden apps are not listed', !(await lastAssistant().innerText()).includes('Hidden helper'));
+    const hint = page.getByTestId('apps-hint');
+    check('with one screen, the strip says apps open on the next workspace and how to come back', await waitFor(async () => (await hint.count()) === 1 && (await hint.innerText()).includes('next workspace (Super+2)') && (await hint.innerText()).includes('Super+Shift+H')));
     await input.fill('open firefox');
     await input.press('Enter');
-    const orb = page.getByTestId('orb');
     check('"open firefox" starts it through gtk-launch', await waitFor(async () => fakeState('launched') === 'firefox.desktop'), fakeState('launched'));
-    check('the chat becomes the orb', await waitFor(async () => (await orb.count()) === 1));
-    check('Hyprland was asked to shrink, pin and place it', ['hl.dsp.window.pin({ action = "on", window = "address:0xc4a7" })', 'hl.dsp.window.move({ x = 932, y = 34, window = "address:0xc4a7" })'].every((d) => dispatches().includes(d)), dispatches().join(' | '));
-    await page.setViewportSize({ width: 56, height: 56 });
-    await shot(page, 's3-orb');
-    await page.setViewportSize({ width: 1280, height: 800 });
-    // Firefox's window opens; a window the user opens themselves doesn't count.
-    hyprEmit('openwindow>>f1,1,firefox,Mozilla Firefox');
-    hyprEmit('openwindow>>k1,1,kitty,Terminal');
-    await orb.click();
-    check('clicking the orb brings the chat back at half screen', await waitFor(async () => (await page.getByTestId('window-controls').count()) === 1 && (await chat.innerText()).includes('Firefox is open.')));
-    check('Hyprland was asked for the right half, with focus', ['hl.dsp.window.resize({ x = 942, y = 1150, window = "address:0xc4a7" })', 'hl.dsp.focus({ window = "address:0xc4a7" })'].every((d) => dispatches().includes(d)));
-    await shot(page, 's3-half');
-    await page.keyboard.press('Escape');
-    check('Esc at half screen goes back to the orb', await waitFor(async () => (await orb.count()) === 1));
-    await orb.click();
-    await page.getByTestId('window-orb').click();
-    check('"Back to the orb" does too', await waitFor(async () => (await orb.count()) === 1));
-    hyprEmit('closewindow>>k1');
-    await sleep(500);
-    check("closing the user's own window changes nothing", (await orb.count()) === 1);
-    hyprEmit('closewindow>>f1');
-    check('closing Firefox brings the chat back full screen', await waitFor(async () => (await orb.count()) === 0 && (await page.getByTestId('window-controls').count()) === 0 && (await input.count()) === 1));
-    check('Hyprland was asked for fullscreen', dispatches().at(-2) === 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "address:0xc4a7" })', dispatches().at(-2));
-    await shot(page, 's3-back');
+    check('Hyprland was asked to open it on workspace 2 first', dispatches().includes('hl.dsp.focus({ workspace = "2" })'), dispatches().join(' | '));
+    check('the chat was never shrunk, pinned or floated', !dispatches().some((d) => d.includes('0xc4a7') && /pin\(|float\(|resize\(/.test(d)), dispatches().join(' | '));
+    check('there is no orb any more', (await page.getByTestId('orb').count()) === 0 && (await input.count()) === 1);
+    await shot(page, 's7-app-opened');
+    // A terminal the user opens from the launcher lands on the chat's workspace: it is moved to 2.
+    writeFileSync(join(state, 'clients'), `[${CHAT_CLIENT},{"address":"0xb1","class":"kitty","floating":false,"pinned":false,"fullscreen":0,"monitor":0,"workspace":{"id":1,"name":"1"}}]`);
+    hyprEmit('openwindow>>b1,1,kitty,Terminal');
+    check('a window opened on the chat’s workspace is moved to workspace 2, following it', await waitFor(async () => dispatches().includes('hl.dsp.window.move({ workspace = "2", follow = true, window = "address:0xb1" })')), dispatches().join(' | '));
+    writeFileSync(join(state, 'clients'), `[${CHAT_CLIENT}]`);
+    hyprEmit('closewindow>>b1');
 
     // S4: building an app. A Build card with caps to pick, progress while Claude Code runs,
     // a message with Open when it is done, and the app is offline.
@@ -775,9 +764,7 @@ async function main(): Promise<void> {
     await shot(page, 's4-built');
     await builtMsg.getByTestId('build-open').click();
     check('Open starts the built app', await waitFor(async () => fakeState('launched').split('\n').includes('aios-app-pomodoro.desktop')), fakeState('launched'));
-    hyprEmit('openwindow>>b1d,1,aios-app-pomodoro,Pomodoro');
-    hyprEmit('closewindow>>b1d');
-    check('closing it brings the chat back', await waitFor(async () => (await page.getByTestId('orb').count()) === 0 && (await input.count()) === 1));
+    check('the built app opens on workspace 2 too', dispatches().filter((d) => d === 'hl.dsp.focus({ workspace = "2" })').length >= 2, dispatches().join(' | '));
     // The built page itself, in Chromium: its own script runs, the network does not.
     const appPage = await browser.newPage();
     await appPage.goto(`file://${appDir}/index.html`);

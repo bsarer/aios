@@ -77,7 +77,7 @@ async function chooseScreen(config: AiosConfig, p: Prompter, save: (c: AiosConfi
     if (hit.name === config.screen.monitor) return config;
     const next = { ...config, screen: { ...config.screen, monitor: hit.name } };
     await save(next);
-    console.log(`AI OS will use ${hit.name}; apps can open beside the chat there or on the other screens.`);
+    console.log(`AI OS will use ${hit.name}; apps open on the other screens.`);
     return next;
   }
 }
@@ -95,12 +95,13 @@ async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean, save: (c:
   }
   if (!(await p.confirm('Run AI OS as a service that starts at login (systemd --user), with the full-screen chat?', true))) return;
   const hyprland = await p.confirm(`Add one line to ${paths.hyprlandLua} to load the kiosk window rule and keys? (a backup is kept)`, true);
+  const bar = await p.confirm('Add an AI button to Omarchy\'s top bar that brings the chat back? (a backup is kept)', true);
   config = await chooseScreen(config, p, save);
   console.log('building the UI…');
   await run('pnpm', ['--filter', '@aios/ui', 'build']);
   const report = await installKiosk(
     paths,
-    { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, ...(config.screen.monitor ? { monitor: config.screen.monitor } : {}) },
+    { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, bar, ...(config.screen.monitor ? { monitor: config.screen.monitor } : {}) },
     run,
   );
   for (const f of report.written) console.log(`wrote ${f}`);

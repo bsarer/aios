@@ -57,7 +57,13 @@ function rig(o: { untrusted?: boolean; openFails?: boolean } = {}) {
       if (o.openFails) throw new Error('gridcraft is not installed');
       opened.push(`${kind} ${path}`);
     },
-    window: { appStarting: async (n) => void steps.push(`orb for ${n}`), appFailed: async (n) => void steps.push(`back from ${n}`) },
+    window: {
+      appStarting: async (n) => {
+        steps.push(`open ${n} elsewhere`);
+        return { screen: 'DP-2' };
+      },
+      appFailed: async (n) => void steps.push(`back from ${n}`),
+    },
   });
   const run: Run = async () => ({ stdout: '', code: 0 });
   const actions = new SystemActions({ store, controls: new SystemControls(run), audit, show: (i, isNew) => void (isNew && posted.push(i)), notice: () => undefined, isPaused: () => false });
@@ -311,11 +317,11 @@ describe('showing documents', () => {
 });
 
 describe('opening documents in their app', () => {
-  it('moves the chat aside and opens the resolved file in GridCraft', async () => {
+  it('opens the resolved file in GridCraft away from the chat’s screen', async () => {
     const { call, opened, steps, fx, log } = rig();
     const r = await call('doc_open_app', { path: 'Finance/sales.xlsx' });
-    expect(r.content).toMatch(/^Opened it in GridCraft\. The chat is now the red orb/);
-    expect(steps).toEqual(['orb for GridCraft']);
+    expect(r.content).toBe('Opened it in GridCraft on screen DP-2. Say it in one short line.');
+    expect(steps).toEqual(['open GridCraft elsewhere']);
     expect(opened).toEqual([`sheet ${join(fx.documents, 'Finance/sales.xlsx')}`]);
     expect(log().at(-1)).toMatchObject({ tool: 'doc_open_app', tier: 'device', decision: 'allowed', app: 'GridCraft' });
   });
@@ -325,7 +331,7 @@ describe('opening documents in their app', () => {
     const r = await call('doc_open_app', { path: 'Finance/sales.xlsx' });
     expect(r.ok).toBe(false);
     expect(r.content).toBe("Error: GridCraft didn't start: gridcraft is not installed");
-    expect(steps).toEqual(['orb for GridCraft', 'back from GridCraft']);
+    expect(steps).toEqual(['open GridCraft elsewhere', 'back from GridCraft']);
   });
 
   it('while outside text is in view it only shows a card, and the click opens it', async () => {

@@ -6,9 +6,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { REQUIRE_LINE, addRequire, hyprlandModule, installKiosk, kioskPaths, launcherScript, parseMonitors, removeRequire, uninstallKiosk, unitFile } from '../src/kiosk.js';
+import { BAR_ID, REQUIRE_LINE, addBarButton, addRequire, hyprlandModule, installKiosk, kioskPaths, launcherScript, parseMonitors, removeBarButton, removeRequire, uninstallKiosk, unitFile } from '../src/kiosk.js';
 
 const has = (cmd: string) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
 
@@ -88,9 +88,10 @@ describe('install and uninstall', () => {
 describe('S6: the screen AI OS takes over', () => {
   it('writes the screen into the Lua module, and only a real monitor name', () => {
     const lua = hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false, monitor: 'HDMI-A-1' });
-    expect(lua).toContain('hl.workspace_rule({ workspace = "1", monitor = "HDMI-A-1", default = true, persistent = true })');
-    expect(lua).toContain('  workspace = "1",\n  monitor = "HDMI-A-1",\n})');
-    expect(hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false })).not.toMatch(/monitor|workspace_rule/);
+    expect(lua).toContain('  fullscreen = true,\n  monitor = "HDMI-A-1",\n})');
+    // S7: no workspace numbers pinned to screens; Omarchy 4 gives every screen its own.
+    expect(lua).not.toMatch(/workspace/);
+    expect(hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false })).not.toMatch(/monitor =|workspace/);
     expect(() => hyprlandModule({ launcher: '/x', autostart: false, monitor: 'DP-2") os.execute("x' })).toThrow(/not a monitor name/);
   });
 
@@ -110,11 +111,61 @@ describe('S6: the screen AI OS takes over', () => {
   });
 });
 
+describe('S7: the AI button in Omarchy 4’s top bar', () => {
+  const OMARCHY_SHELL_JSON = JSON.stringify({ version: 1, bar: { layout: { left: [{ id: 'omarchy.menu' }], center: [{ id: 'omarchy.clock', format: 'dddd HH:mm' }], right: [{ id: 'omarchy.tray' }] } } }, null, 2);
+
+  it('adds one command module at the start of the right section, and only once', () => {
+    const added = addBarButton(OMARCHY_SHELL_JSON, "/home/j/.local/bin/aios-kiosk")!;
+    const cfg = JSON.parse(added) as { bar: { layout: { right: Record<string, unknown>[]; left: unknown[] } } };
+    expect(cfg.bar.layout.right[0]).toEqual({ id: BAR_ID, type: 'command', exec: "'/home/j/.local/bin/aios-kiosk' bar", interval: 2, tooltip: 'AI OS', onClick: "'/home/j/.local/bin/aios-kiosk' open" });
+    expect(cfg.bar.layout.right[1]).toEqual({ id: 'omarchy.tray' });
+    expect(cfg.bar.layout.left).toEqual([{ id: 'omarchy.menu' }]);
+    expect(addBarButton(added, '/x')).toBe(added);
+    expect(JSON.parse(removeBarButton(added))).toEqual(JSON.parse(OMARCHY_SHELL_JSON));
+    expect(removeBarButton(OMARCHY_SHELL_JSON)).toBe(OMARCHY_SHELL_JSON);
+  });
+
+  it('quotes the launcher path for bash, and leaves a file it does not understand alone', () => {
+    const cfg = JSON.parse(addBarButton('{}', "/home/o'brien/aios-kiosk")!) as { bar: { layout: { right: { exec: string }[] } } };
+    expect(cfg.bar.layout.right[0]!.exec).toBe("'/home/o'\\''brien/aios-kiosk' bar");
+    for (const bad of ['not json', '[]', '{"bar": []}', '{"bar": {"layout": 3}}']) expect(addBarButton(bad, '/x')).toBeNull();
+    expect(removeBarButton('not json')).toBe('not json');
+  });
+
+  it('install adds it with a backup and reloads the bar; uninstall takes it out again', async () => {
+    const h = home();
+    mkdirSync(dirname(h.p.shellJson), { recursive: true });
+    writeFileSync(h.p.shellJson, OMARCHY_SHELL_JSON);
+    const r = await installKiosk(h.p, { ...opts, bar: true }, h.run);
+    expect(r.written).toContain(h.p.shellJson);
+    expect(readFileSync(`${h.p.shellJson}.aios-backup`, 'utf8')).toBe(OMARCHY_SHELL_JSON);
+    expect(readFileSync(h.p.shellJson, 'utf8')).toContain(BAR_ID);
+    expect(h.calls).toContain('omarchy-shell shell reloadConfig');
+    expect((await installKiosk(h.p, { ...opts, bar: true }, h.run)).written).toEqual([]);
+    await uninstallKiosk(h.p, h.run);
+    expect(JSON.parse(readFileSync(h.p.shellJson, 'utf8'))).toEqual(JSON.parse(OMARCHY_SHELL_JSON));
+  });
+
+  it('starts from Omarchy’s defaults when there is no shell.json yet, and skips without Omarchy 4', async () => {
+    const h = home();
+    mkdirSync(dirname(h.p.shellDefaults), { recursive: true });
+    writeFileSync(h.p.shellDefaults, OMARCHY_SHELL_JSON);
+    await installKiosk(h.p, { ...opts, bar: true }, h.run);
+    expect(readFileSync(h.p.shellJson, 'utf8')).toContain(BAR_ID);
+    expect(readFileSync(h.p.shellDefaults, 'utf8')).toBe(OMARCHY_SHELL_JSON);
+    const none = home();
+    const r = await installKiosk(none.p, { ...opts, bar: true }, none.run);
+    expect(existsSync(none.p.shellJson)).toBe(false);
+    expect(r.notes.at(-1)).toMatch(/skipped the AI button/);
+    expect((await installKiosk(home().p, opts, h.run)).written).not.toContain(h.p.shellJson);
+  });
+});
+
 describe.skipIf(!has('lua5.4'))('generated Lua against a stub of the Hyprland API', () => {
   const STUB = `
 calls = {}
 hl = {
-  window_rule = function(r) table.insert(calls, "rule " .. r.name .. " " .. r.match.class .. " fullscreen=" .. tostring(r.fullscreen) .. " ws=" .. r.workspace .. (r.monitor and (" mon=" .. r.monitor) or "")) end,
+  window_rule = function(r) table.insert(calls, "rule " .. r.name .. " " .. r.match.class .. " fullscreen=" .. tostring(r.fullscreen) .. (r.workspace and (" ws=" .. r.workspace) or "") .. (r.monitor and (" mon=" .. r.monitor) or "")) end,
   workspace_rule = function(r) table.insert(calls, "wsrule " .. r.workspace .. " mon=" .. r.monitor .. " default=" .. tostring(r.default) .. " persistent=" .. tostring(r.persistent)) end,
   on = function(ev, fn) table.insert(calls, "on " .. ev); fn() end,
   exec_cmd = function(c) table.insert(calls, "exec " .. c) end,
@@ -131,7 +182,7 @@ package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
     mkdirSync(join(dir, '.config', 'hypr'), { recursive: true });
     writeFileSync(join(dir, '.config', 'hypr', 'aios.lua'), hyprlandModule({ launcher: '/home/j/.local/bin/aios-kiosk', autostart: true }));
     expect(runLua(dir, REQUIRE_LINE)).toEqual([
-      'rule aios-kiosk ^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$ fullscreen=true ws=1',
+      'rule aios-kiosk ^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$ fullscreen=true',
       'on hyprland.start',
       'exec /home/j/.local/bin/aios-kiosk open',
       'bind SUPER + SHIFT + ESCAPE -> exec_cmd:/home/j/.local/bin/aios-kiosk exit (Exit AI OS)',
@@ -139,14 +190,13 @@ package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
     ]);
   });
 
-  it('S6: with a screen chosen, workspace 1 and the chat window live on it', () => {
+  it('S6/S7: with a screen chosen, the chat window lives on it, and no workspace is pinned', () => {
     const dir = mkdtempSync(join(tmpdir(), 'aios-lua-'));
     mkdirSync(join(dir, '.config', 'hypr'), { recursive: true });
     writeFileSync(join(dir, '.config', 'hypr', 'aios.lua'), hyprlandModule({ launcher: '/x/aios-kiosk', autostart: false, monitor: 'DP-2' }));
-    expect(runLua(dir, REQUIRE_LINE).slice(0, 2)).toEqual([
-      'wsrule 1 mon=DP-2 default=true persistent=true',
-      'rule aios-kiosk ^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$ fullscreen=true ws=1 mon=DP-2',
-    ]);
+    const calls = runLua(dir, REQUIRE_LINE);
+    expect(calls[0]).toBe('rule aios-kiosk ^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$ fullscreen=true mon=DP-2');
+    expect(calls.some((c) => c.startsWith('wsrule'))).toBe(false);
   });
 
   it('a deleted aios.lua does not break hyprland.lua, and kiosk = false skips autostart', () => {
@@ -186,7 +236,7 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
       const r = spawnSync('bash', [script, arg], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, ...o.env }, encoding: 'utf8' });
       const lines = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [];
       rmSync(log, { force: true });
-      return { status: r.status, ms: Date.now() - started, lines, stderr: r.stderr };
+      return { status: r.status, ms: Date.now() - started, lines, stdout: r.stdout, stderr: r.stderr };
     };
   }
 
@@ -225,6 +275,17 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
     const r = launcher({ windowOpen: true, hung: false })('exit');
     expect(r.lines[0]).toMatch(/^hyprctl dispatch hl\.dsp\.window\.close/);
     expect(r.lines.some((l) => l.startsWith('pkill'))).toBe(false);
+  });
+
+  it('S7: bar prints the AI button, with a dot while aios-core says something new is waiting', () => {
+    const rt = mkdtempSync(join(tmpdir(), 'aios-rt-'));
+    const run = launcher({ windowOpen: true, hung: false, env: { XDG_RUNTIME_DIR: rt } });
+    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI', tooltip: 'AI OS' });
+    mkdirSync(join(rt, 'aios'));
+    writeFileSync(join(rt, 'aios', 'unseen'), '1');
+    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI •', tooltip: 'AI OS: something new', class: 'active' });
+    writeFileSync(join(rt, 'aios', 'unseen'), '0');
+    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI', tooltip: 'AI OS' });
   });
 
   it('exit kills a hung chat within a second', () => {

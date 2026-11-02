@@ -169,7 +169,7 @@ export function docTools(o: DocToolsOptions): RegisteredTool[] {
         const f = await resolveOr(o.files, (args as { path: string }).path);
         if (typeof f === 'string') return f;
         const app = APP_NAME[f.kind];
-        await o.window.appStarting(app);
+        const at = await o.window.appStarting(app);
         try {
           await o.open(f.kind, f.path);
         } catch (err) {
@@ -177,7 +177,7 @@ export function docTools(o: DocToolsOptions): RegisteredTool[] {
           throw new Error(`${app} didn't start: ${(err as Error).message}`);
         }
         return {
-          content: `Opened it in ${app}. The chat is now the red orb at the top of the screen; it comes back full screen when ${app} is closed. Say it in one short line.`,
+          content: `Opened it in ${app}${at && 'screen' in at ? ` on screen ${at.screen}` : at ? ` on workspace ${at.workspace}; Super+Shift+H or the AI button in the top bar brings the chat back` : ''}. Say it in one short line.`,
           audit: { path: f.path, app },
         };
       },

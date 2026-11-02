@@ -53,6 +53,13 @@ const MIGRATIONS = [
    CREATE INDEX file_index_facts ON file_index(facts_state, mtime_ms);
    CREATE INDEX file_index_summary ON file_index(summary_state, mtime_ms);
    CREATE VIRTUAL TABLE file_fts USING fts5(path UNINDEXED, name, folder, title, keywords, tags, summary, details, tokenize = 'unicode61 remove_diacritics 2');`,
+  // L1: when each file was last used (opened or changed) apart from the indexer's own reads, and
+  // what each morning review card's rows point at (paths, window addresses), never shown to a model,
+  // and what the user chose to keep so it isn't suggested again.
+  `CREATE TABLE cleanup_cards (id TEXT PRIMARY KEY, spec TEXT NOT NULL, created_at INTEGER NOT NULL);
+   CREATE TABLE cleanup_keep (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+   ALTER TABLE file_index ADD COLUMN used_ms REAL;
+   ALTER TABLE file_index ADD COLUMN read_at REAL;`,
 ];
 
 export interface UsageRow {

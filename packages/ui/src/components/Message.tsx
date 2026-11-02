@@ -63,6 +63,8 @@ export interface MessageActions {
   onActionStop: (id: string) => void;
   /** Open on a finished build's message (S4); names the Build card, not the app. */
   onAppOpen: (actionId: string) => void;
+  /** L1: a button on one row of the morning review, echoing that row's hash. */
+  onCleanup: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => void;
 }
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
@@ -581,6 +583,111 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
   );
 }
 
+const RESOURCE_TITLE = { disk: 'Drive space', memory: 'Memory', cpu: 'Processor' } as const;
+
+/** L1: a resource alert. Headline and details are written by code; advice by the local model. Plain text only. */
+function ResourceAlert({ item }: { item: Extract<ChatItem, { kind: 'resource_alert' }> }) {
+  return (
+    <div data-kind="resource_alert" data-resource={item.resource} data-resolved={item.resolved ? true : undefined} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.resolved ? 'var(--muted)' : 'var(--warning)'}` }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {RESOURCE_TITLE[item.resource]}
+      </div>
+      <div data-testid="alert-headline" className="mt-1 font-medium">
+        {item.headline}
+      </div>
+      {item.details.map((d) => (
+        <div key={d} className="mt-1 break-words text-[15px]">
+          {d}
+        </div>
+      ))}
+      {item.advice && (
+        <div data-testid="alert-advice" className="mt-2 text-[15px]">
+          {item.advice}
+          <span className="ml-1 text-sm" style={{ color: 'var(--muted)' }}>
+            (local model)
+          </span>
+        </div>
+      )}
+      {item.resolved && (
+        <div data-testid="alert-resolved" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          ✓ {item.resolved}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type CleanupItem = Extract<ChatItem, { kind: 'cleanup' }>;
+
+/** L1: the morning review. Names, titles and reasons come from files, web pages and the local model: plain text only. */
+function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageActions }) {
+  const btn = (testid: string, label: string, onClick: () => void, primary = false) => (
+    <button type="button" data-testid={testid} className={primary ? 'rounded-lg px-2.5 py-0.5' : 'glass rounded-lg px-2.5 py-0.5'} style={primary ? { background: 'var(--accent)', color: 'var(--bg)' } : undefined} onClick={onClick}>
+      {label}
+    </button>
+  );
+  const open = (s: string) => s === 'pending' || s === 'failed';
+  const result = (state: string, text: string | undefined) =>
+    text || state === 'running' ? (
+      <div data-testid="cleanup-result" className="mt-1 text-sm" style={{ color: state === 'failed' ? 'var(--danger)' : 'var(--muted)' }}>
+        {state === 'running' ? 'Working…' : text}
+      </div>
+    ) : null;
+  return (
+    <div data-kind="cleanup" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        Morning tidy-up{item.by === 'local' ? ' · picked by the local model' : ''}
+      </div>
+      <div data-testid="cleanup-intro" className="mt-1">
+        {item.intro}
+      </div>
+      {item.files.length > 0 && (
+        <ul className="mt-2">
+          {item.files.map((f) => (
+            <li key={f.n} data-testid="cleanup-file" data-state={f.state} className={`py-2 ${f.state === 'trashed' || f.state === 'kept' ? 'opacity-50' : ''}`}>
+              <div className="break-all font-medium">{f.name}</div>
+              <div className="text-sm" style={{ color: 'var(--muted)' }}>
+                {f.size} · {f.folder} · {f.lastUsed}
+              </div>
+              <div className="text-[15px]">{f.reason}</div>
+              {open(f.state) && (
+                <div className="mt-1 flex gap-2 text-sm">
+                  {item.trash && btn('cleanup-trash', f.state === 'failed' ? 'Try again: Move to Trash' : 'Move to Trash', () => actions.onCleanup(item.id, 'file', f.n, 'trash', f.hash), true)}
+                  {btn('cleanup-keep', 'Keep', () => actions.onCleanup(item.id, 'file', f.n, 'keep', f.hash))}
+                </div>
+              )}
+              {result(f.state, f.result)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {item.apps.length > 0 && (
+        <ul className="mt-2">
+          {item.apps.map((a) => (
+            <li key={a.n} data-testid="cleanup-app" data-state={a.state} className={`py-2 ${a.state === 'closed' || a.state === 'kept' ? 'opacity-50' : ''}`}>
+              <div className="font-medium">
+                {a.name}
+                {a.title && <span style={{ color: 'var(--muted)' }}> · {a.title}</span>}
+              </div>
+              <div className="text-sm" style={{ color: 'var(--muted)' }}>
+                {[a.memory, a.idle].filter(Boolean).join(' · ')}
+              </div>
+              <div className="text-[15px]">{a.reason}</div>
+              {open(a.state) && (
+                <div className="mt-1 flex gap-2 text-sm">
+                  {btn('cleanup-close', a.state === 'failed' ? 'Try again: Close' : 'Close', () => actions.onCleanup(item.id, 'app', a.n, 'close', a.hash), true)}
+                  {btn('cleanup-keep', 'Keep open', () => actions.onCleanup(item.id, 'app', a.n, 'keep', a.hash))}
+                </div>
+              )}
+              {result(a.state, a.result)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 const URGENCY_COLOR = { high: 'var(--danger)', normal: 'var(--accent)', low: 'var(--muted)' } as const;
 
 /** Mail-derived text (from, subject, summary) is rendered as plain text, never Markdown or HTML. */
@@ -676,6 +783,10 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <DocChangeCard item={item} actions={actions} />;
     case 'file_change':
       return <FileChangeCard item={item} actions={actions} />;
+    case 'resource_alert':
+      return <ResourceAlert item={item} />;
+    case 'cleanup':
+      return <CleanupCard item={item} actions={actions} />;
     case 'attachment':
       return <AttachmentCard item={item} actions={actions} />;
     case 'document':

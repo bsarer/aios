@@ -4,6 +4,7 @@
  * the model client it gets can only make structured calls.
  */
 import { TriageBatch, type TriageItem } from '@aios/shared';
+import type { ModelRole } from '@aios/shared';
 import type { ModelClient, ModelRequest } from '../model.js';
 import { TRIAGE_SYSTEM_PROMPT } from '../prompts.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
@@ -11,7 +12,8 @@ import type { MailEvent } from './state.js';
 
 export type TriageModel = Pick<ModelClient, 'structured'>;
 
-export function triageRequest(events: MailEvent[]): ModelRequest {
+/** `role` is 'triage', or 'local' when assistant.localTasks lists mailTriage (L1). */
+export function triageRequest(events: MailEvent[], role: ModelRole = 'triage'): ModelRequest {
   const blocks = events.map((e) =>
     wrapUntrusted(
       'email',
@@ -20,7 +22,7 @@ export function triageRequest(events: MailEvent[]): ModelRequest {
     ),
   );
   return {
-    role: 'triage',
+    role,
     messages: [
       { role: 'system', content: TRIAGE_SYSTEM_PROMPT },
       { role: 'user', content: `Triage these ${events.length} new message(s). Use each id exactly as given.\n\n${blocks.join('\n\n')}` },
@@ -29,8 +31,8 @@ export function triageRequest(events: MailEvent[]): ModelRequest {
 }
 
 /** One TriageItem per event, in order. Items the model skipped or invented are replaced or dropped. */
-export async function triage(model: TriageModel, events: MailEvent[]): Promise<TriageItem[]> {
-  const { value } = await model.structured(triageRequest(events), 'triage', TriageBatch);
+export async function triage(model: TriageModel, events: MailEvent[], role: ModelRole = 'triage'): Promise<TriageItem[]> {
+  const { value } = await model.structured(triageRequest(events, role), 'triage', TriageBatch);
   const byId = new Map(value.items.map((i) => [i.id, i]));
   return events.map((e) => byId.get(e.mailId) ?? fallbackItem(e));
 }

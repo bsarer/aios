@@ -39,6 +39,7 @@ export function App() {
     onAttachmentSave: (id, folder) => send({ type: 'attachment_save', id, folder }),
     onActionStop: (id) => send({ type: 'action_stop', id }),
     onAppOpen: (actionId) => send({ type: 'app_open', actionId }),
+    onCleanup: (id, list, n, action, hash) => send({ type: 'cleanup_action', id, list, n, action, hash }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
   };
 

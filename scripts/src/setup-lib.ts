@@ -1,4 +1,4 @@
-import { AiosConfig, MODEL_ROLES, type ModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
+import { AiosConfig, LocalModelConfig, MODEL_ROLES, type CloudModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
 import { TEST_MAILBOX } from './mailbox.js';
 
 /** Asks the user something. `secret` answers must not be echoed. */
@@ -8,7 +8,7 @@ export interface Prompter {
 }
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
-export const modelKeyRef = (role: ModelRole): SecretRef => `keyring:model-${role}`;
+export const modelKeyRef = (role: CloudModelRole): SecretRef => `keyring:model-${role}`;
 export const CALENDAR_SECRET_REF: SecretRef = 'keyring:calendar-client-secret';
 export const CALENDAR_TOKEN_REF: SecretRef = 'keyring:calendar-google';
 
@@ -113,6 +113,14 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
     });
   }
 
+  // L1: a small local model through Ollama for the system assistant. No key: it never leaves this computer.
+  const prevLocal = existing?.models.local;
+  if (await p.confirm('Use a small local model through Ollama for the system assistant? (install Ollama and pull a model first; see the README)', !!prevLocal)) {
+    const model = await p.ask('[local] Ollama model name, as `ollama list` shows it', { default: prevLocal?.model ?? '' });
+    if (!model) throw new Error('a model name is required for the local model');
+    models.local = LocalModelConfig.parse({ ...(prevLocal ?? {}), model });
+  }
+
   // Calendar (C1): Google, through an OAuth client the user makes in their own Google Cloud project.
   let calendar: AiosConfig['calendar'];
   const prevCal = existing?.calendar;
@@ -139,10 +147,11 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
     notifications: existing?.notifications,
     cost: existing?.cost,
     ui: existing?.ui,
+    assistant: existing?.assistant,
   });
   return { config, secrets };
 }
 
-function sameModel(a: AiosConfig['models'][ModelRole], b: AiosConfig['models'][ModelRole]): boolean {
+function sameModel(a: AiosConfig['models'][CloudModelRole], b: AiosConfig['models'][CloudModelRole]): boolean {
   return a.baseUrl === b.baseUrl && a.model === b.model;
 }

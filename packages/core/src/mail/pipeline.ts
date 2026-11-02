@@ -5,7 +5,7 @@
  * one catch-up. A failed triage keeps the mail queued and retries.
  */
 import { randomUUID } from 'node:crypto';
-import type { ChatItem, MailRow } from '@aios/shared';
+import type { ChatItem, MailRow, ModelRole } from '@aios/shared';
 import { ModelError } from '../model.js';
 import { type TriageModel, fallbackItem, triage } from './triage.js';
 import type { MailEvent, MailState } from './state.js';
@@ -28,6 +28,8 @@ export interface PipelineOptions {
   batchWindowMs: number;
   maxPerHour: number;
   quietHours?: { start: string; end: string } | undefined;
+  /** L1: 'local' when mail triage runs on the local model. Default 'triage'. */
+  role?: ModelRole;
   now?: () => number;
   newId?: () => string;
 }
@@ -105,7 +107,7 @@ export class MailPipeline {
       batch = batch.filter((e) => e.attempts < MAX_ATTEMPTS);
       if (!batch.length) continue;
       try {
-        const items = await triage(this.o.model, batch);
+        const items = await triage(this.o.model, batch, this.o.role);
         batch.forEach((e, i) => this.o.state.saveTriage(e.messageId, items[i]!));
         if (this.failing || this.capped) this.o.notice('info', 'Mail summaries are working again.');
         this.failing = false;

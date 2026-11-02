@@ -33,8 +33,84 @@ export const ModelRoleConfig = z.strictObject({
 });
 export type ModelRoleConfig = z.infer<typeof ModelRoleConfig>;
 
+/** The cloud roles every config has. */
 export const MODEL_ROLES = ['chat', 'triage', 'nightly'] as const;
-export type ModelRole = (typeof MODEL_ROLES)[number];
+export type CloudModelRole = (typeof MODEL_ROLES)[number];
+/** L1: 'local' is the small model on this computer (Ollama), when [models.local] is set. */
+export type ModelRole = CloudModelRole | 'local';
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
+/**
+ * L1: a small model served on this computer, by default Ollama's OpenAI-compatible API
+ * (http://127.0.0.1:11434/v1, checked against docs.ollama.com on 2026-11-01). It sees file
+ * names, window titles and system numbers, so it must be on this machine: only loopback
+ * addresses are accepted. Ollama needs no key; one can still be given through the keyring.
+ */
+export const LocalModelConfig = ModelRoleConfig.extend({
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    .default('http://127.0.0.1:11434/v1')
+    .refine((u) => LOOPBACK_HOSTS.has(new URL(u).hostname), 'the local model must be on this computer (127.0.0.1, localhost or ::1)'),
+  apiKeyRef: SecretRef.optional(),
+  maxTokens: z.int().positive().max(200_000).default(600),
+  // Small models on a laptop CPU can take a while, more so the first call after a model loads.
+  timeoutMs: z.int().positive().default(120_000),
+  // Ollama documents JSON mode for /v1; json_schema support is not documented, so zod checks the answer.
+  structuredOutput: z.enum(['json_schema', 'json_object']).default('json_object'),
+});
+export type LocalModelConfig = z.infer<typeof LocalModelConfig>;
+
+/** L1: jobs that can move from a cloud role to the local model, by listing them in assistant.localTasks. */
+export const LOCAL_TASKS = ['mailTriage', 'fileSummaries', 'nightlySummary'] as const;
+export type LocalTask = (typeof LOCAL_TASKS)[number];
+
+const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
+
+/**
+ * L1: the background system assistant. Code watches disk, memory and CPU and finds big unused
+ * files and idle windows; the local model only words the advice and picks what to suggest.
+ */
+export const AssistantConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  monitor: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      intervalSeconds: z.int().min(5).max(600).default(30),
+      /** Folders whose drives are watched; one alert per drive. */
+      disks: z.array(z.string().min(1).max(500)).min(1).max(8).default(['/', '~']),
+      /** A drive is low below this share free, or below diskFreeGb, whichever comes first. */
+      diskFreePercent: z.number().min(1).max(50).default(10),
+      diskFreeGb: z.number().min(0.5).max(1000).default(10),
+      /** Memory is low when less than this share is available, two samples in a row. */
+      memoryFreePercent: z.number().min(1).max(50).default(10),
+      /** The CPU is busy at this average over cpuMinutes. */
+      cpuPercent: z.number().min(50).max(100).default(90),
+      cpuMinutes: z.int().min(1).max(60).default(5),
+      /** The same alert again at most this often, even if it recovers and drops again. */
+      cooldownHours: z.number().min(0.25).max(72).default(6),
+    })
+    .prefault({}),
+  review: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      /** Local time after which the day's review is posted, once a day. */
+      at: HHMM.default('09:00'),
+      /** Files at least this big, in the [files] folders, not opened or changed for unusedDays. */
+      minFileMb: z.number().min(1).max(100_000).default(100),
+      unusedDays: z.int().min(1).max(3650).default(60),
+      /** Windows not focused for this long count as idle. */
+      idleAppHours: z.number().min(0.5).max(168).default(4),
+      maxFiles: z.int().min(0).max(20).default(5),
+      maxApps: z.int().min(0).max(20).default(5),
+      /** A Move to Trash button on each suggested file; it runs only on the click and can be restored from the Trash. */
+      trashButton: z.boolean().default(true),
+    })
+    .prefault({}),
+  /** Jobs to run on the local model instead of their cloud role. Needs [models.local]. */
+  localTasks: z.array(z.enum(LOCAL_TASKS)).max(LOCAL_TASKS.length).default([]),
+});
+export type AssistantConfig = z.infer<typeof AssistantConfig>;
 
 const Endpoint = z.strictObject({
   host: z.string().min(1),
@@ -137,6 +213,8 @@ export const AiosConfig = z.strictObject({
     chat: ModelRoleConfig,
     triage: ModelRoleConfig,
     nightly: ModelRoleConfig,
+    /** L1: leave out to run without a local model; the system assistant then writes its own plain text. */
+    local: LocalModelConfig.optional(),
   }),
   mail: MailConfig,
   /** C1: leave out to run without a calendar. */
@@ -187,6 +265,8 @@ export const AiosConfig = z.strictObject({
   }),
   /** F1: managing files in a few folders. */
   files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
+  /** L1: the background system assistant on the local model. */
+  assistant: AssistantConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

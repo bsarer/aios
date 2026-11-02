@@ -19,6 +19,39 @@ export const MailRow = z.strictObject({
 });
 export type MailRow = z.infer<typeof MailRow>;
 
+/** L1: one file the morning review suggests removing. Names come from anywhere: plain text only. */
+export const CleanupFile = z.strictObject({
+  n: z.int().min(1),
+  name: z.string(),
+  folder: z.string(),
+  /** Written by code, e.g. "2.4 GB" and "last used 14 Mar". */
+  size: z.string(),
+  lastUsed: z.string(),
+  /** Why, from the local model (or code): plain text only. */
+  reason: z.string(),
+  /** sha256 of the file's path, size and modification time; the click echoes it back. */
+  hash: z.string(),
+  state: z.enum(['pending', 'running', 'trashed', 'kept', 'failed']),
+  result: z.string().optional(),
+});
+export type CleanupFile = z.infer<typeof CleanupFile>;
+
+/** L1: one open window the morning review suggests closing. Titles come from web pages and apps: plain text only. */
+export const CleanupApp = z.strictObject({
+  n: z.int().min(1),
+  name: z.string(),
+  title: z.string(),
+  /** Written by code, e.g. "1.2 GB" and "not used for 3 days". */
+  memory: z.string().optional(),
+  idle: z.string(),
+  reason: z.string(),
+  /** sha256 of the window's address, class and process; the click echoes it back. */
+  hash: z.string(),
+  state: z.enum(['pending', 'running', 'closed', 'kept', 'failed']),
+  result: z.string().optional(),
+});
+export type CleanupApp = z.infer<typeof CleanupApp>;
+
 export const ChatItem = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('user'), id: z.string(), text: z.string(), at: z.number() }),
   z.strictObject({
@@ -192,6 +225,35 @@ export const ChatItem = z.discriminatedUnion('kind', [
     at: z.number(),
   }),
   z.strictObject({
+    kind: z.literal('resource_alert'),
+    /** L1: the system assistant saw a drive fill up, memory run low or the CPU stay busy. */
+    id: z.string(),
+    resource: z.enum(['disk', 'memory', 'cpu']),
+    /** Written by code, e.g. "Your home drive is almost full: 4.1 GB of 512 GB free." */
+    headline: z.string(),
+    /** Written by code: the biggest users. Process names are chosen by programs: plain text only. */
+    details: z.array(z.string()),
+    /** Advice from the local model, added when it answers: plain text only. */
+    advice: z.string().optional(),
+    /** Set by code when the resource is back to normal. */
+    resolved: z.string().optional(),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('cleanup'),
+    /** L1: the morning review: big unused files and idle windows, each with click-only buttons. */
+    id: z.string(),
+    /** A line above the lists, from the local model or code: plain text only. */
+    intro: z.string(),
+    /** 'code' when the local model wasn't available and code picked the suggestions. */
+    by: z.enum(['local', 'code']),
+    files: z.array(CleanupFile),
+    apps: z.array(CleanupApp),
+    /** Whether files get a Move to Trash button. */
+    trash: z.boolean(),
+    at: z.number(),
+  }),
+  z.strictObject({
     kind: z.literal('doc_change'),
     /** D2: a change to a Word or Excel file, or a new one, that waits for a click. */
     id: z.string(),
@@ -256,6 +318,15 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('file_change_discard'), id: z.string().max(100) }),
   /** F1: Save on an attachment card, into one of the folders the card offers (by index). */
   z.strictObject({ type: z.literal('attachment_save'), id: z.string().max(100), folder: z.int().min(0).max(20) }),
+  /** L1: a button on one row of the morning review, echoing that row's hash. */
+  z.strictObject({
+    type: z.literal('cleanup_action'),
+    id: z.string().max(100),
+    list: z.enum(['file', 'app']),
+    n: z.int().min(1).max(100),
+    action: z.enum(['trash', 'close', 'keep']),
+    hash: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */

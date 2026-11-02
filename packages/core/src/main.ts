@@ -2,7 +2,7 @@
  * aios-core daemon. `pnpm start` (systemd --user in A6).
  *   AIOS_UI_DEV_ORIGIN=http://localhost:5173  also accept the Vite dev server
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDir, parseConfig } from '@aios/shared';
@@ -15,6 +15,12 @@ import { AppLink, linkKey, linkToken } from './apps/link.js';
 import { appTools, buildAppTool, buildStatusTool, builtAppOpener, offerBuild } from './apps/tools.js';
 import { ChatWindow } from './apps/window.js';
 import { desktopNotify } from './notify.js';
+import { ResourceMonitor } from './assistant/monitor.js';
+import { procReader } from './assistant/resources.js';
+import { MorningReview } from './assistant/review.js';
+import { roleFor } from './assistant/tasks.js';
+import { trashDir } from './assistant/trash.js';
+import { WindowTracker } from './assistant/windows.js';
 import { CalendarActions } from './calendar/actions.js';
 import { GoogleAuth, GoogleCalendar } from './calendar/google.js';
 import { calendarTools } from './calendar/tools.js';
@@ -170,8 +176,9 @@ async function main(): Promise<void> {
     notice: (level, text) => shell?.agent.notice(level, text),
     isPaused,
   });
+  const hypr = hyprlandIpc();
   const chatWindow = new ChatWindow({
-    hypr: hyprlandIpc(),
+    hypr,
     // S6: the screen the chat owns, and where apps open when the user doesn't say.
     home: config.screen.monitor,
     defaultPlace: config.screen.defaultPlace,
@@ -212,15 +219,18 @@ async function main(): Promise<void> {
   }
   // F1: managing files. Changes go on a card; the click renames, copies or creates, never replacing anything.
   let fileActions: FileActions | undefined;
+  let fileCatalog: FileCatalog | undefined;
   if (fileRoots) {
     // F2: the file index for files_search, kept current by the indexer.
     const catalog = config.files.index ? new FileCatalog(store) : undefined;
+    fileCatalog = catalog;
     if (catalog) {
       fileIndexer = new FileIndexer({
         roots: fileRoots,
         catalog,
         facts: new FactReader({ engine: docEngine }),
         model: config.files.summaries ? model : undefined,
+        summaryRole: roleFor(config, 'fileSummaries', 'triage'),
         store,
         audit,
         timeZone: config.user.timezone,
@@ -300,6 +310,7 @@ async function main(): Promise<void> {
     userName: config.user.name,
     timeZone: config.user.timezone,
     runAfter: config.memory.nightlyAt,
+    role: roleFor(config, 'nightlySummary', 'nightly'),
     onError: (err) => {
       audit.append({ kind: 'memory', decision: 'nightly_failed', error: (err as Error).message });
       // One notice per day; it retries hourly without repeating itself.
@@ -310,6 +321,57 @@ async function main(): Promise<void> {
       shell?.agent.notice('warning', `I couldn't write yesterday's chat summary for memory. ${why} I'll try again later.`);
     },
   });
+  // L1: the background system assistant. Code watches and picks candidates; the local model, when set, words the advice.
+  const procs = procReader();
+  const localModel = config.models.local ? model : null;
+  let monitor: ResourceMonitor | undefined;
+  let review: MorningReview | undefined;
+  let windowTracker: WindowTracker | undefined;
+  if (config.assistant.enabled) {
+    windowTracker = hypr ? new WindowTracker(hypr) : undefined;
+    const catalog = fileCatalog;
+    const roots = fileRoots;
+    monitor = new ResourceMonitor({
+      reader: procs,
+      config: config.assistant.monitor,
+      timeZone: config.user.timezone,
+      model: localModel,
+      post: (item) => shell?.agent.post(item),
+      patch: (item) => shell?.patchItem(item),
+      notify: (title, body) => desktopNotify(title, body),
+      quietHours: config.notifications.quietHours,
+      audit,
+      ...(catalog && roots
+        ? {
+            bigFiles: async (drive: string, limit: number) => {
+              const dev = (await stat(drive)).dev;
+              const out: { display: string; bytes: number }[] = [];
+              for (const f of catalog.largest(50 * 1024 * 1024, 50)) {
+                if (out.length >= limit) break;
+                if ((await stat(f.path).catch(() => null))?.dev === dev) out.push({ display: roots.display(f.path), bytes: f.bytes });
+              }
+              return out;
+            },
+          }
+        : {}),
+    });
+    review = new MorningReview({
+      config: config.assistant.review,
+      timeZone: config.user.timezone,
+      store,
+      audit,
+      model: localModel,
+      isPaused,
+      roots: catalog ? roots : undefined,
+      catalog,
+      windows: windowTracker,
+      processes: () => procs.processes(),
+      trashDir: trashDir(),
+      post: (item) => shell?.agent.post(item),
+      patch: (item) => shell?.patchItem(item),
+      onTrashed: () => fileIndexer?.soon(),
+    });
+  }
   const themePath = omarchyThemePath();
   shell = new Shell({
     store,
@@ -332,6 +394,8 @@ async function main(): Promise<void> {
     ...(fileIndexer ? { fileIndex: fileIndexer } : {}),
     attachments: attachmentFiles,
     chatWindow,
+    ...(review ? { cleanup: review } : {}),
+    ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),
@@ -346,6 +410,7 @@ async function main(): Promise<void> {
     batchWindowMs: config.mail.batchWindowSeconds * 1000,
     maxPerHour: config.notifications.maxPerHour,
     quietHours: config.notifications.quietHours,
+    role: roleFor(config, 'mailTriage', 'triage'),
   });
   let mailProblem = '';
   const watcher = new MailWatcher({
@@ -405,10 +470,18 @@ async function main(): Promise<void> {
   const nightlyTick = () => void (shell.paused ? undefined : nightly.runIfDue(Date.now()));
   nightlyTick();
   setInterval(nightlyTick, 10 * 60_000).unref();
+  // L1: the monitor samples every half minute; the review checks every few minutes whether today's is due.
+  monitor?.start();
+  windowTracker?.start();
+  const reviewTick = () => void review?.runIfDue().catch((err: unknown) => audit.append({ kind: 'assistant', event: 'review_error', error: (err as Error).message }));
+  setTimeout(reviewTick, 2 * 60_000).unref();
+  setInterval(reviewTick, 5 * 60_000).unref();
   console.log(`aios-core listening on http://127.0.0.1:${config.ui.port}`);
 
   const shutdown = async () => {
     pipeline.stop();
+    monitor?.stop();
+    windowTracker?.stop();
     chatWindow.stop();
     await watcher.stop();
     await mailClient.close();

@@ -47,8 +47,9 @@ const attr = (v: string) => v.replace(/[^A-Za-z0-9._:@-]/g, '_');
 /**
  * 'calendar' (C1): event text, which anyone who sends the user an invite can write.
  * 'document' (D1): text, cells, sheet and file names from a Word or Excel file, which can come from anywhere.
+ * 'system' (L1): window titles and process names, which web pages and downloaded programs choose.
  */
-export function wrapUntrusted(source: 'email' | 'calendar' | 'document', id: string, sanitized: string): string {
+export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system', id: string, sanitized: string): string {
   return `<untrusted source="${source}" id="${attr(id)}">\n${sanitized}\n</untrusted>`;
 }
 

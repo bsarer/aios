@@ -6,6 +6,7 @@
  * in <untrusted source="document">. Its answer is stored, never acted on, and is shown again
  * only inside a wrapper, because it was written from a file that can come from anyone.
  */
+import type { ModelRole } from '@aios/shared';
 import { z } from 'zod';
 import type { ModelClient, ModelRequest } from '../model.js';
 import { FILE_SUMMARY_SYSTEM_PROMPT } from '../prompts.js';
@@ -43,10 +44,11 @@ export function factsText(kind: FileKind, f: FileFacts): string {
     .join('\n');
 }
 
-export function summaryRequest(file: SummaryInput): ModelRequest {
+/** `role` is 'triage', or 'local' when assistant.localTasks lists fileSummaries (L1). */
+export function summaryRequest(file: SummaryInput, role: ModelRole = 'triage'): ModelRequest {
   const body = `File: ${file.display}\n${factsText(file.kind, file.facts)}\n\nStart of the file:\n${file.excerpt}`;
   return {
-    role: 'triage',
+    role,
     messages: [
       { role: 'system', content: FILE_SUMMARY_SYSTEM_PROMPT },
       { role: 'user', content: `Describe this file.\n\n${wrapUntrusted('document', file.display, sanitize({ text: body }, { maxChars: EXCERPT_CHARS + 1200 }))}` },
@@ -55,8 +57,8 @@ export function summaryRequest(file: SummaryInput): ModelRequest {
 }
 
 /** The model's description, cleaned for storage: plain text, short, no markup. */
-export async function summarizeFile(model: SummaryModel, file: SummaryInput): Promise<FileSummary> {
-  const { value } = await model.structured(summaryRequest(file), 'file_summary', FileSummary);
+export async function summarizeFile(model: SummaryModel, file: SummaryInput, role: ModelRole = 'triage'): Promise<FileSummary> {
+  const { value } = await model.structured(summaryRequest(file, role), 'file_summary', FileSummary);
   const clean = (s: string, n: number) => sanitize({ text: s }, { maxChars: n }).replace(/\s+/g, ' ').trim();
   return {
     summary: clean(value.summary, 400),

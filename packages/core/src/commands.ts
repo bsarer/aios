@@ -10,6 +10,7 @@ export type Command =
   | { name: 'export' }
   | { name: 'remember'; text: string }
   | { name: 'reindex' }
+  | { name: 'checkup' }
   | { name: 'unknown'; raw: string };
 
 /** null when the text is a normal message. */
@@ -36,6 +37,8 @@ export function parseCommand(text: string): Command | null {
       return { name: 'remember', text: rest.join(' ') };
     case 'reindex':
       return { name: 'reindex' };
+    case 'checkup':
+      return { name: 'checkup' };
     default:
       return { name: 'unknown', raw: t };
   }
@@ -51,6 +54,7 @@ export const HELP_TEXT = [
   '/forget <text>  remove a remembered fact',
   '/export  write all memory to one Markdown file',
   '/reindex read your files again for file search, and show how far the index is',
+  '/checkup show disk, memory and processor now, and suggest files and windows to tidy up',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Esc stops a reply.',
 ].join('\n');

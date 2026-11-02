@@ -108,6 +108,35 @@ function costNote(update: boolean, est: { medianUsd: number; count: number } | n
   return parts.join(' ');
 }
 
+type Offer = { problem: 'unavailable'; why: string } | { problem: 'signed_out' } | { problem: null; card: string; update: boolean };
+
+/**
+ * Posts a Build or Change card, after checking Claude Code can run. Used by build_app and by an
+ * app's own Change button (S5, link.ts). Builds nothing: that takes a click on the card.
+ */
+export async function offerBuild(
+  o: Pick<BuildAppToolOptions, 'builder' | 'actions' | 'log' | 'budgets'>,
+  b: { name: string; slug: string; request: string; fromApp?: boolean },
+): Promise<Offer> {
+  const why = await o.builder.unavailable();
+  if (why) return { problem: 'unavailable', why };
+  const login = await o.builder.login();
+  if (login === 'none') return { problem: 'signed_out' };
+  const update = o.builder.exists(b.slug);
+  const note = costNote(update, o.log.estimate(!update), login);
+  const card = o.actions.propose({
+    action: 'build_app',
+    name: b.name,
+    slug: b.slug,
+    request: b.request.trim(),
+    update,
+    budgets: o.budgets,
+    note,
+    ...(b.fromApp ? { fromApp: true } : {}),
+  });
+  return { problem: null, card: card.id, update };
+}
+
 /**
  * build_app (S4, write tier): a model call only shows a Build card. The build runs from the
  * click (system/actions.ts), which hands it to the AppBuilder; this records it, shows its
@@ -167,13 +196,10 @@ export function buildAppTool(o: BuildAppToolOptions): RegisteredTool {
       // An installed app with the same name would make "open <name>" ambiguous.
       const taken = (await o.scan()).find((a) => a.id !== appDesktopId(slug) && appSlug(a.name) === slug);
       if (taken) return `Error: ${q(taken.name)} is already the name of an installed app (id: ${shortId(taken.id)}). Pick a different name, e.g. "My ${name}", or ask the user for one.`;
-      const why = await o.builder.unavailable();
-      if (why) return `Error: ${why} Tell the user.`;
-      const login = await o.builder.login();
-      if (login === 'none') return 'Error: Claude Code is installed but not signed in. Tell the user to open a terminal, run `claude` once and sign in, then ask again.';
-      const update = o.builder.exists(slug);
-      const note = costNote(update, o.log.estimate(!update), login);
-      o.actions.propose({ action: 'build_app', name, slug, request: request.trim(), update, budgets: o.budgets, note });
+      const offered = await offerBuild(o, { name, slug, request });
+      if (offered.problem === 'unavailable') return `Error: ${offered.why} Tell the user.`;
+      if (offered.problem === 'signed_out') return 'Error: Claude Code is installed but not signed in. Tell the user to open a terminal, run `claude` once and sign in, then ask again.';
+      const { update } = offered;
       return {
         content: `A card in the chat now asks the user to confirm ${update ? `changing ${q(name)}` : `building ${q(name)}`} and pick a spending cap. Nothing starts until they click ${update ? 'Change' : 'Build'} on it; then the card shows each step, and a message comes when it is done. Tell them in one short line to click ${update ? 'Change' : 'Build'} on the card to start. Don't say how long it will take.`,
         audit: { app: slug, update },

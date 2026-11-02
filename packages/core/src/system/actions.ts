@@ -27,7 +27,17 @@ export type SystemAction =
    * S4: build or change an app. `request` is the user's own words; audits get its length only.
    * The click picks one of `budgets` as the spending cap; `note` is shown under the title.
    */
-  | { action: 'build_app'; name: string; slug: string; request: string; update: boolean; budgets: number[]; note?: string | undefined };
+  | {
+      action: 'build_app';
+      name: string;
+      slug: string;
+      request: string;
+      update: boolean;
+      budgets: number[];
+      note?: string | undefined;
+      /** S5: asked for with the app's own Change button, not in the chat. */
+      fromApp?: boolean | undefined;
+    };
 
 export interface AppBuildContext {
   /** The card's id. */
@@ -110,6 +120,8 @@ function card(a: SystemAction): { title: string; confirm: string } {
       return { title: `${a.summary}? This was asked for while I was reading an email or document, so I'm checking with you first.`, confirm: 'Do it' };
     case 'build_app': {
       const req = a.request.length > 300 ? `${a.request.slice(0, 300)}…` : a.request;
+      if (a.fromApp)
+        return { title: `Change the app ${q(a.name)}? You asked from inside the app: ${q(req)}. Claude Code will edit only that app's folder.`, confirm: 'Change' };
       return a.update
         ? { title: `Change the app ${q(a.name)}? Claude Code will edit it as you asked: ${q(req)}. It only touches that app's folder.`, confirm: 'Change' }
         : { title: `Build a new app, ${q(a.name)}? Claude Code will write it from your request: ${q(req)}. It only touches that app's own folder.`, confirm: 'Build' };
@@ -180,12 +192,20 @@ export class SystemActions {
   }
 
   /** Pending Build cards, oldest first, for build_status. */
-  pendingBuilds(): { id: string; name: string; at: number }[] {
+  pendingBuilds(): { id: string; name: string; slug: string; at: number }[] {
     const rows = this.db.prepare("SELECT * FROM system_actions WHERE state = 'pending' ORDER BY created_at").all() as Row[];
     return rows.flatMap((r) => {
       const spec = JSON.parse(r.spec) as SystemAction;
-      return spec.action === 'build_app' ? [{ id: r.id, name: spec.name, at: r.created_at }] : [];
+      return spec.action === 'build_app' ? [{ id: r.id, name: spec.name, slug: spec.slug, at: r.created_at }] : [];
     });
+  }
+
+  /** A Build card's app, state and current step (S5: what an app's Change button shows). */
+  buildCard(id: string): { slug: string; state: ActionState; step?: string | undefined; result?: string | undefined } | null {
+    const r = this.row(id);
+    const spec = r ? (JSON.parse(r.spec) as SystemAction) : null;
+    if (!r || spec?.action !== 'build_app') return null;
+    return { slug: spec.slug, state: r.state, step: this.live.get(id)?.step, result: r.result ?? undefined };
   }
 
   private refresh(id: string): void {

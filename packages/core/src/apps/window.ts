@@ -122,6 +122,14 @@ export class ChatWindow {
     return this.set(mode, 'user');
   }
 
+  /**
+   * S5: an app's Change button posted a card. The orb opens to half screen beside the app so the
+   * card can be clicked; a full-screen chat already shows it.
+   */
+  async bringForward(app: string): Promise<void> {
+    if (this.current === 'orb') await this.set('half', 'app_change', app);
+  }
+
   /** Called just before an app starts: the chat steps aside first, so the app opens in its place. */
   async appStarting(name: string): Promise<void> {
     const timer = setTimeout(() => {

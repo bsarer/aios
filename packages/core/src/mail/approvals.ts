@@ -8,13 +8,17 @@
  *      │  ▲                                  └──────▶ failed ──Send click──▶ sending
  *      │  └── Edit (new hash)
  *      └──── Discard ──▶ discarded           (failed can be edited or discarded too)
+ *
+ * Attached files (M1) are fixed when the draft is made: their bytes are in the hash, and
+ * before a send or an edit each file is read again and must be exactly the same.
  */
 import { randomUUID } from 'node:crypto';
 import type { ChatItem } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import type { Store } from '../store.js';
 import { describeMailError } from './errors.js';
-import { type OutgoingFields, type ReplyHeaders, type Sender, buildMessage, fieldsHash, newMessageId } from './message.js';
+import { type AttachmentContent, type OutgoingFields, type ReplyHeaders, type Sender, buildMessage, fieldsHash, newMessageId } from './message.js';
+import type { OutgoingAttachment, OutgoingFiles } from './outgoing-files.js';
 
 /** IMAP and SMTP side effects, injected so tests can count them. */
 export interface MailOutbox {
@@ -36,6 +40,8 @@ export interface Draft {
   /** Mail id being replied to, e.g. INBOX:37. */
   inReplyTo: string | null;
   reply: ReplyHeaders | null;
+  /** Files to attach (M1), checked again against their bytes before each send. */
+  attachments: OutgoingAttachment[];
   hash: string;
   state: DraftState;
   warnings: string[];
@@ -54,6 +60,7 @@ interface Row {
   body: string;
   in_reply_to: string | null;
   reply_headers: string | null;
+  attachments: string;
   hash: string;
   state: DraftState;
   warnings: string;
@@ -72,6 +79,7 @@ const fromRow = (r: Row): Draft => ({
   body: r.body,
   inReplyTo: r.in_reply_to,
   reply: r.reply_headers ? (JSON.parse(r.reply_headers) as ReplyHeaders) : null,
+  attachments: JSON.parse(r.attachments) as OutgoingAttachment[],
   hash: r.hash,
   state: r.state,
   warnings: JSON.parse(r.warnings) as string[],
@@ -90,6 +98,8 @@ export interface NewDraft {
   inReplyTo: string | null;
   reply: ReplyHeaders | null;
   warnings: string[];
+  /** Files picked by OutgoingFiles.pick, with the bytes the hash is made from. */
+  files?: { attachments: OutgoingAttachment[]; contents: AttachmentContent[] };
 }
 
 export interface ApprovalBrokerOptions {
@@ -98,6 +108,8 @@ export interface ApprovalBrokerOptions {
   audit: AuditLog;
   from: Sender;
   saveSentCopy: boolean;
+  /** Reads attached files again before a send or an edit. Without it, drafts with files can't be sent. */
+  files?: Pick<OutgoingFiles, 'load'>;
   /** Show a new card, or update an existing one. */
   show: (item: ChatItem, isNew: boolean) => void;
   notice: (level: 'info' | 'warning' | 'error', text: string) => void;
@@ -125,8 +137,15 @@ export class ApprovalBroker {
     return r ? fromRow(r) : null;
   }
 
-  private fields(d: Pick<Draft, 'to' | 'subject' | 'body' | 'reply'>): OutgoingFields {
-    return { from: this.o.from, to: d.to, subject: d.subject, body: d.body, reply: d.reply };
+  private fields(d: Pick<Draft, 'to' | 'subject' | 'body' | 'reply'>, attachments: AttachmentContent[] = []): OutgoingFields {
+    return { from: this.o.from, to: d.to, subject: d.subject, body: d.body, reply: d.reply, attachments };
+  }
+
+  /** The attached files' bytes, read again; throws when one is gone or changed. */
+  private async contents(list: OutgoingAttachment[]): Promise<AttachmentContent[]> {
+    if (!list.length) return [];
+    if (!this.o.files) throw new Error('attaching files is turned off ([files] enabled = false)');
+    return this.o.files.load(list);
   }
 
   private item(d: Draft): DraftItem {
@@ -137,9 +156,10 @@ export class ApprovalBroker {
       subject: d.subject,
       body: d.body,
       ...(d.inReplyTo ? { inReplyTo: d.inReplyTo } : {}),
+      ...(d.attachments.length ? { attachments: d.attachments.map((a) => ({ name: a.name, path: a.display, bytes: a.bytes })) } : {}),
       hash: d.hash,
       state: d.state,
-      warnings: d.warnings,
+      warnings: [...d.warnings, ...d.attachments.flatMap((a) => (a.warning ? [a.warning] : []))],
       ...(d.error ? { error: d.error } : {}),
       at: d.createdAt,
     };
@@ -163,16 +183,30 @@ export class ApprovalBroker {
   /** Save to Drafts and show the card. Called by the mail_create_draft tool; never sends. */
   async create(n: NewDraft): Promise<Draft> {
     const now = this.clock();
-    const fields = this.fields(n);
+    const fields = this.fields(n, n.files?.contents);
     const messageId = newMessageId(this.o.from);
     const uid = await this.o.outbox.saveDraft(await buildMessage(fields, messageId, new Date(now)), messageId);
     const id = this.newId();
     this.db
       .prepare(
-        `INSERT INTO drafts (id, to_json, subject, body, in_reply_to, reply_headers, hash, state, warnings, error, message_id, draft_uid, created_at, updated_at, sent_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO drafts (id, to_json, subject, body, in_reply_to, reply_headers, attachments, hash, state, warnings, error, message_id, draft_uid, created_at, updated_at, sent_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, ?, ?, ?, ?, NULL)`,
       )
-      .run(id, JSON.stringify(n.to), n.subject, n.body, n.inReplyTo, n.reply ? JSON.stringify(n.reply) : null, fieldsHash(fields), JSON.stringify(n.warnings), messageId, uid, now, now);
+      .run(
+        id,
+        JSON.stringify(n.to),
+        n.subject,
+        n.body,
+        n.inReplyTo,
+        n.reply ? JSON.stringify(n.reply) : null,
+        JSON.stringify(n.files?.attachments ?? []),
+        fieldsHash(fields),
+        JSON.stringify(n.warnings),
+        messageId,
+        uid,
+        now,
+        now,
+      );
     const d = this.get(id)!;
     this.o.show(this.item(d), true);
     return d;
@@ -200,12 +234,13 @@ export class ApprovalBroker {
       audit({ decision: 'denied', reason: `draft is ${d.state}` });
       return 'refused';
     }
-    audit({ decision: 'approved', hash: shownHash, to: d.to });
+    audit({ decision: 'approved', hash: shownHash, to: d.to, ...(d.attachments.length ? { files: d.attachments.length, fileBytes: d.attachments.reduce((n, a) => n + a.bytes, 0) } : {}) });
     this.refresh(id);
 
     const approved = this.get(id)!;
-    const fields = this.fields(approved);
     try {
+      // Attached files are read again here; one that is gone or changed stops the send.
+      const fields = this.fields(approved, await this.contents(approved.attachments));
       // Belt and braces: what is about to be built and sent must be what was approved.
       if (fieldsHash(fields) !== shownHash) throw new Error('the draft changed after it was approved');
       const raw = await buildMessage(fields, approved.messageId, new Date(this.clock()));
@@ -238,19 +273,25 @@ export class ApprovalBroker {
   }
 
   /** The user's own edit from the card. Gives a new hash, so an earlier Send click can no longer match. */
-  async edit(id: string, e: { to: string[]; subject: string; body: string }): Promise<boolean> {
+  /**
+   * `keep` lists, by position, the attached files to keep (all of them when left out). An
+   * edit can only remove files, never add one.
+   */
+  async edit(id: string, e: { to: string[]; subject: string; body: string; keep?: number[] | undefined }): Promise<boolean> {
     const d = this.get(id);
     if (!d || (d.state !== 'pending' && d.state !== 'failed')) return false;
-    const fields = this.fields({ ...e, reply: d.reply });
+    const attachments = e.keep ? d.attachments.filter((_, i) => e.keep!.includes(i)) : d.attachments;
+    const fields = this.fields({ ...e, reply: d.reply }, await this.contents(attachments));
     const messageId = newMessageId(this.o.from);
     const uid = await this.o.outbox.saveDraft(await buildMessage(fields, messageId, new Date(this.clock())), messageId);
     // The user typed these recipients, so warnings about where they came from no longer apply.
+    // Warnings about attached files stay with the files that are kept.
     const r = this.db
       .prepare(
-        `UPDATE drafts SET to_json = ?, subject = ?, body = ?, hash = ?, state = 'pending', warnings = '[]', error = NULL, message_id = ?, draft_uid = ?, updated_at = ?
+        `UPDATE drafts SET to_json = ?, subject = ?, body = ?, attachments = ?, hash = ?, state = 'pending', warnings = '[]', error = NULL, message_id = ?, draft_uid = ?, updated_at = ?
          WHERE id = ? AND state IN ('pending', 'failed')`,
       )
-      .run(JSON.stringify(e.to), e.subject, e.body, fieldsHash(fields), messageId, uid, this.clock(), id);
+      .run(JSON.stringify(e.to), e.subject, e.body, JSON.stringify(attachments), fieldsHash(fields), messageId, uid, this.clock(), id);
     if (r.changes !== 1) return false;
     this.o.audit.append({ kind: 'mail', event: 'draft_edited', draftId: id, hash: fieldsHash(fields) });
     if (d.draftUid !== null) await this.o.outbox.deleteDraft(d.draftUid).catch(() => undefined);

@@ -43,6 +43,7 @@ import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
 import { AttachmentFiles } from './mail/attachments.js';
 import { draftTools } from './mail/draft-tools.js';
+import { OutgoingFiles } from './mail/outgoing-files.js';
 import { MailClient, type MailConnection } from './mail/imap.js';
 import { ImapSmtpOutbox } from './mail/outbox.js';
 import { MailPipeline } from './mail/pipeline.js';
@@ -133,8 +134,11 @@ async function main(): Promise<void> {
     user: config.mail.username,
     password: mailConnection.password,
   });
+  // M1: files from the allowed folders can go out on a draft, read again on the Send click.
+  const outgoingFiles = fileRoots ? new OutgoingFiles({ roots: fileRoots }) : undefined;
   const approvals = new ApprovalBroker({
     store,
+    ...(outgoingFiles ? { files: outgoingFiles } : {}),
     outbox,
     audit,
     from: { name: config.user.name, address: config.mail.address },
@@ -143,7 +147,7 @@ async function main(): Promise<void> {
     show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
     notice: (level, text) => shell?.agent.notice(level, text),
   });
-  for (const t of draftTools({ broker: approvals, mail: mailClient, userName: config.user.name, selfAddress: config.mail.address })) tools.register(t);
+  for (const t of draftTools({ broker: approvals, mail: mailClient, userName: config.user.name, selfAddress: config.mail.address, ...(outgoingFiles ? { files: outgoingFiles } : {}) })) tools.register(t);
   // C1: the calendar, when configured. Sign-in comes from `pnpm calendar:login`; until then
   // the tools answer that it isn't signed in.
   let calendarActions: CalendarActions | undefined;

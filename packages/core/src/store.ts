@@ -60,6 +60,8 @@ const MIGRATIONS = [
    CREATE TABLE cleanup_keep (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
    ALTER TABLE file_index ADD COLUMN used_ms REAL;
    ALTER TABLE file_index ADD COLUMN read_at REAL;`,
+  // M1: files attached to a draft (path, name, size and sha256 of the bytes a Send must find again).
+  `ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';`,
 ];
 
 export interface UsageRow {

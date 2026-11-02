@@ -24,6 +24,7 @@ export * from './mail/errors.js';
 export * from './mail/imap.js';
 export * from './mail/message.js';
 export * from './mail/outbox.js';
+export * from './mail/outgoing-files.js';
 export * from './mail/pipeline.js';
 export * from './mail/state.js';
 export * from './mail/tools.js';

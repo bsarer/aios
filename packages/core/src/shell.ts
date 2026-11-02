@@ -242,7 +242,7 @@ export class Shell {
     try {
       if (msg.type === 'draft_send') await broker.approveSend(msg.id, msg.hash);
       else if (msg.type === 'draft_discard') await broker.discard(msg.id);
-      else await broker.edit(msg.id, { to: msg.to, subject: msg.subject, body: msg.body });
+      else await broker.edit(msg.id, { to: msg.to, subject: msg.subject, body: msg.body, keep: msg.keep });
     } catch (err) {
       this.agent.notice('error', `I couldn't update the draft: ${(err as Error).message}`);
     }

@@ -10,7 +10,9 @@
     "setup": "tsx src/setup.ts",
     "uninstall": "tsx src/uninstall.ts",
     "e2e": "tsx src/e2e.ts",
-    "calendar-login": "tsx src/calendar-login.ts"
+    "calendar-login": "tsx src/calendar-login.ts",
+    "doctor": "tsx src/doctor.ts",
+    "backup": "tsx src/backup.ts"
   },
   "dependencies": {
     "@aios/core": "workspace:*",

@@ -3,9 +3,14 @@
  * the user's own message, is rate limited and refused while paused, and while an email is
  * in view it becomes a card the user confirms (systemTools wires that). It takes only an
  * app from the installed list: no command, file, link or option ever reaches the launcher.
+ *
+ * S6: open_app takes a place (over, beside, screen) and a screen; screens_list (read) shows
+ * the screens and the apps open on each; move_app (device, like open_app) moves an open
+ * app's window between those places. Only window classes are shown, never window titles,
+ * which web pages and documents set.
  */
 import { randomUUID } from 'node:crypto';
-import type { ChatItem } from '@aios/shared';
+import type { AppPlace, ChatItem } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import { StoppedError, type SystemActions } from '../system/actions.js';
 import { toolByName } from '../tools/definitions.js';
@@ -14,7 +19,7 @@ import { type AppBuilder, BuildError, type ClaudeLogin, appDesktopId, appName, a
 import type { BuildLog } from './history.js';
 import { type DesktopApp, findApp, searchApps, shortId } from './desktop.js';
 import type { Launch } from './launcher.js';
-import type { ChatWindow } from './window.js';
+import type { ChatWindow, Placement, ScreenInfo } from './window.js';
 
 const MAX_LISTED = 80;
 const q = (s: string) => `“${s}”`;
@@ -22,7 +27,44 @@ const q = (s: string) => `“${s}”`;
 export interface AppToolsOptions {
   scan: () => Promise<DesktopApp[]>;
   launch: Launch;
-  window: Pick<ChatWindow, 'appStarting' | 'appFailed'>;
+  window: Pick<ChatWindow, 'appStarting' | 'appFailed' | 'placement' | 'screens' | 'moveApp'>;
+}
+
+/** A window class as it may be shown: letters, digits and a few marks, at most 40 characters. */
+export const cleanClass = (c: string) => c.replace(/[^A-Za-z0-9._ -]/g, '').trim().slice(0, 40);
+
+/** What to call an open window: the name the chat started it under, an installed app with its class as id, or the class. */
+function windowLabel(w: ScreenInfo['windows'][number], apps: DesktopApp[]): string {
+  if (w.app) return w.place === 'beside' ? `${w.app} (beside the chat)` : w.app;
+  const c = w.className.toLowerCase();
+  const app = apps.find((a) => shortId(a.id).toLowerCase() === c);
+  return app?.name ?? (cleanClass(w.className) || 'a window without a name');
+}
+
+const SIDE: Record<string, string> = { left: 'to the left', right: 'to the right', above: 'above', below: 'below' };
+
+function screenLine(s: ScreenInfo, apps: DesktopApp[]): string {
+  const where = s.home ? "the chat's own screen" : s.position ? SIDE[s.position] : 'another screen';
+  const labels = new Map<string, number>();
+  for (const w of s.windows) {
+    const l = windowLabel(w, apps);
+    labels.set(l, (labels.get(l) ?? 0) + 1);
+  }
+  const open = [...labels].slice(0, 15).map(([l, n]) => (n > 1 ? `${l} (${n} windows)` : l));
+  return `- ${s.name || 'unnamed'}, ${where}${s.focused ? ', focused' : ''}: ${s.w}×${s.h}. ${open.length ? `Open: ${open.join(', ')}.` : 'Nothing open.'}`;
+}
+
+/** The one-line answer after an app opened somewhere. */
+function placedText(name: string, at: Placement, started: boolean): string {
+  const verb = started ? 'Started' : 'Moved';
+  switch (at.place) {
+    case 'over':
+      return `${verb} ${name}${started ? '' : ' onto the chat\'s screen'}. The chat is now the red orb at the top of the screen; it comes back full screen when ${name} is closed, and the user can click the orb to talk to you meanwhile. Say it in one short line.`;
+    case 'beside':
+      return `${verb} ${name} beside the chat: the chat is on the left half of its screen and ${name} on the right. The chat comes back full screen when ${name} is closed. Say it in one short line.`;
+    case 'screen':
+      return `${verb} ${name} ${started ? 'on' : 'to'} screen ${at.screen ?? ''}; the chat stays on its own screen. Say it in one short line.`;
+  }
 }
 
 const line = (a: DesktopApp) => `- ${a.name} (id: ${shortId(a.id)})${a.terminal ? ', runs in a terminal' : ''}${a.comment ? `: ${a.comment}` : ''}`;
@@ -46,11 +88,13 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
       def: toolByName('open_app')!,
       label: 'Opening the app…',
       handler: async (args) => {
-        const want = (args as { app: string }).app;
+        const { app: want, place, screen } = args as { app: string; place?: AppPlace; screen?: string };
         const found = findApp(await o.scan(), want);
         if (!found) return `Error: no installed app is called ${q(want)}. Call apps_list to find its id.`;
         if (Array.isArray(found)) return `Error: several apps are called ${q(want)}: ${found.map((a) => shortId(a.id)).join(', ')}. Ask the user which one, then use its id.`;
-        await o.window.appStarting(found.name);
+        const at = await o.window.placement(place, screen);
+        if (typeof at === 'string') return at;
+        await o.window.appStarting(found.name, at);
         try {
           await o.launch(found.id);
         } catch (err) {
@@ -58,9 +102,39 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
           throw new Error(`${found.name} didn't start: ${(err as Error).message}`);
         }
         return {
-          content: `Started ${found.name}. The chat is now the red orb at the top of the screen; it comes back full screen when ${found.name} is closed, and the user can click the orb to talk to you meanwhile. Say it in one short line.`,
-          audit: { app: found.id, name: found.name },
+          content: placedText(found.name, at, true),
+          audit: { app: found.id, name: found.name, place: at.place, ...(at.screen ? { screen: at.screen } : {}) },
         };
+      },
+    },
+    {
+      def: toolByName('screens_list')!,
+      label: 'Looking at your screens…',
+      handler: async () => {
+        const screens = await o.window.screens();
+        if (!screens.length) return "Screens are unknown: AI OS isn't running inside Hyprland here, so apps can only open over the chat.";
+        const apps = await o.scan();
+        const lines = screens.map((s) => screenLine(s, apps));
+        return `${screens.length} screen${screens.length === 1 ? '' : 's'}:\n${lines.join('\n')}${screens.length === 1 ? '\nWith one screen, apps open over the chat or beside it.' : ''}`;
+      },
+    },
+    {
+      def: toolByName('move_app')!,
+      label: 'Moving the app…',
+      handler: async (args) => {
+        const { app: want, place, screen } = args as { app: string; place: AppPlace; screen?: string };
+        const at = await o.window.placement(place, screen);
+        if (typeof at === 'string') return at;
+        const found = findApp(await o.scan(), want);
+        const installed = found ? (Array.isArray(found) ? found : [found]) : [];
+        const match = { names: [want.trim(), ...installed.map((a) => a.name)], classes: [want.trim(), ...installed.map((a) => shortId(a.id))] };
+        let name: string;
+        try {
+          name = await o.window.moveApp(match, at);
+        } catch (err) {
+          return `Error: ${(err as Error).message}. Call screens_list to see what is open where.`;
+        }
+        return { content: placedText(name, at, false), audit: { app: cleanClass(name), place: at.place, ...(at.screen ? { screen: at.screen } : {}) } };
       },
     },
   ];
@@ -106,6 +180,35 @@ function costNote(update: boolean, est: { medianUsd: number; count: number } | n
         : 'Dollar figures are Claude Code’s estimates at API prices.',
   ];
   return parts.join(' ');
+}
+
+type Offer = { problem: 'unavailable'; why: string } | { problem: 'signed_out' } | { problem: null; card: string; update: boolean };
+
+/**
+ * Posts a Build or Change card, after checking Claude Code can run. Used by build_app and by an
+ * app's own Change button (S5, link.ts). Builds nothing: that takes a click on the card.
+ */
+export async function offerBuild(
+  o: Pick<BuildAppToolOptions, 'builder' | 'actions' | 'log' | 'budgets'>,
+  b: { name: string; slug: string; request: string; fromApp?: boolean },
+): Promise<Offer> {
+  const why = await o.builder.unavailable();
+  if (why) return { problem: 'unavailable', why };
+  const login = await o.builder.login();
+  if (login === 'none') return { problem: 'signed_out' };
+  const update = o.builder.exists(b.slug);
+  const note = costNote(update, o.log.estimate(!update), login);
+  const card = o.actions.propose({
+    action: 'build_app',
+    name: b.name,
+    slug: b.slug,
+    request: b.request.trim(),
+    update,
+    budgets: o.budgets,
+    note,
+    ...(b.fromApp ? { fromApp: true } : {}),
+  });
+  return { problem: null, card: card.id, update };
 }
 
 /**
@@ -167,13 +270,10 @@ export function buildAppTool(o: BuildAppToolOptions): RegisteredTool {
       // An installed app with the same name would make "open <name>" ambiguous.
       const taken = (await o.scan()).find((a) => a.id !== appDesktopId(slug) && appSlug(a.name) === slug);
       if (taken) return `Error: ${q(taken.name)} is already the name of an installed app (id: ${shortId(taken.id)}). Pick a different name, e.g. "My ${name}", or ask the user for one.`;
-      const why = await o.builder.unavailable();
-      if (why) return `Error: ${why} Tell the user.`;
-      const login = await o.builder.login();
-      if (login === 'none') return 'Error: Claude Code is installed but not signed in. Tell the user to open a terminal, run `claude` once and sign in, then ask again.';
-      const update = o.builder.exists(slug);
-      const note = costNote(update, o.log.estimate(!update), login);
-      o.actions.propose({ action: 'build_app', name, slug, request: request.trim(), update, budgets: o.budgets, note });
+      const offered = await offerBuild(o, { name, slug, request });
+      if (offered.problem === 'unavailable') return `Error: ${offered.why} Tell the user.`;
+      if (offered.problem === 'signed_out') return 'Error: Claude Code is installed but not signed in. Tell the user to open a terminal, run `claude` once and sign in, then ask again.';
+      const { update } = offered;
       return {
         content: `A card in the chat now asks the user to confirm ${update ? `changing ${q(name)}` : `building ${q(name)}`} and pick a spending cap. Nothing starts until they click ${update ? 'Change' : 'Build'} on it; then the card shows each step, and a message comes when it is done. Tell them in one short line to click ${update ? 'Change' : 'Build'} on the card to start. Don't say how long it will take.`,
         audit: { app: slug, update },

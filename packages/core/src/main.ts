@@ -11,7 +11,8 @@ import { createLauncher } from './apps/launcher.js';
 import { scanApps } from './apps/desktop.js';
 import { AppBuilder } from './apps/builder.js';
 import { BuildLog } from './apps/history.js';
-import { appTools, buildAppTool, buildStatusTool, builtAppOpener } from './apps/tools.js';
+import { AppLink, linkKey, linkToken } from './apps/link.js';
+import { appTools, buildAppTool, buildStatusTool, builtAppOpener, offerBuild } from './apps/tools.js';
 import { ChatWindow } from './apps/window.js';
 import { desktopNotify } from './notify.js';
 import { ResourceMonitor } from './assistant/monitor.js';
@@ -178,6 +179,9 @@ async function main(): Promise<void> {
   const hypr = hyprlandIpc();
   const chatWindow = new ChatWindow({
     hypr,
+    // S6: the screen the chat owns, and where apps open when the user doesn't say.
+    home: config.screen.monitor,
+    defaultPlace: config.screen.defaultPlace,
     audit,
     // The shell is created below; the UI hears about moves once it exists.
     onMode: (mode) => shell?.broadcast({ type: 'window', mode }),
@@ -254,21 +258,47 @@ async function main(): Promise<void> {
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
   const buildLog = new BuildLog(store);
   buildLog.recover(Date.now());
+  let appLink: AppLink | undefined;
+  let builder: AppBuilder | undefined;
   if (config.builder.enabled) {
     const { maxBudgetUsd, budgetChoicesUsd } = config.builder;
-    const budgets = budgetChoicesUsd.filter((b) => b <= maxBudgetUsd);
+    const offered = budgetChoicesUsd.filter((b) => b <= maxBudgetUsd);
+    const budgets = offered.length ? offered : [maxBudgetUsd];
+    // S5: the key behind each built app's Change button token (apps/link.ts).
+    const key = config.builder.changeButton ? linkKey(join(dataDir(), 'app-link.key')) : null;
+    const b = new AppBuilder({ config: config.builder, ...(key ? { link: { port: config.ui.port, token: (slug: string) => linkToken(key, slug) } } : {}) });
+    builder = b;
     tools.register(
       buildAppTool({
-        builder: new AppBuilder({ config: config.builder }),
+        builder: b,
         actions: systemActions,
         scan: () => scanApps(),
         log: buildLog,
-        budgets: budgets.length ? budgets : [maxBudgetUsd],
+        budgets,
         post: (item) => shell?.agent.post(item),
         notify: (title, body) => desktopNotify(title, body),
       }),
     );
     tools.register(buildStatusTool({ log: buildLog, actions: systemActions }));
+    if (key) {
+      appLink = new AppLink({
+        key,
+        appName: (slug) => b.builtName(slug),
+        waiting: (slug) => systemActions.pendingBuilds().some((p) => p.slug === slug),
+        offer: async ({ name, slug, request }) => {
+          const r = await offerBuild({ builder: b, actions: systemActions, log: buildLog, budgets }, { name, slug, request, fromApp: true });
+          if (r.problem === 'unavailable') return { error: r.why };
+          if (r.problem === 'signed_out') return { error: 'Claude Code is installed but not signed in. Open a terminal, run `claude` once and sign in, then try again.' };
+          return { card: r.card };
+        },
+        card: (id) => systemActions.buildCard(id),
+        showCard: (name) => {
+          void chatWindow.bringForward(name);
+          desktopNotify(`Change ${name}?`, 'Click Change on the card in the AI OS chat to start.');
+        },
+        audit,
+      });
+    }
   }
   const memory = new Memory(new MemoryFiles(join(configDir(), 'memory'), config.user.name), store, config.memory.contextTokens);
   let nightlyNoticeFor = '';
@@ -408,10 +438,16 @@ async function main(): Promise<void> {
     devOrigins: process.env.AIOS_UI_DEV_ORIGIN ? [process.env.AIOS_UI_DEV_ORIGIN] : [],
     attachments: attachmentFiles,
     ...(documentFiles ? { documents: documentFiles } : {}),
+    ...(appLink ? { appLink } : {}),
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();
   systemActions.recover();
+  // S5: apps built before the Change button get it now (or lose it when it's turned off).
+  void builder
+    ?.sealAll()
+    .then((slugs) => slugs.length && audit.append({ kind: 'system', event: 'apps_sealed', apps: slugs, changeButton: config.builder.changeButton }))
+    .catch((err: unknown) => audit.append({ kind: 'system', event: 'apps_seal_error', error: (err as Error).message }));
   calendarActions?.recover();
   docActions?.recover();
   fileActions?.recover();

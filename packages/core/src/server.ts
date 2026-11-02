@@ -9,6 +9,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import { ClientMessage } from '@aios/shared';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { DocumentFiles } from './docs/viewer.js';
+import type { AppLink } from './apps/link.js';
 import type { AttachmentFiles } from './mail/attachments.js';
 import type { Shell } from './shell.js';
 
@@ -22,7 +23,23 @@ export interface ServerOptions {
   attachments?: Pick<AttachmentFiles, 'file'>;
   /** What is behind document cards (D1). Without it, /documents answers 404. */
   documents?: Pick<DocumentFiles, 'file'>;
+  /** Built apps' Change buttons (S5). Without it, /app-link answers 404. */
+  appLink?: Pick<AppLink, 'change' | 'status'>;
 }
+
+/**
+ * Headers for /app-link (S5). Built apps are file:// pages, whose origin is "null"; they may read
+ * the answer. The body is text/plain, so the browser sends no preflight; OPTIONS answers anyway.
+ */
+const LINK_HEADERS = {
+  'access-control-allow-origin': 'null',
+  'access-control-allow-methods': 'POST',
+  'access-control-allow-headers': 'content-type',
+  'access-control-allow-private-network': 'true',
+  vary: 'origin',
+  'x-content-type-options': 'nosniff',
+  'cache-control': 'no-store',
+} as const;
 
 /**
  * Headers for every attachment response. The UI only ever fetches these (fetch() or <img>),
@@ -107,6 +124,18 @@ export async function createServer(shell: Shell, o: ServerOptions): Promise<Fast
     if ('error' in f) return reply.code(422).type('text/plain').send(f.error);
     if (f.kind === 'pdf') return reply.code(200).type('application/pdf').send(f.bytes);
     return reply.code(200).type('application/json; charset=utf-8').send(JSON.stringify(f.view));
+  });
+
+  // S5: a built app's Change button. Only file:// pages (origin "null") are answered, and each
+  // request still needs that app's token (apps/link.ts). A change only ever posts a card.
+  app.options('/app-link/:what', async (_req, reply) => reply.headers(LINK_HEADERS).code(204).send());
+  app.post<{ Params: { what: string }; Body: unknown }>('/app-link/:what', { bodyLimit: 16 * 1024 }, async (req, reply) => {
+    reply.headers(LINK_HEADERS).type('application/json; charset=utf-8');
+    if (req.headers.origin !== 'null') return reply.code(403).send(JSON.stringify({ ok: false, message: 'forbidden' }));
+    if (!o.appLink) return reply.code(404).send(JSON.stringify({ ok: false, message: 'Changing apps from inside them is off.' }));
+    if (req.params.what === 'change') return reply.code(200).send(JSON.stringify(await o.appLink.change(req.body)));
+    if (req.params.what === 'status') return reply.code(200).send(JSON.stringify(o.appLink.status(req.body)));
+    return reply.code(404).send(JSON.stringify({ ok: false, message: 'not found' }));
   });
 
   if (o.uiDir && existsSync(o.uiDir)) {

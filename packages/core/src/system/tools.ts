@@ -55,7 +55,19 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
     case 'theme_set':
       return `Switch to the ${name('name')} theme`;
     case 'open_app':
-      return `Open ${name('app')}`;
+    case 'move_app': {
+      const verb = tool === 'open_app' ? 'Open' : 'Move';
+      const on = tool === 'open_app' ? 'on' : 'to';
+      const where =
+        args.place === 'beside'
+          ? ' beside the chat'
+          : args.place === 'screen'
+            ? ` ${on} ${args.screen ? `screen ${name('screen')}` : 'another screen'}`
+            : args.place === 'over'
+              ? ` ${on} the chat's screen`
+              : '';
+      return `${verb} ${name('app')}${where}`;
+    }
     case 'doc_open_app': {
       const file = String(args.path ?? '').split('/').pop() ?? '';
       return `Open ${q(cleanName(file))} in ${/\.xlsx$/i.test(file) ? 'GridCraft' : 'WordCraft'}`;

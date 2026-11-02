@@ -1,5 +1,6 @@
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
+import { MONITOR_NAME } from './window.js';
 
 /**
  * Reference to a secret held in the system keyring, e.g. `keyring:openrouter`.
@@ -241,6 +242,15 @@ export const AiosConfig = z.strictObject({
       kiosk: z.boolean().default(true),
     })
     .default({ port: 7777, kiosk: true }),
+  /** S6: the screen AI OS takes over, and where apps open when the user doesn't say. */
+  screen: z
+    .strictObject({
+      /** Hyprland output name, e.g. "eDP-1". Empty: the screen the chat window is on. */
+      monitor: z.union([z.literal(''), z.string().regex(MONITOR_NAME, 'must be a Hyprland monitor name such as eDP-1')]).default(''),
+      /** auto: on another screen when there is one, otherwise over the chat (the orb). */
+      defaultPlace: z.enum(['auto', 'over', 'beside', 'screen']).default('auto'),
+    })
+    .default({ monitor: '', defaultPlace: 'auto' }),
   /** D1: reading Word and Excel files. */
   docs: DocsConfig.default({
     enabled: true,
@@ -268,8 +278,13 @@ export const AiosConfig = z.strictObject({
       /** The caps a Build card offers to pick from; any above maxBudgetUsd are left out. */
       budgetChoicesUsd: z.array(z.number().positive().max(50)).min(1).max(4).default([1, 2, 5]),
       timeoutMinutes: z.int().min(1).max(60).default(15),
+      /**
+       * S5: every built app gets a "Change this app" button that sends a change request to the
+       * chat as a Change card. Off takes the button out of all built apps at the next start.
+       */
+      changeButton: z.boolean().default(true),
     })
-    .default({ enabled: true, command: 'claude', maxBudgetUsd: 5, budgetChoicesUsd: [1, 2, 5], timeoutMinutes: 15 }),
+    .default({ enabled: true, command: 'claude', maxBudgetUsd: 5, budgetChoicesUsd: [1, 2, 5], timeoutMinutes: 15, changeButton: true }),
 });
 export type AiosConfig = z.infer<typeof AiosConfig>;
 

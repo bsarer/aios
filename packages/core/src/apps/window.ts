@@ -13,8 +13,20 @@
  * new window after a start belongs to it. When the last of those closes, the chat comes
  * back full screen. An app that opens no new window (one that was already running and
  * only raised itself) leaves the chat as the orb.
+ *
+ * S6 makes one screen the chat's own (the home screen: config [screen] monitor, else the one
+ * the chat is on) and lets an app open in one of three places:
+ *
+ *   over    on the home screen; the chat becomes the orb, as above.
+ *   beside  the home screen is split: the chat floats on the left half ("side"), and the
+ *           app's first window is floated onto the right half when it opens.
+ *   screen  on another screen: that screen is focused before the start, so the app opens
+ *           there, and its window is moved there if it opened elsewhere. The chat stays put.
+ *
+ * Only apps over or beside the chat bring it back full screen when they close. Windows
+ * already open can be moved between the three places too (moveApp).
  */
-import { type WindowMode, CHAT_CLASS_PATTERN } from '@aios/shared';
+import { type AppPlace, type WindowMode, CHAT_CLASS_PATTERN, MONITOR_NAME } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import type { HyprClient, HyprEvent, HyprIpc, HyprMonitor } from './hyprland.js';
 
@@ -27,6 +39,10 @@ const OPEN_WINDOW_MS = 20_000;
 export interface ChatWindowOptions {
   /** Null outside Hyprland: nothing can move, so the chat stays full screen. */
   hypr: HyprIpc | null;
+  /** S6: the monitor the chat owns (config [screen] monitor); empty for the one it is on. */
+  home?: string;
+  /** S6: where an app opens when the user didn't say. auto: another screen if there is one, else over. */
+  defaultPlace?: AppPlace | 'auto';
   audit: AuditLog;
   onMode: (mode: WindowMode) => void;
   notice: (level: 'info' | 'warning' | 'error', text: string) => void;
@@ -60,12 +76,52 @@ export function halfRect(m: HyprMonitor): Rect {
   return { x: a.x + a.w - GAP - w, y: a.y + GAP, w, h: a.h - 2 * GAP };
 }
 
+/** S6: the left half, where the chat sits with an app beside it (which gets halfRect). */
+export function sideRect(m: HyprMonitor): Rect {
+  const r = halfRect(m);
+  return { ...r, x: usableArea(m).x + GAP };
+}
+
+export type Position = 'left' | 'right' | 'above' | 'below';
+
+/** Where a monitor is, seen from the home one, by the centres of their usable areas. */
+export function positionOf(home: HyprMonitor, m: HyprMonitor): Position {
+  const a = usableArea(home);
+  const b = usableArea(m);
+  const dx = b.x + b.w / 2 - (a.x + a.w / 2);
+  const dy = b.y + b.h / 2 - (a.y + a.h / 2);
+  if (Math.abs(dx) >= Math.abs(dy)) return dx < 0 ? 'left' : 'right';
+  return dy < 0 ? 'above' : 'below';
+}
+
+/** The chat's screen: the configured one if it is connected, else the chat's own, the focused one, the first. */
+export function homeMonitor(monitors: HyprMonitor[], win: HyprClient | undefined, configured = ''): HyprMonitor | undefined {
+  const on = monitors.filter((m) => !m.disabled);
+  return (
+    (configured ? on.find((m) => m.name === configured) : undefined) ??
+    (win ? on.find((m) => m.id === win.monitor) : undefined) ??
+    on.find((m) => m.focused) ??
+    on[0]
+  );
+}
+
+const addressOf = (c: HyprClient) => {
+  if (!/^0x[0-9a-f]+$/.test(c.address)) throw new Error('bad window address');
+  return `window = "address:${c.address}"`;
+};
+const monitorName = (m: HyprMonitor) => {
+  if (!MONITOR_NAME.test(m.name)) throw new Error('bad monitor name');
+  return m.name;
+};
+const toMonitor = (m: HyprMonitor, w: string) => `hl.dsp.window.move({ monitor = "${monitorName(m)}", ${w} })`;
+
 /** The Lua dispatches that put the chat window in a mode, in order. Pure, for tests. */
 export function dispatchesFor(mode: WindowMode, win: HyprClient, mon: HyprMonitor): string[] {
-  if (!/^0x[0-9a-f]+$/.test(win.address)) throw new Error('bad window address');
-  const w = `window = "address:${win.address}"`;
+  const w = addressOf(win);
   const prop = (p: string, v: string | number) => `hl.dsp.window.set_prop({ prop = "${p}", value = "${v}", ${w} })`;
   const out: string[] = [];
+  // S6: the chat always goes back to its own screen first.
+  if (win.monitor !== mon.id && mon.name) out.push(toMonitor(mon, w));
   if (mode === 'full') {
     if (win.pinned) out.push(`hl.dsp.window.pin({ action = "off", ${w} })`);
     for (const p of ['rounding', 'border_size', 'no_shadow', 'no_blur']) out.push(prop(p, 'unset'));
@@ -74,7 +130,7 @@ export function dispatchesFor(mode: WindowMode, win: HyprClient, mon: HyprMonito
     out.push(`hl.dsp.focus({ ${w} })`);
     return out;
   }
-  const r = mode === 'orb' ? orbRect(mon) : halfRect(mon);
+  const r = mode === 'orb' ? orbRect(mon) : mode === 'side' ? sideRect(mon) : halfRect(mon);
   if (win.fullscreen > 0) out.push(`hl.dsp.window.fullscreen({ mode = "${win.fullscreen === 1 ? 'maximized' : 'fullscreen'}", action = "unset", ${w} })`);
   if (!win.floating) out.push(`hl.dsp.window.float({ action = "on", ${w} })`);
   if (mode === 'orb') {
@@ -84,6 +140,12 @@ export function dispatchesFor(mode: WindowMode, win: HyprClient, mon: HyprMonito
   }
   out.push(`hl.dsp.window.resize({ x = ${r.w}, y = ${r.h}, ${w} })`);
   out.push(`hl.dsp.window.move({ x = ${r.x}, y = ${r.y}, ${w} })`);
+  // Side shares the screen with an app instead of floating over every workspace.
+  if (mode === 'side') {
+    if (win.pinned) out.push(`hl.dsp.window.pin({ action = "off", ${w} })`);
+    out.push(`hl.dsp.focus({ ${w} })`);
+    return out;
+  }
   if (!win.pinned) out.push(`hl.dsp.window.pin({ action = "on", ${w} })`);
   out.push(`hl.dsp.window.alter_zorder({ mode = "top", ${w} })`);
   // The orb leaves focus with the app; half is for typing.
@@ -91,12 +153,68 @@ export function dispatchesFor(mode: WindowMode, win: HyprClient, mon: HyprMonito
   return out;
 }
 
+/**
+ * S6: the dispatches that put an app's window in a place, in order. Pure, for tests.
+ * `target` is the other screen for "screen"; `unfloat` drops the floating that "beside" gave it.
+ */
+export function placeDispatches(place: AppPlace, app: HyprClient, home: HyprMonitor, o: { target?: HyprMonitor; unfloat?: boolean } = {}): string[] {
+  const w = addressOf(app);
+  const out: string[] = [];
+  if (place === 'screen') {
+    const t = o.target;
+    if (!t) throw new Error('no screen to move it to');
+    if (app.monitor !== t.id) out.push(toMonitor(t, w));
+    if (o.unfloat && app.floating) out.push(`hl.dsp.window.float({ action = "off", ${w} })`);
+    out.push(`hl.dsp.focus({ ${w} })`);
+    return out;
+  }
+  if (app.monitor !== home.id) out.push(toMonitor(home, w));
+  if (place === 'over') {
+    if (o.unfloat && app.floating) out.push(`hl.dsp.window.float({ action = "off", ${w} })`);
+    out.push(`hl.dsp.focus({ ${w} })`);
+    return out;
+  }
+  const r = halfRect(home);
+  if (app.fullscreen > 0) out.push(`hl.dsp.window.fullscreen({ mode = "${app.fullscreen === 1 ? 'maximized' : 'fullscreen'}", action = "unset", ${w} })`);
+  if (!app.floating) out.push(`hl.dsp.window.float({ action = "on", ${w} })`);
+  out.push(`hl.dsp.window.resize({ x = ${r.w}, y = ${r.h}, ${w} })`);
+  out.push(`hl.dsp.window.move({ x = ${r.x}, y = ${r.y}, ${w} })`);
+  out.push(`hl.dsp.focus({ ${w} })`);
+  return out;
+}
+
+/** Where an app goes: the place and, for "screen", the monitor's name. */
+export interface Placement {
+  place: AppPlace;
+  screen?: string;
+}
+
+/** One screen as screens_list shows it. Window classes are the apps' own; no titles, which pages set. */
+export interface ScreenInfo {
+  name: string;
+  home: boolean;
+  focused: boolean;
+  /** Size in layout pixels. */
+  w: number;
+  h: number;
+  position: Position | null;
+  windows: { address: string; className: string; app?: string; place?: AppPlace }[];
+}
+
+/** What identifies an open app's window: names the chat started it under, and window classes. */
+export interface WindowMatch {
+  names: string[];
+  classes: string[];
+}
+
+const lower = (s: string) => s.toLowerCase().trim();
+
 export class ChatWindow {
   private current: WindowMode = 'full';
-  /** Windows of apps the chat started: address → app name. */
-  private readonly apps = new Map<string, string>();
+  /** Windows of apps the chat started or placed: address → app name and where it is. */
+  private readonly apps = new Map<string, { name: string; place: AppPlace }>();
   /** Starts still waiting for their first window, oldest first. */
-  private pending: { name: string; timer: NodeJS.Timeout }[] = [];
+  private pending: { name: string; at: Placement; timer: NodeJS.Timeout }[] = [];
   private queue: Promise<void> = Promise.resolve();
   private stopEvents: (() => void) | null = null;
 
@@ -122,14 +240,55 @@ export class ChatWindow {
     return this.set(mode, 'user');
   }
 
+  /**
+   * S5: an app's Change button posted a card. The orb opens to half screen beside the app so the
+   * card can be clicked; a full-screen chat already shows it.
+   */
+  async bringForward(app: string): Promise<void> {
+    if (this.current === 'orb') await this.set('half', 'app_change', app);
+  }
+
+  /**
+   * S6: where an app should go, from what the model asked (or the default), checked against
+   * the screens connected now. A string is an error to hand back to the model.
+   */
+  async placement(want?: AppPlace, screen?: string): Promise<Placement | string> {
+    const hypr = this.o.hypr;
+    if (!hypr) return { place: 'over' };
+    const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
+    const home = homeMonitor(monitors, clients.find((c) => CHAT_CLASS.test(c.class)), this.o.home);
+    if (!home) return { place: 'over' };
+    const others = monitors.filter((m) => !m.disabled && m.id !== home.id && MONITOR_NAME.test(m.name)).sort((a, b) => a.x - b.x || a.y - b.y);
+    const def = this.o.defaultPlace ?? 'auto';
+    const place = want ?? (screen ? 'screen' : def === 'auto' ? (others.length ? 'screen' : 'over') : def);
+    if (place !== 'screen') return { place };
+    const list = others.map((m) => `${m.name} (${positionOf(home, m)})`).join(', ');
+    if (!others.length) return `Error: only one screen is connected (${home.name || 'this one'}), the chat's own. Open it over the chat or beside it instead.`;
+    if (!screen) {
+      if (others.length === 1 || !want) return { place, screen: others[0]!.name };
+      return `Error: there are several other screens: ${list}. Ask the user which one, then give its name or side as screen.`;
+    }
+    const s = lower(screen);
+    if (s === lower(home.name) || ['this', 'here', 'home', 'main'].includes(s)) return { place: 'over' };
+    const byName = others.find((m) => lower(m.name) === s);
+    if (byName) return { place, screen: byName.name };
+    const bySide = s === 'other' ? others : others.filter((m) => positionOf(home, m) === s);
+    if (bySide.length === 1) return { place, screen: bySide[0]!.name };
+    if (bySide.length > 1) return `Error: more than one screen fits ${JSON.stringify(screen)}: ${list}. Ask the user which one.`;
+    return `Error: no screen is called ${JSON.stringify(screen.slice(0, 40))}. The other screens are: ${list}.`;
+  }
+
   /** Called just before an app starts: the chat steps aside first, so the app opens in its place. */
-  async appStarting(name: string): Promise<void> {
+  async appStarting(name: string, at: Placement = { place: 'over' }): Promise<void> {
     const timer = setTimeout(() => {
       this.pending = this.pending.filter((p) => p.timer !== timer);
     }, this.o.openWindowMs ?? OPEN_WINDOW_MS);
     timer.unref();
-    this.pending.push({ name, timer });
-    await this.set('orb', 'app_started');
+    this.pending.push({ name, at, timer });
+    if (at.place === 'over') await this.set('orb', 'app_started');
+    else if (at.place === 'beside') await this.set('side', 'app_beside');
+    // Apps open on the focused screen, so focus the one it should open on.
+    else if (at.screen) await this.run(`focus ${at.screen}`, name, async (h) => h.dispatch(`hl.dsp.focus({ monitor = "${checkedName(at.screen!)}" })`), { place: 'screen', screen: at.screen });
   }
 
   /** The start failed: nothing will open, so the chat comes back unless another app is open. */
@@ -139,7 +298,62 @@ export class ChatWindow {
       clearTimeout(this.pending[i]!.timer);
       this.pending.splice(i, 1);
     }
-    if (!this.apps.size && !this.pending.length) await this.set('full', 'app_failed');
+    if (!this.homeApps()) await this.set('full', 'app_failed');
+  }
+
+  /** S6: the screens and what is open on each, for screens_list. */
+  async screens(): Promise<ScreenInfo[]> {
+    const hypr = this.o.hypr;
+    if (!hypr) return [];
+    const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
+    const home = homeMonitor(monitors, clients.find((c) => CHAT_CLASS.test(c.class)), this.o.home);
+    return monitors
+      .filter((m) => !m.disabled)
+      .map((m) => {
+        const a = usableArea(m);
+        return {
+          name: m.name,
+          home: m.id === home?.id,
+          focused: m.focused,
+          w: a.w,
+          h: a.h,
+          position: home && m.id !== home.id ? positionOf(home, m) : null,
+          windows: clients
+            .filter((c) => c.monitor === m.id && !CHAT_CLASS.test(c.class) && (c.workspace?.id ?? 1) > 0 && c.mapped !== false && c.hidden !== true)
+            .map((c) => ({ address: c.address, className: c.class, ...(this.apps.has(c.address) ? { app: this.apps.get(c.address)!.name, place: this.apps.get(c.address)!.place } : {}) })),
+        };
+      });
+  }
+
+  /**
+   * S6: moves an app's open window to a place. The window is one the chat started under one of
+   * `match.names`, else one whose class is one of `match.classes`, the most recently used first.
+   * Returns the app's name; throws when there is no such window.
+   */
+  async moveApp(match: WindowMatch, at: Placement): Promise<string> {
+    const hypr = this.o.hypr;
+    if (!hypr) throw new Error("windows can't be moved here: AI OS isn't running inside Hyprland");
+    const names = new Set(match.names.map(lower));
+    const classes = new Set(match.classes.map(lower));
+    const clients = (await hypr.clients()).filter((c) => !CHAT_CLASS.test(c.class) && c.mapped !== false);
+    const ranked = clients
+      .map((c) => ({ c, tracked: this.apps.get(c.address) }))
+      .filter(({ c, tracked }) => (tracked && names.has(lower(tracked.name))) || classes.has(lower(c.class)))
+      .sort((a, b) => Number(!!b.tracked) - Number(!!a.tracked) || (a.c.focusHistoryID ?? 1e9) - (b.c.focusHistoryID ?? 1e9));
+    const hit = ranked[0];
+    if (!hit) throw new Error('no window of that app is open');
+    const name = hit.tracked?.name ?? match.names[0] ?? hit.c.class;
+    const was = hit.tracked?.place;
+    if (at.place === 'over') await this.set('orb', 'app_moved', name);
+    if (at.place === 'beside') await this.set('side', 'app_moved', name);
+    await this.placeWindow(hit.c.address, name, at, was === 'beside');
+    if (at.place === 'screen' && !this.homeApps() && this.current !== 'full') await this.set('full', 'app_moved', name);
+    return name;
+  }
+
+  /** Apps over or beside the chat, open or still starting: while there are any, the chat stays aside. */
+  private homeApps(): number {
+    return [...this.apps.values()].filter((a) => a.place !== 'screen').length + this.pending.filter((p) => p.at.place !== 'screen').length;
   }
 
   private onEvent(ev: HyprEvent): void {
@@ -148,13 +362,48 @@ export class ChatWindow {
       const p = this.pending.shift();
       if (!p) return;
       clearTimeout(p.timer);
-      this.apps.set(ev.address, p.name);
+      this.apps.set(ev.address, { name: p.name, place: p.at.place });
+      if (p.at.place !== 'over') void this.placeWindow(ev.address, p.name, p.at, false).catch(() => undefined);
       return;
     }
-    const name = this.apps.get(ev.address);
-    if (name === undefined) return;
+    const app = this.apps.get(ev.address);
+    if (app === undefined) return;
     this.apps.delete(ev.address);
-    if (!this.apps.size && !this.pending.length && this.current !== 'full') void this.set('full', 'app_closed', name);
+    if (app.place !== 'screen' && !this.homeApps() && this.current !== 'full') void this.set('full', 'app_closed', app.name);
+  }
+
+  /** Puts one app window in a place and remembers it there. Audited; a refusal is a notice. */
+  private placeWindow(address: string, name: string, at: Placement, unfloat: boolean): Promise<void> {
+    return this.run(`place ${at.place}`, name, async (hypr) => {
+      const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
+      const app = clients.find((c) => c.address === address);
+      // Closed before it could be placed.
+      if (!app) return;
+      const home = homeMonitor(monitors, clients.find((c) => CHAT_CLASS.test(c.class)), this.o.home);
+      if (!home) throw new Error('Hyprland reports no monitor');
+      const target = at.screen ? monitors.find((m) => m.name === at.screen && !m.disabled) : undefined;
+      if (at.place === 'screen' && !target) throw new Error(`screen ${at.screen ?? ''} is no longer connected`);
+      for (const expr of placeDispatches(at.place, app, home, { ...(target ? { target } : {}), unfloat })) await hypr.dispatch(expr);
+      this.apps.set(address, { name, place: at.place });
+    }, at);
+  }
+
+  /** Runs one Hyprland job in the window queue, audits it, and turns a failure into a notice. */
+  private run(what: string, app: string, job: (hypr: HyprIpc) => Promise<void>, at: Placement): Promise<void> {
+    const hypr = this.o.hypr;
+    if (!hypr) return Promise.resolve();
+    const next = this.queue.then(async () => {
+      let error: string | undefined;
+      try {
+        await job(hypr);
+      } catch (err) {
+        error = (err as Error).message.slice(0, 300);
+      }
+      this.o.audit.append({ kind: 'window', app, place: at.place, ...(at.screen ? { screen: at.screen } : {}), step: what, ok: !error, ...(error ? { error } : {}) });
+      if (error) this.o.notice('warning', `I couldn't move ${app}'s window: ${error}`);
+    });
+    this.queue = next.catch(() => undefined);
+    return next;
   }
 
   /** Changes run one at a time, in the order asked. */
@@ -187,8 +436,13 @@ export class ChatWindow {
     const win = clients.find((c) => CHAT_CLASS.test(c.class));
     // Opened in a normal browser (development): nothing to move.
     if (!win) return;
-    const mon = monitors.find((m) => m.id === win.monitor) ?? monitors.find((m) => m.focused) ?? monitors[0];
+    const mon = homeMonitor(monitors, win, this.o.home);
     if (!mon) throw new Error('Hyprland reports no monitor');
     for (const expr of dispatchesFor(mode, win, mon)) await hypr.dispatch(expr);
   }
+}
+
+function checkedName(name: string): string {
+  if (!MONITOR_NAME.test(name)) throw new Error('bad monitor name');
+  return name;
 }

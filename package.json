@@ -9,7 +9,7 @@
   "scripts": {
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:injection": "vitest run packages/core/test/attachments.test.ts scripts/test/hostile-mail.test.ts scripts/test/email-memory.test.ts packages/core/test/untrusted.test.ts packages/core/test/approvals.test.ts packages/core/test/mail.test.ts packages/core/test/system.test.ts packages/core/test/apps.test.ts scripts/test/hostile-calendar.test.ts scripts/test/hostile-document.test.ts scripts/test/docs.test.ts packages/core/test/assistant.test.ts",
+    "test:injection": "vitest run packages/core/test/attachments.test.ts scripts/test/hostile-mail.test.ts scripts/test/email-memory.test.ts packages/core/test/untrusted.test.ts packages/core/test/approvals.test.ts packages/core/test/mail.test.ts packages/core/test/system.test.ts packages/core/test/apps.test.ts packages/core/test/app-link.test.ts scripts/test/hostile-calendar.test.ts scripts/test/hostile-document.test.ts scripts/test/docs.test.ts packages/core/test/assistant.test.ts",
     "test:stack:up": "docker compose -f docker-compose.test.yml up -d --wait && pnpm --filter @aios/scripts seed",
     "test:stack:down": "docker compose -f docker-compose.test.yml down",
     "test:stack:check": "pnpm --filter @aios/scripts check-mail",

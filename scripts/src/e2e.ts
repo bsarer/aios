@@ -131,6 +131,14 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: { content: `That email is about: ${subject}` } }] });
     return finish(0.0004);
   }
+  // M1: "email report.docx to x@y as <subject>" drafts with the file attached.
+  const emailFile = last.role === 'user' ? /^email (\S+) to (\S+@\S+) as (.+)$/i.exec(lastUser) : null;
+  if (emailFile) {
+    const args = JSON.stringify({ to: [emailFile[2]], subject: emailFile[3], body: 'Here is the file.\n\nJohn', attachments: [emailFile[1]] });
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_df', function: { name: 'mail_create_draft', arguments: args } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
   if (last.role === 'tool' && /has NOT been sent/.test(last.content ?? '')) {
     chunk(res, { choices: [{ delta: { content: 'The draft is ready for you to review.' } }] });
     return finish(0.0004);
@@ -326,6 +334,26 @@ async function deliverAttachmentMail(subject: string): Promise<string> {
 }
 
 /** Plain-text bodies of messages in Sent whose subject contains `subject`. */
+/** The whole source of each message in Sent with this subject (M1: to see attached files). */
+async function sentSources(subject: string): Promise<string[]> {
+  const c = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });
+  await c.connect();
+  try {
+    await c.mailboxOpen('Sent', { readOnly: true });
+    const uids = (await c.search({ subject }, { uid: true })) || [];
+    const out: string[] = [];
+    for (const uid of uids) {
+      const { content } = await c.download(String(uid), undefined, { uid: true });
+      let text = '';
+      for await (const part of content ?? []) text += part;
+      out.push(text);
+    }
+    return out;
+  } finally {
+    await c.logout();
+  }
+}
+
 async function sentMatching(subject: string): Promise<string[]> {
   const c = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });
   await c.connect();
@@ -825,6 +853,20 @@ async function main(): Promise<void> {
       check('Discard marks the card discarded', await waitFor(async () => (await second.getAttribute('data-state')) === 'discarded'));
       await sleep(1000);
       check('Discard sent nothing', (await sentMatching(`E2E urgent ${stamp}`)).length === 1);
+
+      // M1: a file from the folders goes out on a draft, only on the Send click.
+      await input.fill(`email report.docx to sara.kaya@northwind.example as E2E file ${stamp}`);
+      await input.press('Enter');
+      const fileDraft = page.locator('[data-kind="draft"]').last();
+      check('"email report.docx" shows a draft card with the file', await waitFor(async () => (await page.locator('[data-kind="draft"]').count()) === 3 && (await fileDraft.getByTestId('draft-file').count()) === 1, 15_000));
+      check('the card names the file', (await fileDraft.getByTestId('draft-file').innerText()).includes('report.docx'));
+      check('no warning for a file the user named', (await fileDraft.getByTestId('draft-warning').count()) === 0);
+      check('nothing in Sent before the click', (await sentSources(`E2E file ${stamp}`)).length === 0);
+      await shot(page, '12b-draft-file');
+      await fileDraft.getByTestId('draft-send').click();
+      check('Send sends the email with the file', await waitFor(async () => (await fileDraft.getAttribute('data-state')) === 'sent', 15_000));
+      const withFile = await sentSources(`E2E file ${stamp}`);
+      check('the sent email carries report.docx', withFile.length === 1 && /filename="?report\.docx"?/.test(withFile[0]!), String(withFile.length));
 
       // 10. Attachments (S2): a card per attachment, each opening in the viewer; the model reads the PDF's text.
       const attId = await deliverAttachmentMail(`E2E attachments ${stamp}`);

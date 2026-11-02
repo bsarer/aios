@@ -35,13 +35,13 @@ describe('config schema', () => {
     expect(c.mail.pollIntervalSeconds).toBe(30);
     expect(c.mail.batchWindowSeconds).toBe(20);
     expect(c.ui).toEqual({ port: 7777, kiosk: true });
-    expect(c.screen).toEqual({ monitor: '', defaultPlace: 'auto' });
+    expect(c.screen).toEqual({ monitor: '', defaultPlace: 'auto', keep: true });
     expect(c.models.chat.maxTokens).toBe(1024);
     expect(c.calendar).toBeUndefined();
   });
 
   it('S6: the screen is a Hyprland monitor name and nothing else', () => {
-    expect(parseConfig(`${valid}\n[screen]\nmonitor = "DP-2"\ndefaultPlace = "beside"\n`).screen).toEqual({ monitor: 'DP-2', defaultPlace: 'beside' });
+    expect(parseConfig(`${valid}\n[screen]\nmonitor = "DP-2"\ndefaultPlace = "beside"\n`).screen).toEqual({ monitor: 'DP-2', defaultPlace: 'beside', keep: true });
     expect(() => parseConfig(`${valid}\n[screen]\nmonitor = "DP-2; rm -rf"\n`)).toThrow(/monitor name/);
     expect(() => parseConfig(`${valid}\n[screen]\ndefaultPlace = "everywhere"\n`)).toThrow(ConfigError);
   });

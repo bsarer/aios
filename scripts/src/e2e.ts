@@ -489,7 +489,9 @@ async function main(): Promise<void> {
       `[calendar]\nclientId = "${FAKE_CLIENT_ID}"\napiBaseUrl = "${gcal.apiBaseUrl}"\ntokenUrl = "${gcal.tokenUrl}"\n` +
       `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
       `[files]\nroots = ["${docs.documents}"]\n` +
-      `[ui]\nport = ${port}\nkiosk = false\n`,
+      `[ui]\nport = ${port}\nkiosk = false\n` +
+      // The S3 orb steps below need the chat to step aside; keep (S6) is covered by unit tests.
+      `[screen]\nkeep = false\n`,
   );
 
   let coreLog = '';

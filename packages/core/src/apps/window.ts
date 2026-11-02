@@ -43,6 +43,12 @@ export interface ChatWindowOptions {
   home?: string;
   /** S6: where an app opens when the user didn't say. auto: another screen if there is one, else over. */
   defaultPlace?: AppPlace | 'auto';
+  /**
+   * S6 keep: the chat never gives up its screen. It never becomes the orb (apps go to another
+   * screen, or beside it with one screen), windows that open on its screen are moved off it,
+   * and with two or more screens, a workspace switched onto its screen moves to another one.
+   */
+  keep?: boolean;
   audit: AuditLog;
   onMode: (mode: WindowMode) => void;
   notice: (level: 'info' | 'warning' | 'error', text: string) => void;
@@ -233,6 +239,8 @@ export class ChatWindow {
     this.stopEvents = null;
     for (const p of this.pending) clearTimeout(p.timer);
     this.pending = [];
+    if (this.keepRecheck) clearTimeout(this.keepRecheck);
+    this.keepRecheck = null;
   }
 
   /** The UI asked (orb clicked, back to orb, full screen). */
@@ -253,6 +261,24 @@ export class ChatWindow {
    * the screens connected now. A string is an error to hand back to the model.
    */
   async placement(want?: AppPlace, screen?: string): Promise<Placement | string> {
+    const at = await this.choosePlace(want, screen);
+    if (typeof at === 'string' || at.place !== 'over' || !this.o.keep || !this.o.hypr) return at;
+    // S6 keep: the chat never gives up its screen, so "over" becomes another screen, or beside with one screen.
+    const other = await this.otherScreen();
+    return other ? { place: 'screen', screen: other } : { place: 'beside' };
+  }
+
+  /** The first other screen, left to right, or null with one screen. */
+  private async otherScreen(): Promise<string | null> {
+    const hypr = this.o.hypr;
+    if (!hypr) return null;
+    const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
+    const home = homeMonitor(monitors, clients.find((c) => CHAT_CLASS.test(c.class)), this.o.home);
+    const others = monitors.filter((m) => !m.disabled && m.id !== home?.id && MONITOR_NAME.test(m.name)).sort((a, b) => a.x - b.x || a.y - b.y);
+    return others[0]?.name ?? null;
+  }
+
+  private async choosePlace(want?: AppPlace, screen?: string): Promise<Placement | string> {
     const hypr = this.o.hypr;
     if (!hypr) return { place: 'over' };
     const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
@@ -280,6 +306,11 @@ export class ChatWindow {
 
   /** Called just before an app starts: the chat steps aside first, so the app opens in its place. */
   async appStarting(name: string, at: Placement = { place: 'over' }): Promise<void> {
+    // Starts that don't choose a place (documents, built apps) still respect keep.
+    if (at.place === 'over' && this.o.keep) {
+      const p = await this.placement('over');
+      at = typeof p === 'string' ? { place: 'beside' } : p;
+    }
     const timer = setTimeout(() => {
       this.pending = this.pending.filter((p) => p.timer !== timer);
     }, this.o.openWindowMs ?? OPEN_WINDOW_MS);
@@ -357,10 +388,17 @@ export class ChatWindow {
   }
 
   private onEvent(ev: HyprEvent): void {
+    if (ev.name === 'workspace') {
+      if (this.o.keep) void this.keepWorkspace().catch(() => undefined);
+      return;
+    }
     if (ev.name === 'openwindow') {
       if (CHAT_CLASS.test(ev.className)) return;
       const p = this.pending.shift();
-      if (!p) return;
+      if (!p) {
+        if (this.o.keep) void this.keepWindow(ev.address, ev.className).catch(() => undefined);
+        return;
+      }
       clearTimeout(p.timer);
       this.apps.set(ev.address, { name: p.name, place: p.at.place });
       if (p.at.place !== 'over') void this.placeWindow(ev.address, p.name, p.at, false).catch(() => undefined);
@@ -370,6 +408,66 @@ export class ChatWindow {
     if (app === undefined) return;
     this.apps.delete(ev.address);
     if (app.place !== 'screen' && !this.homeApps() && this.current !== 'full') void this.set('full', 'app_closed', app.name);
+  }
+
+  /**
+   * S6 keep: a window nobody asked the chat for opened. If it landed on the chat's screen (tiled,
+   * on a normal workspace, and not a second window of an app beside the chat), move it to another
+   * screen, or beside the chat when there is no other screen.
+   */
+  private async keepWindow(address: string, className: string): Promise<void> {
+    const hypr = this.o.hypr!;
+    const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
+    const c = clients.find((x) => x.address === address);
+    const chat = clients.find((x) => CHAT_CLASS.test(x.class));
+    const home = homeMonitor(monitors, chat, this.o.home);
+    if (!c || !home || c.floating || c.monitor !== home.id || (c.workspace?.id ?? 1) < 0) return;
+    const besidePids = new Set(clients.filter((x) => this.apps.get(x.address)?.place === 'beside').map((x) => x.pid));
+    if (c.pid !== undefined && besidePids.has(c.pid)) return;
+    const name = cleanLabel(className);
+    const other = await this.otherScreen();
+    if (other) return this.placeWindow(address, name, { place: 'screen', screen: other }, false);
+    await this.set('side', 'keep', name);
+    await this.placeWindow(address, name, { place: 'beside' }, false);
+  }
+
+  private lastKeepWorkspace = 0;
+  private keepRecheck: NodeJS.Timeout | null = null;
+
+  /**
+   * S6 keep: the chat's screen shows another workspace (Super+2 while on it, say). That workspace
+   * moves to the first other screen, the chat's workspace comes back, and focus goes to the
+   * moved one, so the user still lands where they asked. At most once a second, so it can't loop.
+   */
+  private async keepWorkspace(): Promise<void> {
+    const hypr = this.o.hypr!;
+    const now = Date.now();
+    if (now - this.lastKeepWorkspace < 1000) {
+      // Look again once the second is up, so a quick second switch isn't missed.
+      if (!this.keepRecheck) {
+        this.keepRecheck = setTimeout(() => {
+          this.keepRecheck = null;
+          void this.keepWorkspace().catch(() => undefined);
+        }, 1000 - (now - this.lastKeepWorkspace));
+        this.keepRecheck.unref();
+      }
+      return;
+    }
+    const [clients, monitors] = await Promise.all([hypr.clients(), hypr.monitors()]);
+    const chat = clients.find((x) => CHAT_CLASS.test(x.class));
+    const home = homeMonitor(monitors, chat, this.o.home);
+    const mine = chat?.workspace?.id;
+    const shown = home?.activeWorkspace?.id;
+    if (!chat || !home || chat.monitor !== home.id || mine === undefined || shown === undefined) return;
+    if (shown === mine || mine < 0 || shown < 0 || !Number.isInteger(mine) || !Number.isInteger(shown)) return;
+    const other = monitors.filter((m) => !m.disabled && m.id !== home.id && MONITOR_NAME.test(m.name)).sort((a, b) => a.x - b.x || a.y - b.y)[0];
+    if (!other) return;
+    this.lastKeepWorkspace = now;
+    await this.run('keep workspace', `workspace ${shown}`, async (h) => {
+      await h.dispatch(`hl.dsp.workspace.move({ monitor = "${checkedName(other.name)}", workspace = "${shown}" })`);
+      await h.dispatch(`hl.dsp.focus({ workspace = "${mine}" })`);
+      await h.dispatch(`hl.dsp.focus({ workspace = "${shown}" })`);
+    }, { place: 'screen', screen: other.name });
   }
 
   /** Puts one app window in a place and remembers it there. Audited; a refusal is a notice. */
@@ -441,6 +539,9 @@ export class ChatWindow {
     for (const expr of dispatchesFor(mode, win, mon)) await hypr.dispatch(expr);
   }
 }
+
+/** A window class as a name in notices and the audit log. */
+const cleanLabel = (c: string) => c.replace(/[^A-Za-z0-9._ -]/g, '').trim().slice(0, 40) || 'a window';
 
 function checkedName(name: string): string {
   if (!MONITOR_NAME.test(name)) throw new Error('bad monitor name');

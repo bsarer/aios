@@ -171,8 +171,10 @@ export const AiosConfig = z.strictObject({
       monitor: z.union([z.literal(''), z.string().regex(MONITOR_NAME, 'must be a Hyprland monitor name such as eDP-1')]).default(''),
       /** auto: on another screen when there is one, otherwise over the chat (the orb). */
       defaultPlace: z.enum(['auto', 'over', 'beside', 'screen']).default('auto'),
+      /** Keep the screen: the chat never becomes the orb, and other windows and workspaces are moved off its screen. */
+      keep: z.boolean().default(true),
     })
-    .default({ monitor: '', defaultPlace: 'auto' }),
+    .default({ monitor: '', defaultPlace: 'auto', keep: true }),
   /** D1: reading Word and Excel files. */
   docs: DocsConfig.default({
     enabled: true,

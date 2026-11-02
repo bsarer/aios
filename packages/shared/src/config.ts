@@ -1,5 +1,6 @@
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
+import { MONITOR_NAME } from './window.js';
 
 /**
  * Reference to a secret held in the system keyring, e.g. `keyring:openrouter`.
@@ -163,6 +164,15 @@ export const AiosConfig = z.strictObject({
       kiosk: z.boolean().default(true),
     })
     .default({ port: 7777, kiosk: true }),
+  /** S6: the screen AI OS takes over, and where apps open when the user doesn't say. */
+  screen: z
+    .strictObject({
+      /** Hyprland output name, e.g. "eDP-1". Empty: the screen the chat window is on. */
+      monitor: z.union([z.literal(''), z.string().regex(MONITOR_NAME, 'must be a Hyprland monitor name such as eDP-1')]).default(''),
+      /** auto: on another screen when there is one, otherwise over the chat (the orb). */
+      defaultPlace: z.enum(['auto', 'over', 'beside', 'screen']).default('auto'),
+    })
+    .default({ monitor: '', defaultPlace: 'auto' }),
   /** D1: reading Word and Excel files. */
   docs: DocsConfig.default({
     enabled: true,

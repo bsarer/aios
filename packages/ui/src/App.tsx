@@ -74,11 +74,14 @@ export function App() {
   return (
     <div className="flex h-full flex-col">
       <StatusStrip status={state.status} conn={conn} />
-      {mode === 'half' && (
+      {(mode === 'half' || mode === 'side') && (
         <div className="mx-auto mt-2 flex gap-2" data-testid="window-controls">
-          <button type="button" data-testid="window-orb" className="glass rounded-lg px-3 py-1 text-[14px]" onClick={() => send({ type: 'window', mode: 'orb' })}>
-            Back to the orb
-          </button>
+          {/* S6: beside an app the chat has its own half; only half floats over one and can shrink back. */}
+          {mode === 'half' && (
+            <button type="button" data-testid="window-orb" className="glass rounded-lg px-3 py-1 text-[14px]" onClick={() => send({ type: 'window', mode: 'orb' })}>
+              Back to the orb
+            </button>
+          )}
           <button type="button" data-testid="window-full" className="glass rounded-lg px-3 py-1 text-[14px]" onClick={() => send({ type: 'window', mode: 'full' })}>
             Full screen
           </button>

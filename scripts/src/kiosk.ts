@@ -13,7 +13,7 @@
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { CHAT_APP_CLASS, CHAT_CLASS_PATTERN } from '@aios/shared';
+import { CHAT_APP_CLASS, CHAT_CLASS_PATTERN, MONITOR_NAME } from '@aios/shared';
 
 export const APP_CLASS = CHAT_APP_CLASS;
 export const CLASS_PATTERN = CHAT_CLASS_PATTERN;
@@ -159,25 +159,63 @@ esac
 
 const lua = (s: string) => JSON.stringify(s);
 
-/** ~/.config/hypr/aios.lua: Hyprland 0.55+ Lua API (hl.window_rule, hl.on, hl.bind, hl.dsp.exec_cmd). */
-export function hyprlandModule(o: { launcher: string; autostart: boolean }): string {
+/**
+ * ~/.config/hypr/aios.lua: Hyprland 0.55+ Lua API (hl.window_rule, hl.workspace_rule, hl.on,
+ * hl.bind, hl.dsp.exec_cmd). S6: with a monitor (config [screen] monitor), the chat's
+ * workspace 1 lives on that screen and the chat window opens there.
+ */
+export function hyprlandModule(o: { launcher: string; autostart: boolean; monitor?: string }): string {
   const open = lua(`${o.launcher} open`);
   const exit = lua(`${o.launcher} exit`);
+  if (o.monitor && !MONITOR_NAME.test(o.monitor)) throw new Error(`${JSON.stringify(o.monitor)} is not a monitor name`);
+  const screen = o.monitor
+    ? `
+-- AI OS owns ${o.monitor}: workspace 1 stays on it, and the chat opens there.
+hl.workspace_rule({ workspace = "1", monitor = ${lua(o.monitor)}, default = true, persistent = true })
+`
+    : '';
   return `-- AI OS kiosk. Written by \`pnpm run setup\`; removed by \`pnpm --filter @aios/scripts uninstall\`.
 -- Edits here are overwritten when setup runs again.
-
+${screen}
 -- The chat window is fullscreen on workspace 1.
 hl.window_rule({
   name = "aios-kiosk",
   match = { class = ${lua(CLASS_PATTERN)} },
   fullscreen = true,
-  workspace = "1",
+  workspace = "1",${o.monitor ? `
+  monitor = ${lua(o.monitor)},` : ''}
 })
 ${o.autostart ? `\n-- Open the chat at login.\nhl.on("hyprland.start", function()\n  hl.exec_cmd(${open})\nend)\n` : ''}
 -- Handled by the compositor, so they work even when the chat is hung.
 hl.bind(${lua(EXIT_KEYS)}, hl.dsp.exec_cmd(${exit}), { description = "Exit AI OS" })
 hl.bind(${lua(OPEN_KEYS)}, hl.dsp.exec_cmd(${open}), { description = "Open AI OS" })
 `;
+}
+
+/** S6: a screen setup can offer AI OS, from `hyprctl -j monitors`. */
+export interface ScreenChoice {
+  name: string;
+  width: number;
+  height: number;
+  focused: boolean;
+}
+
+/** The enabled monitors in `hyprctl -j monitors` output with names Hyprland dispatches accept; [] for anything else. */
+export function parseMonitors(json: string): ScreenChoice[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((m: unknown) => {
+    if (!m || typeof m !== 'object') return [];
+    const r = m as Record<string, unknown>;
+    if (typeof r.name !== 'string' || !MONITOR_NAME.test(r.name) || r.disabled === true) return [];
+    const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+    return [{ name: r.name, width: n(r.width), height: n(r.height), focused: r.focused === true }];
+  });
 }
 
 /** hyprland.lua with REQUIRE_LINE appended once. */
@@ -204,6 +242,8 @@ export interface InstallOptions {
   autostart: boolean;
   /** Edit hyprland.lua. False leaves Hyprland untouched and only prints what to add. */
   hyprland: boolean;
+  /** S6: the screen AI OS owns (config [screen] monitor); empty for the one it opens on. */
+  monitor?: string;
 }
 
 /** What install did, for setup to print. */
@@ -236,7 +276,7 @@ export async function installKiosk(p: KioskPaths, o: InstallOptions, run: Run): 
     );
     return report;
   }
-  await writeIfChanged(p.aiosLua, hyprlandModule({ launcher: p.launcher, autostart: o.autostart }), 0o644, report);
+  await writeIfChanged(p.aiosLua, hyprlandModule({ launcher: p.launcher, autostart: o.autostart, ...(o.monitor ? { monitor: o.monitor } : {}) }), 0o644, report);
   if (!o.hyprland) {
     report.notes.push(`Add this line to the end of ${p.hyprlandLua} to turn the kiosk on:\n  ${REQUIRE_LINE}`);
     return report;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AppPlace } from '@aios/shared';
 import { MAX_CHANGES, SheetChange, WordChange } from '../docs/changes.js';
 
 /**
@@ -178,8 +179,30 @@ export const ALPHA_TOOLS = [
     name: 'open_app',
     tier: 'device',
     description:
-      'Start an installed app, by its id from apps_list or its exact name. It opens in its own window; the chat shrinks to a red orb at the top of the screen and comes back when the app is closed. Apps start without files, links or options.',
-    input: z.strictObject({ app: z.string().min(1).max(200).describe('App id from apps_list, e.g. "firefox", or its exact name') }),
+      'Start an installed app, by its id from apps_list or its exact name, in its own window. place: "over" opens it on the chat\'s screen and the chat shrinks to a red orb at the top until it closes; "beside" splits the chat\'s screen, chat on the left and the app on the right; "screen" opens it on another screen and the chat stays as it is. Leave place out unless the user said where. Apps start without files, links or options.',
+    input: z.strictObject({
+      app: z.string().min(1).max(200).describe('App id from apps_list, e.g. "firefox", or its exact name'),
+      place: AppPlace.optional().describe('over, beside or screen; only when the user said where'),
+      screen: z.string().min(1).max(40).optional().describe('For place "screen": a screen name from screens_list (e.g. "DP-2") or left, right, above, below'),
+    }),
+  }),
+  // ── Screens (S6) ──
+  def({
+    name: 'screens_list',
+    tier: 'read',
+    description: "The screens connected to this computer: which one is the chat's own, where the others are (left, right, above, below), their size, and the apps open on each.",
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'move_app',
+    tier: 'device',
+    description:
+      'Move an app that is already open: "over" onto the chat\'s screen (the chat becomes the orb), "beside" the chat (the screen is split, chat on the left), or "screen" to another screen (the chat comes back full screen when nothing is left over or beside it). Nothing is closed.',
+    input: z.strictObject({
+      app: z.string().min(1).max(200).describe('The app\'s name or id, as apps_list or screens_list shows it'),
+      place: AppPlace,
+      screen: z.string().min(1).max(40).optional().describe('For place "screen": a screen name from screens_list or left, right, above, below'),
+    }),
   }),
   def({
     name: 'build_app',

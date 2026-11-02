@@ -19,7 +19,7 @@ import { folderStatus } from './mailbox.js';
 import providers from '../providers.json' with { type: 'json' };
 import { terminalPrompter } from './prompt.js';
 import { type Prompter, collectSetup } from './setup-lib.js';
-import { EXIT_KEYS, OPEN_KEYS, hyprlandModule, installKiosk, kioskPaths, launcherScript, unitFile } from './kiosk.js';
+import { EXIT_KEYS, OPEN_KEYS, hyprlandModule, installKiosk, kioskPaths, launcherScript, parseMonitors, unitFile } from './kiosk.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const run = async (cmd: string, args: string[]) => void (await promisify(execFile)(cmd, args, { cwd: root }));
@@ -51,21 +51,58 @@ async function testMail(config: AiosConfig, keyring: Keyring): Promise<string> {
   }
 }
 
+async function writeConfig(path: string, config: AiosConfig): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(path, serializeConfig(config), { mode: 0o600 });
+  await chmod(path, 0o600);
+}
+
+/**
+ * S6: with more than one screen, ask which one AI OS takes over and keep the answer in
+ * config [screen] monitor. With one screen, or outside Hyprland, nothing is asked.
+ */
+async function chooseScreen(config: AiosConfig, p: Prompter, save: (c: AiosConfig) => Promise<void>): Promise<AiosConfig> {
+  const out = await promisify(execFile)('hyprctl', ['-j', 'monitors'], { timeout: 3000 }).then((r) => r.stdout, () => '');
+  const screens = parseMonitors(out);
+  if (screens.length < 2) return config;
+  const list = screens.map((s) => `${s.name} (${s.width}×${s.height}${s.focused ? ', focused now' : ''})`).join(', ');
+  const current = screens.find((s) => s.name === config.screen.monitor)?.name ?? screens.find((s) => s.focused)?.name ?? screens[0]!.name;
+  for (;;) {
+    const answer = (await p.ask(`Which screen should AI OS take over? ${list}`, { default: current })).trim();
+    const hit = screens.find((s) => s.name.toLowerCase() === answer.toLowerCase());
+    if (!hit) {
+      console.log(`Type one of: ${screens.map((s) => s.name).join(', ')}`);
+      continue;
+    }
+    if (hit.name === config.screen.monitor) return config;
+    const next = { ...config, screen: { ...config.screen, monitor: hit.name } };
+    await save(next);
+    console.log(`AI OS will use ${hit.name}; apps can open beside the chat there or on the other screens.`);
+    return next;
+  }
+}
+
 /** Offer the systemd service and Hyprland kiosk (plan §8). Nothing changes without a yes. */
-async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean): Promise<void> {
+async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean, save: (c: AiosConfig) => Promise<void> = async () => undefined): Promise<void> {
   const paths = kioskPaths();
   const coreDir = join(root, 'packages', 'core');
+  const monitor = config.screen.monitor ? { monitor: config.screen.monitor } : {};
   if (dryRun) {
     console.log(`\n--- ${paths.unit} (dry run) ---\n${unitFile({ node: process.execPath, coreDir })}`);
     console.log(`--- ${paths.launcher} (dry run) ---\n${launcherScript({ port: config.ui.port, profileDir: paths.profileDir })}`);
-    console.log(`--- ${paths.aiosLua} (dry run) ---\n${hyprlandModule({ launcher: paths.launcher, autostart: config.ui.kiosk })}`);
+    console.log(`--- ${paths.aiosLua} (dry run) ---\n${hyprlandModule({ launcher: paths.launcher, autostart: config.ui.kiosk, ...monitor })}`);
     return;
   }
   if (!(await p.confirm('Run AI OS as a service that starts at login (systemd --user), with the full-screen chat?', true))) return;
   const hyprland = await p.confirm(`Add one line to ${paths.hyprlandLua} to load the kiosk window rule and keys? (a backup is kept)`, true);
+  config = await chooseScreen(config, p, save);
   console.log('building the UI…');
   await run('pnpm', ['--filter', '@aios/ui', 'build']);
-  const report = await installKiosk(paths, { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland }, run);
+  const report = await installKiosk(
+    paths,
+    { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, ...(config.screen.monitor ? { monitor: config.screen.monitor } : {}) },
+    run,
+  );
   for (const f of report.written) console.log(`wrote ${f}`);
   for (const n of report.notes) console.log(n);
   if (await p.confirm('Start (or restart) the service now? Stop any `pnpm start` first, they use the same port.', true)) {
@@ -91,7 +128,7 @@ async function main(): Promise<void> {
     if (!existing) throw new Error(`run \`pnpm run setup\` first; ${path} not found`);
     const p = terminalPrompter();
     try {
-      await kiosk(existing, p, dryRun);
+      await kiosk(existing, p, dryRun, (c) => writeConfig(path, c));
     } finally {
       p.close();
     }
@@ -140,7 +177,7 @@ async function main(): Promise<void> {
     }
   }
   try {
-    await kiosk(result.config, prompter, false);
+    await kiosk(result.config, prompter, false, (c) => writeConfig(path, c));
   } finally {
     prompter.close();
   }

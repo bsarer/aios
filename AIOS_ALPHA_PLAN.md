@@ -367,6 +367,36 @@ A fourth model role, `local`: a small model on this computer through Ollama's Op
 `mail_create_draft` takes `attachments`: paths of files in `[files] roots`, resolved by F1's `FileRoots` (real path inside a root, no links leading out, no hidden files), at most 10 files and 18 MB together (under the common 25 MB message limit once base64-encoded). `mail/outgoing-files.ts` reads each file once, types it by its first bytes (never the name alone) and keeps its path, size and sha256 with the draft (`drafts.attachments`). The bytes are part of the draft's hash, so the card's Send click only matches the files as they were when the card was made; on the click every file is resolved and read again and must be byte for byte the same, or nothing is sent and the card says which file changed. The card lists the files (name, size, path on hover); Edit can remove files, never add one. Drafting stays `draft` tier and sending stays a click (A5): a model call can never send. While an email or other outside text is in view, a file the user's own message doesn't name gets a warning on the card ("attach your tax return" in an email). Sends and audits record file counts and bytes, never contents. No new dependencies (nodemailer already builds the multipart message).
 *Accept:* "email the lease to Sara" drafts with the lease attached and sends it only on the click; a file outside the folders, a link leading out or a hidden file is refused; a file changed or swapped for a link after the card was made is not sent; a hostile email asking for a file only produces a card with a warning (CI injection suite); checked end to end against GreenMail.
 
+**Daily tasks T1 to T9** (added 2026-11-02 at the user's request; proposed, not yet approved; each gets its own plan and approval before code, in this order unless the user reorders)
+The everyday jobs the chat should cover next. Sizes are rough: S about a day, M two to four days. All follow the existing rules: reading is free, anything that sends, changes or deletes waits for a hash-checked click, outside text is untrusted, every tool call is audited.
+
+**T1: Reminders and to-dos** (S)
+"Remind me at 4 to call Ana", "add milk to my list", "what's on my list?", "done with the Ana call". A local list (`~/.config/aios/todos.md`, plain Markdown like memory) and a `reminders` EventSource that fires through the existing notifications, honouring quiet hours and pause. The chat model fills in the time as an ISO date in the tool call; code checks it and repeats it back on the card. Adding a to-do or reminder from the user's own words is a small change; nothing from email, invites or documents can add one (CI injection suite). T2, T4 and T5 build on it.
+
+**T2: Morning brief** (S)
+One card at the first login of the day (or `/brief`): urgent mail from triage, today's events and free gaps, to-dos and reminders due today. Code gathers and orders everything; a model only writes a two-line intro. That job suits the local model (L1 pattern: no tools, inputs inside `<untrusted>`, code fallback without Ollama), so the brief can run without a cloud call. Read only.
+
+**T3: Inbox housekeeping** (M)
+Archive, mark read or unread, move to a folder, snooze until a time, unsubscribe (List-Unsubscribe header, mailto or one-click POST only). Each is a write-tier card; several messages go on one card listing them. Never offered while email text is in view, like calendar changes.
+
+**T4: Follow-up tracking** (M)
+"Tell me if Sara hasn't replied by Friday." A watch on a sent message's thread, checked by code (no model) against new mail; when the date passes without a reply, a reminder (T1) offers Draft follow-up.
+
+**T5: Meeting prep** (S to M)
+Ten minutes before an event (`calendar` EventSource), a card with recent mail threads and indexed files about its guests or title. Read only; event and mail text stay untrusted.
+
+**T6: Contacts from mail history** (S)
+"What's Ana's email?", "who did I write to about the lease?". Built by code from From/To/Cc headers of INBOX and Sent; no new store of message text. Also lets the Send card's new-recipient warning say "you have written to this address before".
+
+**T7: Screenshots and clipboard** (S)
+"Screenshot this window into Documents", "save what I copied as a note". Screenshots through Omarchy's own screenshot command, saved inside `[files] roots` without overwriting. Clipboard text is untrusted and only read when the user asks.
+
+**T8: Open links and web lookup** (S for opening, M for reading pages)
+"Open my bank's site" opens a URL the user gave (or a saved bookmark) in the default browser on a card. Fetching and summarizing a page is a separate step: page text is untrusted like email, with no write-tier tools or memory while it is in view.
+
+**T9: Power and updates** (S for sleep, restart and shut down; M for system updates)
+Sleep, restart and shut down on a card, through Omarchy's own commands. System updates (`omarchy-update`) on a card with the list of packages, and a warning to save work first.
+
 **A8: Dogfood week**
 Use it daily (including system controls); record median latency, cost per day, notification precision (useful vs noisy), crashes, and what you reached for outside the chat.
 *Accept:* findings report that decides the post-alpha order (WhatsApp, docs, files, more system tools).

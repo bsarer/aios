@@ -11,6 +11,7 @@ export type Command =
   | { name: 'remember'; text: string }
   | { name: 'reindex' }
   | { name: 'checkup' }
+  | { name: 'doctor' }
   | { name: 'unknown'; raw: string };
 
 /** null when the text is a normal message. */
@@ -39,6 +40,8 @@ export function parseCommand(text: string): Command | null {
       return { name: 'reindex' };
     case 'checkup':
       return { name: 'checkup' };
+    case 'doctor':
+      return { name: 'doctor' };
     default:
       return { name: 'unknown', raw: t };
   }
@@ -55,6 +58,7 @@ export const HELP_TEXT = [
   '/export  write all memory to one Markdown file',
   '/reindex read your files again for file search, and show how far the index is',
   '/checkup show disk, memory and processor now, and suggest files and windows to tidy up',
+  '/doctor  check the install: service, kiosk, Omarchy commands, top bar button, keyring',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Esc stops a reply.',
 ].join('\n');

@@ -1,6 +1,9 @@
 import { AiosConfig, LocalModelConfig, MODEL_ROLES, type CloudModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
 import { TEST_MAILBOX } from './mailbox.js';
 
+// P1: the doctor checks the same references, so the list lives in core.
+export { secretRefs } from '@aios/core';
+
 /** Asks the user something. `secret` answers must not be echoed. */
 export interface Prompter {
   ask(question: string, opts?: { default?: string; secret?: boolean }): Promise<string>;
@@ -13,11 +16,6 @@ export const CALENDAR_SECRET_REF: SecretRef = 'keyring:calendar-client-secret';
 export const CALENDAR_TOKEN_REF: SecretRef = 'keyring:calendar-google';
 
 /** Every keyring reference a config points at, deduplicated. */
-export function secretRefs(config: AiosConfig): SecretRef[] {
-  const calendar = config.calendar ? [...(config.calendar.clientSecretRef ? [config.calendar.clientSecretRef] : []), config.calendar.tokenRef] : [];
-  return [...new Set([config.mail.passwordRef, ...MODEL_ROLES.map((r) => config.models[r].apiKeyRef), ...calendar])];
-}
-
 export interface CollectedSetup {
   config: AiosConfig;
   /** Secrets to store, keyed by reference. Only entries the user typed. */

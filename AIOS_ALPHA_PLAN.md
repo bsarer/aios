@@ -374,10 +374,21 @@ One rule: the chat is always full screen on its own workspace, and nothing else 
 - **A visible way out:** a line under the status strip says where apps open (the other screen, or the next workspace with Super+2) and how to come back. At start, core puts a chat window left as the orb by an older version back to full screen.
 - S5's Change button now brings the chat forward (focus) instead of opening it at half screen beside the app.
 *Accept:* checked on the real machine with one screen and with two. Opening Firefox from the chat never covers or shrinks AI OS; an app opened from the launcher never stays on the chat's workspace; the AI button and Super+Shift+H always bring AI OS back full screen; the dot appears for a notification while elsewhere and clears on return; the unit tests and the end-to-end check cover these rules against the pretend Hyprland.
+*Status:* merged; checked by the user on the laptop on 2026-11-02 ("it seems to work fine").
 
 **P1: Packaging and reinstall** (approved 2026-11-02; after S7)
 `install.sh` (checks Omarchy 4, Hyprland 0.55+, Node 22.13+ and pnpm; installs a release tag into `~/.local/share/aios/app`; runs `setup --kiosk`; again to upgrade), `pnpm doctor` and `/doctor` (service, the `aios.lua` line, session variables, the `omarchy-*` commands S1 uses, the top bar button, the keyring), `pnpm backup` and `install.sh --restore` (config and data, never keyring secrets), a `v0.1.0` tag with a CHANGELOG. Before other developers are invited: CONTRIBUTING.md, a list of GitHub settings for the owner (protect `main`, CODEOWNERS on the safety-critical files), and a secret scan of the whole history.
 *Accept:* backup, uninstall, Omarchy update, install of v0.1.0, restore and `pnpm doctor` all pass on the real machine.
+*Built:* `install.sh` (`--check`, `--ref`, `--restore`; refuses root and local changes in the installed copy), `packages/core/src/doctor.ts` (`pnpm doctor`, `/doctor`), `scripts/src/backup.ts`, `CHANGELOG.md`, `CONTRIBUTING.md` (with the owner's GitHub settings list) and `.github/CODEOWNERS`. History scan before inviting developers (2026-11-02, all 152 commits): no keys, tokens or private keys; the only matches are test fakes. The tag is created by the owner after merge.
+*PR:* [#35](https://github.com/bsarer/aios/pull/35) (open). To do on the real machine, in order, after it is merged:
+1. Tag the release: `git tag v0.1.0 && git push origin v0.1.0`.
+2. `pnpm backup` (writes `~/aios-backup-<date>.tar.gz`; keyring secrets are not in it).
+3. Optional, for a clean test: `pnpm --filter @aios/scripts uninstall`.
+4. Update Omarchy.
+5. `./install.sh --restore ~/aios-backup-<date>.tar.gz` (installs v0.1.0 into `~/.local/share/aios/app` and runs `setup --kiosk`).
+6. `pnpm doctor` (or `/doctor` in the chat); fix any ✗ line with the fix it names. If secrets are reported missing, `pnpm run setup`.
+7. Check the screens again (S7) and that mail, calendar and the AI button work.
+8. If all pass, mark P1 accepted, then before inviting developers: the GitHub settings in CONTRIBUTING.md (protect `main` with CI, one review and Code Owners; Write role for collaborators), and decide private or public (a license only if public).
 
 **Daily tasks T1 to T9** (added 2026-11-02 at the user's request; proposed, not yet approved; each gets its own plan and approval before code, in this order unless the user reorders)
 The everyday jobs the chat should cover next. Sizes are rough: S about a day, M two to four days. All follow the existing rules: reading is free, anything that sends, changes or deletes waits for a hash-checked click, outside text is untrusted, every tool call is audited.

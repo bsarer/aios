@@ -16,6 +16,8 @@
     "check:account": "pnpm --filter @aios/scripts check-account",
     "calendar:login": "pnpm --filter @aios/scripts calendar-login",
     "setup": "pnpm --filter @aios/scripts run setup",
+    "doctor": "pnpm --filter @aios/scripts run doctor",
+    "backup": "pnpm --filter @aios/scripts run backup",
     "bakeoff": "pnpm --filter @aios/evals run bakeoff",
     "test:e2e": "pnpm --filter @aios/ui build && pnpm --filter @aios/scripts run e2e",
     "start": "pnpm --filter @aios/ui build && pnpm --filter @aios/core start",

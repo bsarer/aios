@@ -33,6 +33,8 @@ export const HyprClient = z.looseObject({
   focusHistoryID: z.number().optional(),
   mapped: z.boolean().optional(),
   hidden: z.boolean().optional(),
+  /** S6 keep: windows of an app already beside the chat share its process. */
+  pid: z.number().optional(),
 });
 export type HyprClient = z.infer<typeof HyprClient>;
 
@@ -42,6 +44,8 @@ export const HyprMonitor = z.looseObject({
   name: z.string().default(''),
   /** S6: switched off in the monitor settings; nothing goes there. */
   disabled: z.boolean().default(false),
+  /** S6 keep: the workspace shown on it now; id is missing for named workspaces. */
+  activeWorkspace: z.looseObject({ id: z.number().optional(), name: z.string() }).optional(),
   width: z.number(),
   height: z.number(),
   x: z.number(),
@@ -54,7 +58,7 @@ export const HyprMonitor = z.looseObject({
 });
 export type HyprMonitor = z.infer<typeof HyprMonitor>;
 
-export type HyprEvent = { name: 'openwindow'; address: string; className: string } | { name: 'closewindow'; address: string };
+export type HyprEvent = { name: 'openwindow'; address: string; className: string } | { name: 'closewindow'; address: string } | { name: 'workspace' };
 
 export interface HyprIpc {
   clients(): Promise<HyprClient[]>;
@@ -76,6 +80,8 @@ export function parseHyprEvent(line: string): HyprEvent | null {
     return addr && /^[0-9a-f]+$/.test(addr) ? { name, address: `0x${addr}`, className: className ?? '' } : null;
   }
   if (name === 'closewindow') return /^[0-9a-f]+$/.test(data) ? { name, address: `0x${data}` } : null;
+  // S6 keep: a screen now shows another workspace (Hyprland 0.55 sends workspacev2>>ID,NAME); the state is read again.
+  if (name === 'workspacev2') return { name: 'workspace' };
   return null;
 }
 

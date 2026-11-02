@@ -130,7 +130,8 @@ describe('Hyprland', () => {
   it('parses the window events it needs', () => {
     expect(parseHyprEvent('openwindow>>55d0c1f4a2b0,1,firefox,Mozilla Firefox, with commas')).toEqual({ name: 'openwindow', address: '0x55d0c1f4a2b0', className: 'firefox' });
     expect(parseHyprEvent('closewindow>>55d0c1f4a2b0')).toEqual({ name: 'closewindow', address: '0x55d0c1f4a2b0' });
-    for (const l of ['activewindow>>firefox,x', 'closewindow>>zz; rm', 'openwindow>>,1,x,y', 'nonsense']) expect(parseHyprEvent(l)).toBeNull();
+    expect(parseHyprEvent('workspacev2>>2,2')).toEqual({ name: 'workspace' });
+    for (const l of ['activewindow>>firefox,x', 'closewindow>>zz; rm', 'openwindow>>,1,x,y', 'workspace>>2', 'nonsense']) expect(parseHyprEvent(l)).toBeNull();
   });
 
   it('is off outside Hyprland', () => {
@@ -269,7 +270,7 @@ class FakeHypr implements HyprIpc {
   }
 }
 
-function windowRig(hypr: FakeHypr | null = new FakeHypr(), extra: Pick<ChatWindowOptions, 'home' | 'defaultPlace'> = {}) {
+function windowRig(hypr: FakeHypr | null = new FakeHypr(), extra: Pick<ChatWindowOptions, 'home' | 'defaultPlace' | 'keep'> = {}) {
   const dir = tmp('window');
   const auditPath = join(dir, 'audit.jsonl');
   const modes: WindowMode[] = [];
@@ -814,5 +815,101 @@ describe('screens: tools', () => {
     await call('move_app', { app: 'spotify', place: 'screen', screen: 'DP-2' }, true);
     expect(steps).toEqual([]);
     expect(shown.map((c) => (c.kind === 'action' ? c.title.replace(/\?.*$/, '') : ''))).toEqual(['Open “firefox” beside the chat', 'Move “spotify” to screen “DP-2”']);
+  });
+});
+
+describe('screens: keep the chat’s screen', () => {
+  const ws = (id: number) => ({ id, name: String(id) });
+  const twoScreens = () => {
+    const h = new FakeHypr();
+    h.mons = [{ ...laptop, activeWorkspace: ws(1) }, { ...right, activeWorkspace: ws(3) }];
+    h.windows = [chat({ workspace: ws(1) })];
+    return h;
+  };
+  const opened = (h: FakeHypr, c: Partial<HyprClient>) => {
+    const w = chat({ address: '0xf00', class: 'kitty', fullscreen: 0, workspace: ws(1), pid: 42, ...c });
+    h.windows.push(w);
+    h.emit({ name: 'openwindow', address: w.address, className: w.class });
+  };
+
+  it('never becomes the orb: "over" goes to another screen, or beside with one screen', async () => {
+    const h = twoScreens();
+    const { w, modes } = windowRig(h, { keep: true });
+    expect(await w.placement('over')).toEqual({ place: 'screen', screen: 'DP-2' });
+    expect(await w.placement('screen', 'this')).toEqual({ place: 'screen', screen: 'DP-2' });
+    // A start that doesn't choose (a document, a built app) is kept off the chat's screen too.
+    await w.appStarting('WordCraft');
+    expect(h.dispatched).toEqual(['hl.dsp.focus({ monitor = "DP-2" })']);
+    expect(modes).toEqual([]);
+    expect(await windowRig(new FakeHypr(), { keep: true }).w.placement('over')).toEqual({ place: 'beside' });
+  });
+
+  it('moves a window the user opened on the chat’s screen to the other screen', async () => {
+    const h = twoScreens();
+    const { w, settle, log } = windowRig(h, { keep: true });
+    opened(h, {});
+    await settle();
+    expect(h.window('0xf00')!.monitor).toBe(1);
+    expect(w.mode).toBe('full');
+    expect(log().at(-1)).toMatchObject({ kind: 'window', app: 'kitty', place: 'screen', screen: 'DP-2', ok: true });
+  });
+
+  it('leaves dialogs, other screens, special workspaces and the beside app’s own windows alone', async () => {
+    const h = twoScreens();
+    const { w, settle } = windowRig(h, { keep: true });
+    opened(h, { address: '0x1', floating: true });
+    opened(h, { address: '0x2', monitor: 1 });
+    opened(h, { address: '0x3', workspace: { id: -98, name: 'special:scratch' } });
+    await w.appStarting('Firefox', { place: 'beside' });
+    opened(h, { address: '0x4', class: 'firefox', pid: 7 });
+    await settle();
+    opened(h, { address: '0x5', class: 'firefox', pid: 7 });
+    await settle();
+    expect(h.dispatched.filter((d) => /monitor = "DP-2"/.test(d))).toEqual([]);
+    expect(h.window('0x5')!.monitor).toBe(0);
+  });
+
+  it('with one screen, puts a window the user opened beside the chat', async () => {
+    const h = new FakeHypr();
+    h.windows = [chat({ workspace: ws(1) })];
+    const { w, settle } = windowRig(h, { keep: true });
+    opened(h, {});
+    await settle();
+    expect(w.mode).toBe('side');
+    expect(h.window('0xf00')).toMatchObject({ floating: true });
+  });
+
+  it('moves a workspace switched onto the chat’s screen to the other screen, and focuses it there', async () => {
+    const h = twoScreens();
+    const { settle } = windowRig(h, { keep: true });
+    h.emit({ name: 'workspace' });
+    await settle();
+    expect(h.dispatched).toEqual([]);
+    h.mons[0] = { ...h.mons[0]!, activeWorkspace: ws(2) };
+    h.emit({ name: 'workspace' });
+    await settle();
+    expect(h.dispatched).toEqual([
+      'hl.dsp.workspace.move({ monitor = "DP-2", workspace = "2" })',
+      'hl.dsp.focus({ workspace = "1" })',
+      'hl.dsp.focus({ workspace = "2" })',
+    ]);
+  });
+
+  it('does none of this when keep is off, or with one screen for workspaces', async () => {
+    const h = twoScreens();
+    h.mons[0] = { ...h.mons[0]!, activeWorkspace: ws(2) };
+    const { w, settle } = windowRig(h);
+    opened(h, {});
+    h.emit({ name: 'workspace' });
+    await settle();
+    expect(h.dispatched).toEqual([]);
+    expect(await w.placement('over')).toEqual({ place: 'over' });
+    const one = new FakeHypr();
+    one.mons = [{ ...laptop, activeWorkspace: ws(2) }];
+    one.windows = [chat({ workspace: ws(1) })];
+    const r = windowRig(one, { keep: true });
+    one.emit({ name: 'workspace' });
+    await r.settle();
+    expect(one.dispatched).toEqual([]);
   });
 });

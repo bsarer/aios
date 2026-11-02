@@ -182,6 +182,7 @@ async function main(): Promise<void> {
     // S6: the screen the chat owns, and where apps open when the user doesn't say.
     home: config.screen.monitor,
     defaultPlace: config.screen.defaultPlace,
+    keep: config.screen.keep,
     audit,
     // The shell is created below; the UI hears about moves once it exists.
     onMode: (mode) => shell?.broadcast({ type: 'window', mode }),

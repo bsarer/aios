@@ -4,7 +4,23 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS), L1 (the local system assistant on Ollama), M1 (sending files by email) and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) are merged. P1 (install.sh, `pnpm doctor`, backup and restore) is in review. Changes are listed in [CHANGELOG.md](CHANGELOG.md); to help, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Install, upgrade and restore
+
+On Omarchy 4, as yourself (not root), in the desktop session:
+
+```sh
+git clone https://github.com/bsarer/aios.git && cd aios
+./install.sh --check      # only checks Omarchy 4, Hyprland 0.55+, Node 22.13+, pnpm, git, tar and secret-tool
+./install.sh              # installs the newest release into ~/.local/share/aios/app and runs setup
+```
+
+- **Upgrade:** run `./install.sh` again (from the clone or from `~/.local/share/aios/app`). It fetches the newest `v*` tag, reinstalls packages, rebuilds the chat page and runs `setup --kiosk`, which keeps your answers. `--ref main` (or any tag) installs that instead. It stops if the installed copy has local changes.
+- **Check:** `pnpm doctor` (or `/doctor` in the chat) checks the config, the service and the Node it points at, the chat page, the `aios.lua` line in `hyprland.lua`, that the service sees the desktop session, the `omarchy-*` commands AI OS uses, the AI button on the top bar and that each keyring secret is stored (never shown). Each problem comes with a one-line fix. Run it after every Omarchy update; most fixes are `pnpm run setup --kiosk`.
+- **Back up:** `pnpm backup` stops the service for a moment and writes `~/aios-backup-<date>.tar.gz` (readable only by you) with `~/.config/aios` (config, memory) and `~/.local/share/aios` (database, audit log, built apps), without the installed copy, the chat's browser profile or caches. **Keyring secrets are never in it**, and it holds your mail cache and memory: keep it private.
+- **Restore:** `./install.sh --restore ~/aios-backup-<date>.tar.gz` checks every entry first (only plain files and folders inside AI OS's own folders), moves what is there now to `*.before-restore-<date>` instead of deleting it, unpacks, then installs as above. On a new computer, run `pnpm run setup` afterwards to type the secrets again; `pnpm doctor` says which are missing.
+- **Reinstall after an Omarchy update:** `pnpm backup`, `pnpm --filter @aios/scripts uninstall`, update Omarchy, `./install.sh --restore <file>`, `pnpm doctor`.
 
 ## Mail
 

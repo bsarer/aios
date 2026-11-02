@@ -28,6 +28,7 @@ export function describeMailError(err: unknown): string {
   if (e.code && TLS.has(e.code)) return "the mail server's security certificate couldn't be verified";
   if (e.code === 'ETHROTTLE') return 'the mail server is limiting how often we connect';
   if (e.code === 'ECONNRESET' || e.code === 'EPIPE' || e.code === 'ESOCKET') return 'the connection to the mail server dropped';
+  if (e.responseCode === 552) return "the mail server refused the email as too big (or the mailbox is full). Attach fewer or smaller files";
   if (e.code === 'EENVELOPE') return 'the mail server refused one of the recipients';
   // imapflow's message for a refused command is only "Command failed"; the server's own words say why.
   if (e.message === 'Command failed' && e.responseText) return `the mail server said: ${e.responseText}`.slice(0, 200);

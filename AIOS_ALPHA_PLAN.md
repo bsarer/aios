@@ -362,6 +362,36 @@ A fourth model role, `local`: a small model on this computer through Ollama's Op
 - **More jobs over time:** `assistant.localTasks` moves `mailTriage`, `fileSummaries` or `nightlySummary` to the local model; each keeps its prompt, limits and no-tools rule, and the role switch only happens when `[models.local]` exists. `/checkup` shows the numbers and runs the review now.
 *Accept:* with Ollama running, a nearly full drive, low memory and a busy CPU each post one alert with advice and "back to normal" afterwards; the morning card lists an old ISO in Downloads and an idle browser window; Move to Trash puts the file in the Trash (restorable in the file manager) only on the click, and refuses a file that changed; Close closes the window only on the click; Keep stops the suggestion; a hostile file name or window title only appears as text and causes nothing; without Ollama the same works with code-written text; checked on the real machine.
 
+**Daily tasks T1 to T9** (added 2026-11-02 at the user's request; proposed, not yet approved; each gets its own plan and approval before code, in this order unless the user reorders)
+The everyday jobs the chat should cover next. Sizes are rough: S about a day, M two to four days. All follow the existing rules: reading is free, anything that sends, changes or deletes waits for a hash-checked click, outside text is untrusted, every tool call is audited.
+
+**T1: Reminders and to-dos** (S)
+"Remind me at 4 to call Ana", "add milk to my list", "what's on my list?", "done with the Ana call". A local list (`~/.config/aios/todos.md`, plain Markdown like memory) and a `reminders` EventSource that fires through the existing notifications, honouring quiet hours and pause. The chat model fills in the time as an ISO date in the tool call; code checks it and repeats it back on the card. Adding a to-do or reminder from the user's own words is a small change; nothing from email, invites or documents can add one (CI injection suite). T2, T4 and T5 build on it.
+
+**T2: Morning brief** (S)
+One card at the first login of the day (or `/brief`): urgent mail from triage, today's events and free gaps, to-dos and reminders due today. Code gathers and orders everything; a model only writes a two-line intro. That job suits the local model (L1 pattern: no tools, inputs inside `<untrusted>`, code fallback without Ollama), so the brief can run without a cloud call. Read only.
+
+**T3: Inbox housekeeping** (M)
+Archive, mark read or unread, move to a folder, snooze until a time, unsubscribe (List-Unsubscribe header, mailto or one-click POST only). Each is a write-tier card; several messages go on one card listing them. Never offered while email text is in view, like calendar changes.
+
+**T4: Follow-up tracking** (M)
+"Tell me if Sara hasn't replied by Friday." A watch on a sent message's thread, checked by code (no model) against new mail; when the date passes without a reply, a reminder (T1) offers Draft follow-up.
+
+**T5: Meeting prep** (S to M)
+Ten minutes before an event (`calendar` EventSource), a card with recent mail threads and indexed files about its guests or title. Read only; event and mail text stay untrusted.
+
+**T6: Contacts from mail history** (S)
+"What's Ana's email?", "who did I write to about the lease?". Built by code from From/To/Cc headers of INBOX and Sent; no new store of message text. Also lets the Send card's new-recipient warning say "you have written to this address before".
+
+**T7: Screenshots and clipboard** (S)
+"Screenshot this window into Documents", "save what I copied as a note". Screenshots through Omarchy's own screenshot command, saved inside `[files] roots` without overwriting. Clipboard text is untrusted and only read when the user asks.
+
+**T8: Open links and web lookup** (S for opening, M for reading pages)
+"Open my bank's site" opens a URL the user gave (or a saved bookmark) in the default browser on a card. Fetching and summarizing a page is a separate step: page text is untrusted like email, with no write-tier tools or memory while it is in view.
+
+**T9: Power and updates** (S for sleep, restart and shut down; M for system updates)
+Sleep, restart and shut down on a card, through Omarchy's own commands. System updates (`omarchy-update`) on a card with the list of packages, and a warning to save work first.
+
 **A8: Dogfood week**
 Use it daily (including system controls); record median latency, cost per day, notification precision (useful vs noisy), crashes, and what you reached for outside the chat.
 *Accept:* findings report that decides the post-alpha order (WhatsApp, docs, files, more system tools).

@@ -13,6 +13,7 @@ import { AppBuilder } from './apps/builder.js';
 import { BuildLog } from './apps/history.js';
 import { AppLink, linkKey, linkToken } from './apps/link.js';
 import { appTools, buildAppTool, buildStatusTool, builtAppOpener, offerBuild } from './apps/tools.js';
+import { UnseenFlag, unseenPath } from './apps/bar.js';
 import { ChatWindow } from './apps/window.js';
 import { desktopNotify } from './notify.js';
 import { ResourceMonitor } from './assistant/monitor.js';
@@ -181,16 +182,19 @@ async function main(): Promise<void> {
     isPaused,
   });
   const hypr = hyprlandIpc();
+  // S7: the chat keeps its own full screen; apps open elsewhere. The top bar's AI button shows a dot
+  // while something new is waiting and the chat doesn't have focus.
+  const unseen = new UnseenFlag(unseenPath());
+  unseen.set(false);
   const chatWindow = new ChatWindow({
     hypr,
-    // S6: the screen the chat owns, and where apps open when the user doesn't say.
     home: config.screen.monitor,
-    defaultPlace: config.screen.defaultPlace,
-    keep: config.screen.keep,
     audit,
-    // The shell is created below; the UI hears about moves once it exists.
-    onMode: (mode) => shell?.broadcast({ type: 'window', mode }),
     notice: (level, text) => shell?.agent.notice(level, text),
+    onFocus: (focused) => {
+      if (focused) unseen.set(false);
+    },
+    onAppsAt: () => shell?.pushStatus(),
   });
   const launch = createLauncher();
   const apps = appTools({ scan: () => scanApps(), launch, window: chatWindow });
@@ -468,6 +472,9 @@ async function main(): Promise<void> {
   setInterval(() => void shell.refreshSystemStatus(), 15_000).unref();
   watcher.start();
   chatWindow.start();
+  shell.subscribe((ev) => {
+    if (ev.type === 'item' && !chatWindow.focused) unseen.set(true);
+  });
   // Catch-up after pause, quiet hours, rate limits and failed triage; a no-op when nothing is queued.
   setInterval(() => void pipeline.run(), 30_000).unref();
   // Paused means no model calls, so the nightly summary waits too.

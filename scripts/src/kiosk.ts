@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { BAR_ID, type KioskPaths, REQUIRE_LINE } from '@aios/core';
 import { CHAT_APP_CLASS, CHAT_CLASS_PATTERN, MONITOR_NAME } from '@aios/shared';
 
 export const APP_CLASS = CHAT_APP_CLASS;
@@ -20,42 +21,8 @@ export const CLASS_PATTERN = CHAT_CLASS_PATTERN;
 export const EXIT_KEYS = 'SUPER + SHIFT + ESCAPE';
 export const OPEN_KEYS = 'SUPER + SHIFT + H';
 
-/** The line added to the user's hyprland.lua. It tolerates aios.lua being deleted by hand. */
-export const REQUIRE_LINE =
-  'do local f = io.open((os.getenv("HOME") or "") .. "/.config/hypr/aios.lua") if f then f:close() require("hypr.aios") end end -- AI OS (pnpm run setup)';
-
-export interface KioskPaths {
-  hyprDir: string;
-  hyprlandLua: string;
-  aiosLua: string;
-  launcher: string;
-  unitDir: string;
-  unit: string;
-  profileDir: string;
-  /** S7: Omarchy 4's shell config, where the top bar's layout lives. */
-  shellJson: string;
-  /** S7: Omarchy's own defaults for it, used when the user has no shell.json yet. */
-  shellDefaults: string;
-}
-
-export function kioskPaths(env: NodeJS.ProcessEnv = process.env): KioskPaths {
-  const home = env.HOME ?? '';
-  const config = env.XDG_CONFIG_HOME || join(home, '.config');
-  const data = env.XDG_DATA_HOME || join(home, '.local', 'share');
-  const hyprDir = join(config, 'hypr');
-  const unitDir = join(config, 'systemd', 'user');
-  return {
-    hyprDir,
-    hyprlandLua: join(hyprDir, 'hyprland.lua'),
-    aiosLua: join(hyprDir, 'aios.lua'),
-    launcher: join(home, '.local', 'bin', 'aios-kiosk'),
-    unitDir,
-    unit: join(unitDir, 'aios-core.service'),
-    profileDir: join(data, 'aios', 'chromium'),
-    shellJson: join(config, 'omarchy', 'shell.json'),
-    shellDefaults: join(env.OMARCHY_PATH || join(data, 'omarchy'), 'config', 'omarchy', 'shell.json'),
-  };
-}
+// P1: the paths and markers live in core, so the doctor can check them too.
+export { BAR_ID, type KioskPaths, REQUIRE_LINE, kioskPaths } from '@aios/core';
 
 /** systemd --user unit. `node` is an absolute path: user units don't see mise's shims. */
 export function unitFile(o: { node: string; coreDir: string }): string {
@@ -202,8 +169,6 @@ hl.bind(${lua(OPEN_KEYS)}, hl.dsp.exec_cmd(${open}), { description = "Open AI OS
 `;
 }
 
-/** S7: the top bar entry's id in Omarchy's shell.json. */
-export const BAR_ID = 'aios-home';
 
 /**
  * S7: Omarchy 4's shell.json with the AI button added at the start of the bar's right section,

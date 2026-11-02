@@ -63,6 +63,8 @@ export interface ShellOptions {
   cleanup?: { act: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => Promise<void>; run: () => Promise<'nothing' | 'posted'> };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
+  /** P1: the install checks for /doctor, written by code. Without it, /doctor says to run `pnpm doctor`. */
+  doctor?: () => Promise<string[]>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -402,6 +404,11 @@ export class Shell {
         const r = await this.o.cleanup.run();
         if (r === 'nothing') say('Nothing to tidy up right now: no big unused files in your folders and no idle windows.');
         return;
+      }
+      case 'doctor': {
+        // Code checks only: no model call, so it works while paused too.
+        if (!this.o.doctor) return say('Run `pnpm doctor` in the AI OS folder to check the install.');
+        return say((await this.o.doctor()).join('\n'));
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

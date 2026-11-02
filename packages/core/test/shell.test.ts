@@ -7,7 +7,7 @@ import { MAX_ITERATIONS } from '../src/agent.js';
 import { AuditLog, redact } from '../src/audit.js';
 import { parseCommand } from '../src/commands.js';
 import { type Delta, ModelError, type ModelRequest, type ModelResult, type ToolCall } from '../src/model.js';
-import { Shell } from '../src/shell.js';
+import { Shell, type ShellOptions } from '../src/shell.js';
 import { parseNmcli, readBattery } from '../src/status/system.js';
 import { parseThemeToml } from '../src/status/theme.js';
 import { Store, startOfDay } from '../src/store.js';
@@ -55,7 +55,7 @@ function fakeModel(turns: Turn[]) {
   };
 }
 
-function setup(turns: Turn[] = []) {
+function setup(turns: Turn[] = [], extra: Partial<ShellOptions> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'aios-'));
   const store = new Store(':memory:');
   const auditPath = join(dir, 'audit.jsonl');
@@ -74,6 +74,7 @@ function setup(turns: Turn[] = []) {
     readBattery: async () => ({ percent: 80, charging: false }),
     readWifi: async () => ({ connected: true, ssid: 'home' }),
     clock: () => CLOCK,
+    ...extra,
   });
   const events: ServerEvent[] = [];
   shell.subscribe((e) => events.push(e));
@@ -188,8 +189,18 @@ describe('slash commands', () => {
 
   it('commands never reach the model', async () => {
     const { shell, model } = setup();
-    for (const c of ['/help', '/cost', '/memory', '/forget x', '/whatever']) await shell.handle({ type: 'send', text: c });
+    for (const c of ['/help', '/cost', '/memory', '/forget x', '/doctor', '/whatever']) await shell.handle({ type: 'send', text: c });
     expect(model.requests).toHaveLength(0);
+  });
+
+  it('/doctor shows the install checks written by code, or says to run pnpm doctor (P1)', async () => {
+    const plain = setup();
+    await plain.shell.handle({ type: 'send', text: '/doctor' });
+    expect(plain.items().at(-1)).toMatchObject({ text: expect.stringContaining('pnpm doctor') });
+    const withDoctor = setup([], { doctor: async () => ['✓ Config: config.toml loads', '✗ Kiosk: aios.lua is missing'] });
+    await withDoctor.shell.handle({ type: 'send', text: '/doctor' });
+    expect(withDoctor.items().at(-1)).toMatchObject({ text: '✓ Config: config.toml loads\n✗ Kiosk: aios.lua is missing' });
+    expect(withDoctor.model.requests).toHaveLength(0);
   });
 });
 

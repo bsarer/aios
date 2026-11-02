@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type ChatItem, type ClientMessage, type ServerEvent, type Status, type Theme, type WindowMode } from '@aios/shared';
+import { type ChatItem, type ClientMessage, type ServerEvent, type Status, type Theme } from '@aios/shared';
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
@@ -55,8 +55,8 @@ export interface ShellOptions {
   fileIndex?: Pick<FileIndexer, 'reindex' | 'status'>;
   /** Save buttons on attachment cards (F1). Without it, attachment_save is ignored. */
   attachments?: Pick<AttachmentFiles, 'save'>;
-  /** Where the chat window sits (S3). Without it, window messages are ignored and the chat stays full screen. */
-  chatWindow?: { readonly mode: WindowMode; request: (mode: WindowMode) => Promise<void> };
+  /** S7: where apps open now, for the status strip's hint. Without it, the hint is left out. */
+  chatWindow?: { readonly appsAt: 'screen' | 'workspace' | null };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
   openBuiltApp?: (actionId: string) => Promise<void>;
   /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
@@ -108,7 +108,7 @@ export class Shell {
 
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
-    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme, window: this.o.chatWindow?.mode ?? 'full' });
+    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme });
     return () => this.listeners.delete(l);
   }
 
@@ -126,6 +126,7 @@ export class Shell {
       costTodayUsd: this.o.store.usageSince(since).costUsd,
       costCapUsd: this.o.costCapUsd,
       model: this.o.modelName,
+      ...(this.o.chatWindow?.appsAt ? { appsAt: this.o.chatWindow.appsAt } : {}),
     };
   }
 
@@ -185,10 +186,8 @@ export class Shell {
     // L1: the user's own click on a morning review row; the review checks its hash and the file or window first.
     if (msg.type === 'cleanup_action') return this.o.cleanup?.act(msg.id, msg.list, msg.n, msg.action, msg.hash);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
-    // The user's own click on a build they started, so like the window it works while paused.
+    // The user's own click on a build they started, so it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
-    // The user's own click, so it works while paused; it only moves the chat window.
-    if (msg.type === 'window') return this.o.chatWindow?.request(msg.mode);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {

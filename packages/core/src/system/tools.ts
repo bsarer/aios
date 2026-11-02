@@ -58,14 +58,7 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
     case 'move_app': {
       const verb = tool === 'open_app' ? 'Open' : 'Move';
       const on = tool === 'open_app' ? 'on' : 'to';
-      const where =
-        args.place === 'beside'
-          ? ' beside the chat'
-          : args.place === 'screen'
-            ? ` ${on} ${args.screen ? `screen ${name('screen')}` : 'another screen'}`
-            : args.place === 'over'
-              ? ` ${on} the chat's screen`
-              : '';
+      const where = args.screen ? ` ${on} screen ${name('screen')}` : tool === 'move_app' ? ' to the other screen' : '';
       return `${verb} ${name('app')}${where}`;
     }
     case 'doc_open_app': {

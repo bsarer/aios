@@ -4,13 +4,14 @@
  * in view it becomes a card the user confirms (systemTools wires that). It takes only an
  * app from the installed list: no command, file, link or option ever reaches the launcher.
  *
- * S6: open_app takes a place (over, beside, screen) and a screen; screens_list (read) shows
- * the screens and the apps open on each; move_app (device, like open_app) moves an open
- * app's window between those places. Only window classes are shown, never window titles,
- * which web pages and documents set.
+ * S7: the chat keeps its own full screen, so open_app opens an app on another screen (or the
+ * next workspace with one screen), optionally on a screen the user named; screens_list (read)
+ * shows the screens and the apps open on each; move_app (device, like open_app) moves an open
+ * app to another screen. Only window classes are shown, never window titles, which web pages
+ * and documents set.
  */
 import { randomUUID } from 'node:crypto';
-import type { AppPlace, ChatItem } from '@aios/shared';
+import type { ChatItem } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import { StoppedError, type SystemActions } from '../system/actions.js';
 import { toolByName } from '../tools/definitions.js';
@@ -19,7 +20,7 @@ import { type AppBuilder, BuildError, type ClaudeLogin, appDesktopId, appName, a
 import type { BuildLog } from './history.js';
 import { type DesktopApp, findApp, searchApps, shortId } from './desktop.js';
 import type { Launch } from './launcher.js';
-import type { ChatWindow, Placement, ScreenInfo } from './window.js';
+import type { AppTarget, ChatWindow, ScreenInfo } from './window.js';
 
 const MAX_LISTED = 80;
 const q = (s: string) => `“${s}”`;
@@ -27,7 +28,7 @@ const q = (s: string) => `“${s}”`;
 export interface AppToolsOptions {
   scan: () => Promise<DesktopApp[]>;
   launch: Launch;
-  window: Pick<ChatWindow, 'appStarting' | 'appFailed' | 'placement' | 'screens' | 'moveApp'>;
+  window: Pick<ChatWindow, 'appStarting' | 'appFailed' | 'target' | 'screens' | 'moveApp'>;
 }
 
 /** A window class as it may be shown: letters, digits and a few marks, at most 40 characters. */
@@ -35,7 +36,7 @@ export const cleanClass = (c: string) => c.replace(/[^A-Za-z0-9._ -]/g, '').trim
 
 /** What to call an open window: the name the chat started it under, an installed app with its class as id, or the class. */
 function windowLabel(w: ScreenInfo['windows'][number], apps: DesktopApp[]): string {
-  if (w.app) return w.place === 'beside' ? `${w.app} (beside the chat)` : w.app;
+  if (w.app) return w.app;
   const c = w.className.toLowerCase();
   const app = apps.find((a) => shortId(a.id).toLowerCase() === c);
   return app?.name ?? (cleanClass(w.className) || 'a window without a name');
@@ -54,17 +55,12 @@ function screenLine(s: ScreenInfo, apps: DesktopApp[]): string {
   return `- ${s.name || 'unnamed'}, ${where}${s.focused ? ', focused' : ''}: ${s.w}×${s.h}. ${open.length ? `Open: ${open.join(', ')}.` : 'Nothing open.'}`;
 }
 
-/** The one-line answer after an app opened somewhere. */
-function placedText(name: string, at: Placement, started: boolean): string {
-  const verb = started ? 'Started' : 'Moved';
-  switch (at.place) {
-    case 'over':
-      return `${verb} ${name}${started ? '' : ' onto the chat\'s screen'}. The chat is now the red orb at the top of the screen; it comes back full screen when ${name} is closed, and the user can click the orb to talk to you meanwhile. Say it in one short line.`;
-    case 'beside':
-      return `${verb} ${name} beside the chat: the chat is on the left half of its screen and ${name} on the right. The chat comes back full screen when ${name} is closed. Say it in one short line.`;
-    case 'screen':
-      return `${verb} ${name} ${started ? 'on' : 'to'} screen ${at.screen ?? ''}; the chat stays on its own screen. Say it in one short line.`;
-  }
+/** The one-line answer after an app opened or moved somewhere. */
+function placedText(name: string, at: AppTarget | undefined, started: boolean): string {
+  const back = 'Super+Shift+H or the AI button in the top bar brings the chat back';
+  if (!at) return `${started ? 'Started' : 'Moved'} ${name}. Say it in one short line.`;
+  if ('screen' in at) return `${started ? 'Started' : 'Moved'} ${name} ${started ? 'on' : 'to'} screen ${at.screen}; the chat stays on its own screen. Say it in one short line.`;
+  return `Started ${name} on workspace ${at.workspace}, next to the chat's own, and switched the screen there; ${back}. Say it in one short line, with how to come back.`;
 }
 
 const line = (a: DesktopApp) => `- ${a.name} (id: ${shortId(a.id)})${a.terminal ? ', runs in a terminal' : ''}${a.comment ? `: ${a.comment}` : ''}`;
@@ -88,23 +84,20 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
       def: toolByName('open_app')!,
       label: 'Opening the app…',
       handler: async (args) => {
-        const { app: want, place, screen } = args as { app: string; place?: AppPlace; screen?: string };
+        const { app: want, screen } = args as { app: string; screen?: string };
         const found = findApp(await o.scan(), want);
         if (!found) return `Error: no installed app is called ${q(want)}. Call apps_list to find its id.`;
         if (Array.isArray(found)) return `Error: several apps are called ${q(want)}: ${found.map((a) => shortId(a.id)).join(', ')}. Ask the user which one, then use its id.`;
-        const at = await o.window.placement(place, screen);
-        if (typeof at === 'string') return at;
-        await o.window.appStarting(found.name, at);
+        const to = await o.window.target(screen);
+        if (typeof to === 'string') return to;
+        const at = await o.window.appStarting(found.name, to);
         try {
           await o.launch(found.id);
         } catch (err) {
           await o.window.appFailed(found.name);
           throw new Error(`${found.name} didn't start: ${(err as Error).message}`);
         }
-        return {
-          content: placedText(found.name, at, true),
-          audit: { app: found.id, name: found.name, place: at.place, ...(at.screen ? { screen: at.screen } : {}) },
-        };
+        return { content: placedText(found.name, at, true), audit: { app: found.id, name: found.name, ...(at ?? {}) } };
       },
     },
     {
@@ -112,29 +105,29 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
       label: 'Looking at your screens…',
       handler: async () => {
         const screens = await o.window.screens();
-        if (!screens.length) return "Screens are unknown: AI OS isn't running inside Hyprland here, so apps can only open over the chat.";
+        if (!screens.length) return "Screens are unknown: AI OS isn't running inside Hyprland here.";
         const apps = await o.scan();
         const lines = screens.map((s) => screenLine(s, apps));
-        return `${screens.length} screen${screens.length === 1 ? '' : 's'}:\n${lines.join('\n')}${screens.length === 1 ? '\nWith one screen, apps open over the chat or beside it.' : ''}`;
+        return `${screens.length} screen${screens.length === 1 ? '' : 's'}:\n${lines.join('\n')}${screens.length === 1 ? "\nWith one screen, apps open on the next workspace, beside the chat's own." : ''}`;
       },
     },
     {
       def: toolByName('move_app')!,
       label: 'Moving the app…',
       handler: async (args) => {
-        const { app: want, place, screen } = args as { app: string; place: AppPlace; screen?: string };
-        const at = await o.window.placement(place, screen);
-        if (typeof at === 'string') return at;
+        const { app: want, screen } = args as { app: string; screen?: string };
+        const to = await o.window.target(screen ?? 'other');
+        if (typeof to === 'string') return to;
         const found = findApp(await o.scan(), want);
         const installed = found ? (Array.isArray(found) ? found : [found]) : [];
         const match = { names: [want.trim(), ...installed.map((a) => a.name)], classes: [want.trim(), ...installed.map((a) => shortId(a.id))] };
         let name: string;
         try {
-          name = await o.window.moveApp(match, at);
+          name = await o.window.moveApp(match, to);
         } catch (err) {
           return `Error: ${(err as Error).message}. Call screens_list to see what is open where.`;
         }
-        return { content: placedText(name, at, false), audit: { app: cleanClass(name), place: at.place, ...(at.screen ? { screen: at.screen } : {}) } };
+        return { content: placedText(name, to, false), audit: { app: cleanClass(name), ...to } };
       },
     },
   ];

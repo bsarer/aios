@@ -3,7 +3,6 @@
  * these schemas; the reducer at the bottom is the UI's single source of chat state.
  */
 import { z } from 'zod';
-import { WindowMode } from './window.js';
 
 // ── Chat items (what the UI renders) ─────────────────────────────────────────
 
@@ -292,6 +291,8 @@ export const Status = z.strictObject({
   costTodayUsd: z.number(),
   costCapUsd: z.number(),
   model: z.string(),
+  /** S7: where apps open now (another screen, or the next workspace), for the hint under the status strip. */
+  appsAt: z.enum(['screen', 'workspace']).optional(),
 });
 export type Status = z.infer<typeof Status>;
 
@@ -342,20 +343,16 @@ export const ClientMessage = z.discriminatedUnion('type', [
     /** M1: positions of the attached files to keep; left out keeps them all. An edit can't add a file. */
     keep: z.array(z.int().min(0).max(19)).max(20).optional(),
   }),
-  /** S3: the orb was clicked (half), or a button asked for the orb or full screen. */
-  z.strictObject({ type: z.literal('window'), mode: WindowMode }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, window: WindowMode.optional() }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
   z.strictObject({ type: z.literal('status'), status: Status }),
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
-  /** S3: where the chat window now is; the UI draws the orb or the chat to match. */
-  z.strictObject({ type: z.literal('window'), mode: WindowMode }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
@@ -366,15 +363,14 @@ export interface ChatState {
   items: ChatItem[];
   status: Status | null;
   theme: Theme;
-  window: WindowMode;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, window: 'full' };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {} };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, window: ev.window ?? 'full' };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':
@@ -388,7 +384,5 @@ export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
       return { ...state, status: ev.status };
     case 'theme':
       return { ...state, theme: ev.theme };
-    case 'window':
-      return { ...state, window: ev.mode };
   }
 }

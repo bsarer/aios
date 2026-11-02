@@ -44,7 +44,7 @@ export interface MessageActions {
   /** Send echoes the hash of what the card shows; the server sends only that. */
   onDraftSend: (id: string, hash: string) => void;
   onDraftDiscard: (id: string) => void;
-  onDraftEdit: (id: string, edit: { to: string[]; subject: string; body: string }) => void;
+  onDraftEdit: (id: string, edit: { to: string[]; subject: string; body: string; keep?: number[] }) => void;
   /** A system change (S1) runs only on this click, which echoes the card's hash and the choice clicked. */
   onActionConfirm: (id: string, hash: string, choice?: string) => void;
   onActionCancel: (id: string) => void;
@@ -169,19 +169,53 @@ const DRAFT_STATE_TEXT: Record<DraftItem['state'], string> = {
   failed: '',
 };
 
+const fileSize = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+/** M1: the files on a draft. Names come from disk: plain text only. While editing, each can be removed. */
+function DraftFiles({ files, removed, onToggle }: { files: NonNullable<DraftItem['attachments']>; removed?: Set<number>; onToggle?: (i: number) => void }) {
+  return (
+    <ul data-testid="draft-files" className="mt-2 flex flex-col gap-1 text-sm">
+      {files.map((f, i) => (
+        <li key={`${i}-${f.path}`} data-testid="draft-file" className="flex items-center gap-2" style={removed?.has(i) ? { opacity: 0.45, textDecoration: 'line-through' } : undefined}>
+          <span aria-hidden>📎</span>
+          <span className="truncate" title={f.path}>
+            {f.name}
+          </span>
+          <span style={{ color: 'var(--muted)' }}>{fileSize(f.bytes)}</span>
+          {onToggle && (
+            <button type="button" data-testid="draft-file-remove" className="glass ml-auto rounded-lg px-2 py-0.5" onClick={() => onToggle(i)}>
+              {removed?.has(i) ? 'Keep' : 'Remove'}
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** The approval card (plan §7). Draft text is plain text, never Markdown or HTML. */
 function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions }) {
   const [editing, setEditing] = useState(false);
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [removed, setRemoved] = useState<Set<number>>(new Set());
+  const files = item.attachments ?? [];
   const open = item.state === 'pending' || item.state === 'failed';
   const startEdit = () => {
     setTo(item.to.join(', '));
     setSubject(item.subject);
     setBody(item.body);
+    setRemoved(new Set());
     setEditing(true);
   };
+  const toggleFile = (i: number) =>
+    setRemoved((r) => {
+      const next = new Set(r);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
   const recipients = to.split(/[,;\s]+/).filter(Boolean);
   const validTo = recipients.length > 0 && recipients.every((r) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(r));
   const field = 'w-full rounded-lg bg-transparent px-2 py-1 outline-none';
@@ -202,6 +236,7 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
             <input data-testid="draft-subject" className={field} style={fieldStyle} value={subject} onChange={(e) => setSubject(e.target.value)} />
           </label>
           <textarea data-testid="draft-body" className={`${field} min-h-40 font-[inherit]`} style={fieldStyle} value={body} onChange={(e) => setBody(e.target.value)} />
+          {files.length > 0 && <DraftFiles files={files} removed={removed} onToggle={toggleFile} />}
           <div className="flex gap-2">
             <button
               type="button"
@@ -210,7 +245,7 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
               className="rounded-lg px-3 py-1 disabled:opacity-40"
               style={{ background: 'var(--accent)', color: 'var(--bg)' }}
               onClick={() => {
-                actions.onDraftEdit(item.id, { to: recipients, subject, body });
+                actions.onDraftEdit(item.id, { to: recipients, subject, body, ...(removed.size ? { keep: files.flatMap((_, i) => (removed.has(i) ? [] : [i])) } : {}) });
                 setEditing(false);
               }}
             >
@@ -232,6 +267,7 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
           <div data-testid="draft-body-text" className="mt-2 whitespace-pre-wrap rounded-lg px-3 py-2" style={{ background: 'rgba(127,127,127,0.08)' }}>
             {item.body}
           </div>
+          {files.length > 0 && <DraftFiles files={files} />}
         </>
       )}
       {item.warnings.map((w) => (

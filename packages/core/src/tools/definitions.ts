@@ -70,12 +70,14 @@ export const ALPHA_TOOLS = [
   def({
     name: 'mail_create_draft',
     tier: 'draft',
-    description: 'Save a draft to the Drafts folder and show it to the user. Never sends.',
+    description:
+      "Save a draft to the Drafts folder and show it to the user. Never sends. To send files with it, give their paths in attachments (from files_search or files_list; only files in the user's folders, at most 10 and 18 MB together).",
     input: z.strictObject({
       inReplyTo: z.string().optional().describe('Message id being replied to'),
       to: z.array(z.email()).min(1),
       subject: z.string(),
       body: z.string(),
+      attachments: z.array(z.string().min(1).max(1000)).max(10).optional().describe('Paths of files to attach, e.g. "~/Documents/lease.pdf"'),
     }),
   }),
   def({

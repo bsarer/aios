@@ -108,7 +108,9 @@ export const ChatItem = z.discriminatedUnion('kind', [
     body: z.string(),
     /** Mail id (e.g. INBOX:37) this replies to. */
     inReplyTo: z.string().optional(),
-    /** sha256 of exactly what is shown; Send echoes it back and only that text is sent. */
+    /** M1: files attached, from the allowed folders. Names come from disk: show as plain text only. */
+    attachments: z.array(z.strictObject({ name: z.string(), path: z.string(), bytes: z.number() })).optional(),
+    /** sha256 of exactly what is shown, attached files' bytes included; Send echoes it back and only that is sent. */
     hash: z.string(),
     /** Only a Send click moves 'pending' to 'sending'; editing gives a new hash. */
     state: z.enum(['pending', 'sending', 'sent', 'discarded', 'failed']),
@@ -337,6 +339,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
     to: z.array(z.email()).min(1).max(20),
     subject: z.string().max(500),
     body: z.string().max(50_000),
+    /** M1: positions of the attached files to keep; left out keeps them all. An edit can't add a file. */
+    keep: z.array(z.int().min(0).max(19)).max(20).optional(),
   }),
   /** S3: the orb was clicked (half), or a button asked for the orb or full screen. */
   z.strictObject({ type: z.literal('window'), mode: WindowMode }),

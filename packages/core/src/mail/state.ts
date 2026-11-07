@@ -145,6 +145,15 @@ export class MailState {
     ).map(toEvent);
   }
 
+  /** T2: mail triaged since `since` and not ignored, newest first (also mail held for quiet hours). */
+  triagedSince(since: number, limit = 200): MailEvent[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM mail_events WHERE status IN ('triaged', 'notified') AND received_at >= ? ORDER BY received_at DESC, rowid DESC LIMIT ?")
+        .all(since, limit) as Row[]
+    ).map(toEvent);
+  }
+
   notificationsSince(since: number): number {
     return (this.db.prepare('SELECT COUNT(*) n FROM notification_log WHERE at >= ?').get(since) as { n: number }).n;
   }

@@ -252,6 +252,13 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: { content: 'Tap **Save** if that is right.' } }] });
     return finish(0.0004);
   }
+  if (last.role === 'user' && /^remind me at 4 tomorrow to call ana$/i.test(lastUser)) {
+    // T1: the model fills in the time as a local ISO time; code checks it and repeats it on the card.
+    const args = JSON.stringify({ items: [{ text: 'Call Ana', remindAt: `${calDay(1)}T16:00` }] });
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_todo', function: { name: 'todo_add', arguments: args } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
   if (last.role === 'user' && /remember/i.test(lastUser)) {
     const args = JSON.stringify({ fact: 'Sara prefers short emails' });
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_m', function: { name: 'memory_propose', arguments: args } }] } }] });
@@ -529,6 +536,8 @@ async function main(): Promise<void> {
       `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
       `[files]\nroots = ["${docs.documents}", "${downloads}"]\n` +
       `[assistant.monitor]\nenabled = false\n[assistant.review]\nenabled = false\nminFileMb = 1\n` +
+      // T2: the brief is due from midnight here, so it comes at boot whatever time the test runs.
+      `[brief]\nafter = "00:00"\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -955,6 +964,20 @@ async function main(): Promise<void> {
     await cleanup.getByTestId('cleanup-trash').first().click();
     check('Move to Trash marks the row', await waitFor(async () => (await cleanup.getByTestId('cleanup-file').first().getAttribute('data-state')) === 'trashed'));
     check('the file is in the Trash with its info', !existsSync(oldIso) && existsSync(join(tmp, 'data', 'Trash', 'files', 'old-installer.iso')) && readFileSync(join(tmp, 'data', 'Trash', 'info', 'old-installer.iso.trashinfo'), 'utf8').includes(`Path=${oldIso.split('/').map(encodeURIComponent).join('/')}`));
+    // 16. T1 and T2: a reminder from the user's words, repeated back by code; Done only on the click; /brief.
+    await input.fill('remind me at 4 tomorrow to call Ana');
+    await input.press('Enter');
+    const todoCard = page.locator('[data-kind="todo"]').last();
+    check('the reminder card repeats the checked time', await waitFor(async () => (await todoCard.count()) === 1 && /Call Ana[^]*Reminder: Tomorrow, .*16:00/.test(await todoCard.innerText()), 10_000));
+    const todosFile = join(tmp, 'config', 'aios', 'todos.md');
+    check('the reminder is in todos.md', existsSync(todosFile) && readFileSync(todosFile, 'utf8').includes(`- [ ] Call Ana · remind ${calDay(1)} 16:00`));
+    await todoCard.getByTestId('todo-done').click();
+    check('Done ticks it off in the file', await waitFor(async () => readFileSync(todosFile, 'utf8').includes('- [x] Call Ana')));
+    check('the morning brief came at boot with today\'s events', (await page.locator('[data-kind="brief"]').count()) >= 1 && (await page.locator('[data-kind="brief"]').first().getByTestId('brief-intro').innerText()).includes('John'));
+    await input.fill('/brief');
+    await input.press('Enter');
+    check('/brief shows it again', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) >= 2, 10_000));
+    await shot(page, '16-todos-brief');
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

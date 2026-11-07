@@ -51,6 +51,31 @@ export const CleanupApp = z.strictObject({
 });
 export type CleanupApp = z.infer<typeof CleanupApp>;
 
+/** T1: one item on a to-do card. The text is the user's own words; still shown as plain text only. */
+export const TodoRow = z.strictObject({
+  todoId: z.string(),
+  text: z.string(),
+  /** Written by code from the checked time, e.g. "Today, Sat 7 Nov, 16:00". */
+  when: z.string().optional(),
+  /** Written by code, e.g. "Mon 10 Nov". */
+  due: z.string().optional(),
+  /** sha256 of the item as the card shows it; a click echoes it back. */
+  hash: z.string(),
+  state: z.enum(['open', 'done', 'removed']),
+  /** Written by code after a click. */
+  result: z.string().optional(),
+});
+export type TodoRow = z.infer<typeof TodoRow>;
+
+/** T2: one event on the morning brief. Titles come from whoever sent the invite: plain text only. */
+export const BriefEvent = z.strictObject({
+  /** Written by code, e.g. "09:30–10:00" or "all day". */
+  when: z.string(),
+  title: z.string(),
+  location: z.string().optional(),
+});
+export type BriefEvent = z.infer<typeof BriefEvent>;
+
 export const ChatItem = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('user'), id: z.string(), text: z.string(), at: z.number() }),
   z.strictObject({
@@ -278,6 +303,40 @@ export const ChatItem = z.discriminatedUnion('kind', [
     result: z.string().optional(),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('todo'),
+    /** T1: items just added, changed or ticked off from the user's own words, or a reminder that is due. */
+    id: z.string(),
+    event: z.enum(['added', 'updated', 'done', 'reminder']),
+    /** Written by code, e.g. "Added to your list" or "Reminder". */
+    title: z.string(),
+    rows: z.array(TodoRow),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('brief'),
+    /** T2: the morning brief. Read only: gathered and ordered by code. */
+    id: z.string(),
+    /** Written by code, e.g. "Saturday 7 November". */
+    title: z.string(),
+    /** Two short lines from the local model, or written by code: plain text only. */
+    intro: z.string(),
+    by: z.enum(['local', 'code']),
+    /** Urgent mail from triage. from/subject/summary come from email: plain text only. */
+    mails: z.array(MailRow),
+    /** Other new mail since the last brief, counted by code. */
+    moreMail: z.int().min(0),
+    /** 'off' without a calendar, 'error' when it couldn't be read. */
+    calendar: z.enum(['ok', 'off', 'error']),
+    events: z.array(BriefEvent),
+    /** Free gaps in the working day, written by code, e.g. "13:00–15:30". */
+    free: z.array(z.string()),
+    /** To-dos and reminders due today, and overdue ones. */
+    todos: z.array(z.strictObject({ text: z.string(), when: z.string().optional(), overdue: z.boolean() })),
+    /** Open items without a date, counted by code. */
+    moreTodos: z.int().min(0),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -328,6 +387,14 @@ export const ClientMessage = z.discriminatedUnion('type', [
     list: z.enum(['file', 'app']),
     n: z.int().min(1).max(100),
     action: z.enum(['trash', 'close', 'keep']),
+    hash: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
+  /** T1: a button on one row of a to-do card, echoing that row's hash. */
+  z.strictObject({
+    type: z.literal('todo_action'),
+    id: z.string().max(100),
+    todoId: z.string().max(20),
+    action: z.enum(['done', 'reopen', 'remove', 'snooze']),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
   /** S4: Stop on a running build card. */

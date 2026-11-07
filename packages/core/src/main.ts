@@ -67,6 +67,10 @@ import { omarchyThemePath, readTheme, watchTheme } from './status/theme.js';
 import { Store } from './store.js';
 import { nowTool } from './tools/now.js';
 import { ToolRegistry } from './tools/registry.js';
+import { MorningBrief } from './brief/brief.js';
+import { TodoList } from './todos/list.js';
+import { Todos } from './todos/reminders.js';
+import { todoTools } from './todos/tools.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -152,6 +156,7 @@ async function main(): Promise<void> {
   // C1: the calendar, when configured. Sign-in comes from `pnpm calendar:login`; until then
   // the tools answer that it isn't signed in.
   let calendarActions: CalendarActions | undefined;
+  let calendarApi: GoogleCalendar | undefined;
   const cal = config.calendar;
   if (cal) {
     const clientSecretRef = cal.clientSecretRef;
@@ -162,6 +167,7 @@ async function main(): Promise<void> {
       refreshToken: async () => (await keyring.get(cal.tokenRef))?.reveal() ?? null,
     });
     const api = new GoogleCalendar({ apiBaseUrl: cal.apiBaseUrl, calendarId: cal.calendarId, auth });
+    calendarApi = api;
     calendarActions = new CalendarActions({
       store,
       api,
@@ -192,7 +198,10 @@ async function main(): Promise<void> {
     audit,
     notice: (level, text) => shell?.agent.notice(level, text),
     onFocus: (focused) => {
-      if (focused) unseen.set(false);
+      if (!focused) return;
+      unseen.set(false);
+      // T2: coming back to the chat counts as AI OS being in use.
+      shell?.briefIfDue();
     },
     onAppsAt: () => shell?.pushStatus(),
   });
@@ -380,6 +389,39 @@ async function main(): Promise<void> {
       onTrashed: () => fileIndexer?.soon(),
     });
   }
+  // T1: the to-do list and its reminders. Adding, changing and ticking off come only from the user's own words.
+  const todos = config.todos.enabled
+    ? new Todos({
+        list: new TodoList(join(configDir(), 'todos.md')),
+        store,
+        audit,
+        timeZone: config.user.timezone,
+        snoozeMinutes: config.todos.snoozeMinutes,
+        quietHours: config.notifications.quietHours,
+        isPaused,
+        post: (item) => shell?.agent.post(item),
+        patch: (item) => shell?.patchItem(item),
+        notify: (title, body) => desktopNotify(title, body),
+      })
+    : undefined;
+  if (todos) for (const t of todoTools({ todos, timeZone: config.user.timezone })) tools.register(t);
+  // T2: the morning brief. Code gathers it; the local model, when set, writes two lines on top.
+  const brief = config.brief.enabled
+    ? new MorningBrief({
+        config: config.brief,
+        userName: config.user.name,
+        timeZone: config.user.timezone,
+        store,
+        audit,
+        mail: mailState,
+        calendar: calendarApi && cal ? { api: calendarApi, workday: cal.workday } : undefined,
+        todos: todos?.list,
+        model: localModel,
+        isPaused,
+        quietHours: config.notifications.quietHours,
+        post: (item) => shell?.agent.post(item),
+      })
+    : undefined;
   const themePath = omarchyThemePath();
   shell = new Shell({
     store,
@@ -403,6 +445,8 @@ async function main(): Promise<void> {
     attachments: attachmentFiles,
     chatWindow,
     ...(review ? { cleanup: review } : {}),
+    ...(todos ? { todos } : {}),
+    ...(brief ? { brief } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
@@ -483,6 +527,7 @@ async function main(): Promise<void> {
   setInterval(nightlyTick, 10 * 60_000).unref();
   // L1: the monitor samples every half minute; the review checks every few minutes whether today's is due.
   monitor?.start();
+  todos?.start();
   windowTracker?.start();
   const reviewTick = () => void review?.runIfDue().catch((err: unknown) => audit.append({ kind: 'assistant', event: 'review_error', error: (err as Error).message }));
   setTimeout(reviewTick, 2 * 60_000).unref();
@@ -492,6 +537,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     pipeline.stop();
     monitor?.stop();
+    todos?.stop();
     windowTracker?.stop();
     chatWindow.stop();
     await watcher.stop();

@@ -527,6 +527,49 @@ export const ALPHA_TOOLS = [
     description: 'Switch to another installed Omarchy theme, by its name from theme_list.',
     input: z.strictObject({ name: z.string().min(1).max(64) }),
   }),
+  // ── To-dos and reminders (T1) ──
+  def({
+    name: 'todos_list',
+    tier: 'read',
+    description: "The user's to-do list with each item's id, reminder time and due date (their local time). Open items only unless `done` is true.",
+    input: z.strictObject({ done: z.boolean().optional().describe('Also list items already ticked off') }),
+  }),
+  def({
+    name: 'todo_add',
+    tier: 'device',
+    description:
+      'Add items to the user\'s to-do list, each optionally with a reminder time (a notification then) or a due date. Only for what the user asked in their own message. Times are the user\'s local time, worked out from the current time: "remind me at 4" today is "2026-11-07T16:00".',
+    input: z.strictObject({
+      items: z
+        .array(
+          z.strictObject({
+            text: z.string().min(1).max(200).describe('What to do, in the user\'s words, e.g. "Call Ana" or "Milk"'),
+            remindAt: z.string().optional().describe('Local time "2026-11-07T16:00" to remind the user'),
+            due: z.string().optional().describe('Local date "2026-11-10" it is due, without a reminder'),
+          }),
+        )
+        .min(1)
+        .max(20),
+    }),
+  }),
+  def({
+    name: 'todo_update',
+    tier: 'device',
+    description: 'Change one item on the to-do list: its text, its reminder time (or take the reminder off) or its due date. Get the id from todos_list.',
+    input: z.strictObject({
+      id: z.string().max(20),
+      text: z.string().min(1).max(200).optional(),
+      remindAt: z.string().optional().describe('New local time "2026-11-07T17:00"'),
+      noReminder: z.boolean().optional().describe('Take the reminder off'),
+      due: z.string().optional().describe('New local due date "2026-11-10"'),
+    }),
+  }),
+  def({
+    name: 'todo_done',
+    tier: 'device',
+    description: 'Tick items off the to-do list ("done with the Ana call"). Get the ids from todos_list.',
+    input: z.strictObject({ ids: z.array(z.string().max(20)).min(1).max(20) }),
+  }),
   def({
     name: 'now',
     tier: 'read',

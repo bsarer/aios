@@ -62,6 +62,8 @@ const MIGRATIONS = [
    ALTER TABLE file_index ADD COLUMN read_at REAL;`,
   // M1: files attached to a draft (path, name, size and sha256 of the bytes a Send must find again).
   `ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';`,
+  // T1: which reminders have been posted (item id and its time), so each fires once for its time.
+  `CREATE TABLE reminders_fired (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`,
 ];
 
 export interface UsageRow {

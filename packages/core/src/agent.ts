@@ -148,7 +148,7 @@ export class Agent {
     store.saveTurn({ role: 'user', content: text }, at());
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read') });
+      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add') });
       const messages = quarantineEarlierEmail(
         this.o.memory
           ? this.o.memory.context(system, text, store.recentTurns(CONTEXT_TURNS_BUDGETED))

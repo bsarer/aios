@@ -39,6 +39,7 @@ export function App() {
     onActionStop: (id) => send({ type: 'action_stop', id }),
     onAppOpen: (actionId) => send({ type: 'app_open', actionId }),
     onCleanup: (id, list, n, action, hash) => send({ type: 'cleanup_action', id, list, n, action, hash }),
+    onTodo: (id, todoId, action, hash) => send({ type: 'todo_action', id, todoId, action, hash }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
   };
 

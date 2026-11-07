@@ -202,6 +202,25 @@ export const FilesConfig = z.strictObject({
 });
 export type FilesConfig = z.infer<typeof FilesConfig>;
 
+/** T1: the to-do list (`todos.md` in the config folder) and its reminders. */
+export const TodosConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** How much later a reminder's Snooze button reminds again. */
+  snoozeMinutes: z.int().min(5).max(24 * 60).default(60),
+});
+export type TodosConfig = z.infer<typeof TodosConfig>;
+
+/** T2: one card each morning with urgent mail, today's events and what is due. */
+export const BriefConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** The brief comes the first time AI OS is in use after this local time each day (or with /brief). */
+  after: HHMM.default('06:00'),
+  /** At most this many urgent emails and events on the card. */
+  maxMails: z.int().min(0).max(20).default(5),
+  maxEvents: z.int().min(0).max(30).default(10),
+});
+export type BriefConfig = z.infer<typeof BriefConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -266,6 +285,10 @@ export const AiosConfig = z.strictObject({
   files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
   /** L1: the background system assistant on the local model. */
   assistant: AssistantConfig.prefault({}),
+  /** T1: to-dos and reminders. */
+  todos: TodosConfig.prefault({}),
+  /** T2: the morning brief. */
+  brief: BriefConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

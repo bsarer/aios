@@ -65,6 +65,8 @@ export interface MessageActions {
   onAppOpen: (actionId: string) => void;
   /** L1: a button on one row of the morning review, echoing that row's hash. */
   onCleanup: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => void;
+  /** T1: a button on one row of a to-do card, echoing that row's hash. */
+  onTodo: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void;
 }
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
@@ -769,6 +771,142 @@ function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: '
   );
 }
 
+type TodoItem = Extract<ChatItem, { kind: 'todo' }>;
+
+/** T1: what was just saved, in code's words, with click-only buttons. Item text is shown as plain text. */
+function TodoCard({ item, actions }: { item: TodoItem; actions: MessageActions }) {
+  const btn = (testid: string, label: string, onClick: () => void, primary = false) => (
+    <button type="button" data-testid={testid} className={primary ? 'rounded-lg px-2.5 py-0.5' : 'glass rounded-lg px-2.5 py-0.5'} style={primary ? { background: 'var(--accent)', color: 'var(--bg)' } : undefined} onClick={onClick}>
+      {label}
+    </button>
+  );
+  return (
+    <div data-kind="todo" data-event={item.event} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.event === 'reminder' ? 'var(--warning)' : 'var(--accent)'}` }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {item.title}
+      </div>
+      <ul className="mt-1">
+        {item.rows.map((r) => (
+          <li key={r.todoId} data-testid="todo-row" data-state={r.state} className={`py-1.5 ${r.state === 'removed' ? 'opacity-50' : ''}`}>
+            <div className={r.state === 'done' ? 'line-through opacity-60' : ''}>
+              <span className="mr-2">{r.state === 'done' ? '☑' : '☐'}</span>
+              {r.text}
+            </div>
+            {(r.when || r.due) && (
+              <div data-testid="todo-when" className="ml-6 text-sm" style={{ color: 'var(--muted)' }}>
+                {r.when ? `Reminder: ${r.when}` : `Due: ${r.due}`}
+              </div>
+            )}
+            {r.state !== 'removed' && (
+              <div className="ml-6 mt-1 flex gap-2 text-sm">
+                {r.state === 'open' && btn('todo-done', 'Done', () => actions.onTodo(item.id, r.todoId, 'done', r.hash), item.event === 'reminder')}
+                {r.state === 'open' && item.event === 'reminder' && btn('todo-snooze', 'Later', () => actions.onTodo(item.id, r.todoId, 'snooze', r.hash))}
+                {r.state === 'done' && btn('todo-reopen', 'Not done', () => actions.onTodo(item.id, r.todoId, 'reopen', r.hash))}
+                {(item.event === 'added' || item.event === 'updated') && btn('todo-remove', 'Remove', () => actions.onTodo(item.id, r.todoId, 'remove', r.hash))}
+              </div>
+            )}
+            {r.result && (
+              <div data-testid="todo-result" className="ml-6 mt-1 text-sm" style={{ color: 'var(--muted)' }}>
+                {r.result}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+type BriefItem = Extract<ChatItem, { kind: 'brief' }>;
+
+/** T2: the morning brief. Read only; mail and event text is shown as plain text. */
+function BriefCard({ item, actions }: { item: BriefItem; actions: MessageActions }) {
+  const head = (t: string) => (
+    <div className="mt-3 text-sm font-medium" style={{ color: 'var(--muted)' }}>
+      {t}
+    </div>
+  );
+  return (
+    <div data-kind="brief" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {item.title}
+        {item.by === 'local' ? ' · written by the local model' : ''}
+      </div>
+      <div data-testid="brief-intro" className="mt-1">
+        {item.intro}
+      </div>
+      {head(item.mails.length ? 'Urgent mail' : 'Mail')}
+      {item.mails.length > 0 ? (
+        <ul data-testid="brief-mails">
+          {item.mails.map((m) => (
+            <li key={m.id} className="py-1">
+              <div className="flex items-baseline gap-2">
+                <span style={{ color: URGENCY_COLOR[m.urgency] }}>●</span>
+                <span className="font-medium">{m.from.replace(/\s*<[^>]*>$/, '')}</span>
+                <span style={{ color: 'var(--muted)' }}>· {m.subject}</span>
+                <button type="button" data-testid="brief-mail-read" className="glass ml-auto rounded-lg px-2.5 py-0.5 text-sm" onClick={() => actions.onSend(`Read email ${m.id}`)}>
+                  Read
+                </button>
+              </div>
+              <div className="ml-5 text-[15px]">{m.summary}</div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="text-[15px]" style={{ color: 'var(--muted)' }}>
+        {item.mails.length ? (item.moreMail ? `And ${item.moreMail} other new email${item.moreMail === 1 ? '' : 's'}.` : '') : item.moreMail ? `Nothing urgent among ${item.moreMail} new email${item.moreMail === 1 ? '' : 's'}.` : 'No new mail.'}
+      </div>
+      {item.calendar !== 'off' && (
+        <>
+          {head('Today')}
+          {item.calendar === 'error' ? (
+            <div className="text-[15px]" style={{ color: 'var(--warning)' }}>
+              I couldn't read your calendar just now.
+            </div>
+          ) : item.events.length ? (
+            <ul data-testid="brief-events">
+              {item.events.map((e, i) => (
+                <li key={i} className="py-0.5 text-[15px]">
+                  <span className="mr-2 tabular-nums" style={{ color: 'var(--muted)' }}>
+                    {e.when}
+                  </span>
+                  {e.title}
+                  {e.location && <span style={{ color: 'var(--muted)' }}> · {e.location}</span>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-[15px]">No events.</div>
+          )}
+          {item.free.length > 0 && (
+            <div data-testid="brief-free" className="text-sm" style={{ color: 'var(--muted)' }}>
+              Free: {item.free.join(', ')}
+            </div>
+          )}
+        </>
+      )}
+      {(item.todos.length > 0 || item.moreTodos > 0) && head('Due')}
+      {item.todos.length > 0 && (
+        <ul data-testid="brief-todos">
+          {item.todos.map((t, i) => (
+            <li key={i} className="py-0.5 text-[15px]">
+              <span className="mr-2">☐</span>
+              {t.text}
+              {t.when && <span style={{ color: t.overdue ? 'var(--warning)' : 'var(--muted)' }}> · {t.when}</span>}
+              {t.overdue && !t.when && <span style={{ color: 'var(--warning)' }}> · overdue</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {item.moreTodos > 0 && (
+        <div className="text-sm" style={{ color: 'var(--muted)' }}>
+          {item.moreTodos} more on your list without a date.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Message({ item, actions }: { item: ChatItem; actions: MessageActions }) {
   switch (item.kind) {
     case 'user':
@@ -823,6 +961,10 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <ResourceAlert item={item} />;
     case 'cleanup':
       return <CleanupCard item={item} actions={actions} />;
+    case 'todo':
+      return <TodoCard item={item} actions={actions} />;
+    case 'brief':
+      return <BriefCard item={item} actions={actions} />;
     case 'attachment':
       return <AttachmentCard item={item} actions={actions} />;
     case 'document':

@@ -61,6 +61,10 @@ export interface ShellOptions {
   openBuiltApp?: (actionId: string) => Promise<void>;
   /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
   cleanup?: { act: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => Promise<void>; run: () => Promise<'nothing' | 'posted'> };
+  /** T1: to-do cards' buttons. Without it, todo_action messages are ignored. */
+  todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void };
+  /** T2: the morning brief, checked whenever AI OS is in use, and /brief. Without it, /brief says it is off. */
+  brief?: { runIfDue: () => Promise<unknown>; run: () => Promise<unknown> };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
@@ -109,7 +113,14 @@ export class Shell {
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
     l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme });
+    // T2: a chat window opening counts as AI OS being in use.
+    this.briefIfDue();
     return () => this.listeners.delete(l);
+  }
+
+  /** T2: posts today's brief if it is due; never in the way of anything else. */
+  briefIfDue(): void {
+    void this.o.brief?.runIfDue().catch((err: unknown) => this.o.audit.append({ kind: 'brief', event: 'error', error: (err as Error).message.slice(0, 200) }));
   }
 
   broadcast(ev: ServerEvent): void {
@@ -185,6 +196,8 @@ export class Shell {
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
     // L1: the user's own click on a morning review row; the review checks its hash and the file or window first.
     if (msg.type === 'cleanup_action') return this.o.cleanup?.act(msg.id, msg.list, msg.n, msg.action, msg.hash);
+    // T1: the user's own click on a to-do row; checked against its hash and the list first. Works while paused.
+    if (msg.type === 'todo_action') return this.o.todos?.act(msg.id, msg.todoId, msg.action, msg.hash);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
     // The user's own click on a build they started, so it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
@@ -198,6 +211,7 @@ export class Shell {
       this.agent.notice('info', 'Still working on the last request. Press Esc to stop it.');
       return;
     }
+    this.briefIfDue();
     const ac = new AbortController();
     this.running = ac;
     this.pushStatus();
@@ -401,6 +415,12 @@ export class Shell {
         if (this.paused) return say('I am paused, so the tidy-up suggestions wait. Type /resume to continue.');
         const r = await this.o.cleanup.run();
         if (r === 'nothing') say('Nothing to tidy up right now: no big unused files in your folders and no idle windows.');
+        return;
+      }
+      case 'brief': {
+        if (!this.o.brief) return say('The morning brief is off. Turn it on with enabled = true under [brief] in your config.');
+        if (this.paused) return say('I am paused, so the brief waits. Type /resume to continue.');
+        await this.o.brief.run();
         return;
       }
       case 'unknown':

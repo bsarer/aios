@@ -134,6 +134,16 @@ The chat looks after files in your folders (F1), by default `~/Documents` and `~
 
 Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`), `saveTo` (default `~/Downloads`), `index` (default true), `summaries` (default true; false keeps facts and tags only, with no model calls), `summariesPerDay` (default 200), `maxIndexedFiles` (default 20000).
 
+## To-dos, reminders and the morning brief
+
+- **To-dos (T1):** "add milk to my list", "remind me at 4 to call Ana", "what's on my list?", "done with the Ana call", "move the Ana reminder to 5". The list is a plain Markdown file you can edit yourself: `~/.config/aios/todos.md`.
+  - **A card repeats back what was saved**, with the time worked out by code ("Reminder: Today, Sat 7 Nov, 16:00"), so a wrong guess is easy to spot and fix with one message. Each item has **Done** (and **Not done**) and **Remove**; only the Remove button takes something off the list.
+  - **Reminders** come as a card in the chat and a desktop notification at their time. During quiet hours or while paused they wait and come afterwards. A reminder's **Later** button reminds you again in an hour.
+  - **Safety:** only your own messages can add, move or tick off items. While an email, invite or document is being read, the chat can't touch the list at all.
+- **Morning brief (T2):** the first time you use AI OS each day after 06:00 (outside quiet hours), one card lists urgent mail since the last brief, today's events and free time, and what is due today or overdue. `/brief` shows it any time. With the local model (below) it writes two friendly lines on top, without a cloud call; without it, the lines are written by code. It only shows things; nothing on it changes anything.
+
+Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
+
 ## System assistant (local model)
 
 A small model running on this computer through [Ollama](https://ollama.com) keeps an eye on the machine in the background (L1). Nothing it sees leaves the computer, and it costs nothing, so the daily cost cap doesn't apply to it (`/pause` still does).

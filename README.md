@@ -145,6 +145,12 @@ Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`
 
 Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
 
+## Videos
+
+"Play holiday.mp4 from Downloads" or "watch this: https://www.youtube.com/watch?v=…" plays the video in mpv, on another screen or the next workspace, like any app. Files must be videos in your allowed folders (`[files] roots`); links must be `https://` links to a site by name (no IP addresses, local names or ports). YouTube and most sites need `yt-dlp` installed next to mpv. A link that comes from an email, invite or document never starts by itself: a card asks you first.
+
+Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
+
 ## System assistant (local model)
 
 A small model running on this computer through [Ollama](https://ollama.com) keeps an eye on the machine in the background (L1). Nothing it sees leaves the computer, and it costs nothing, so the daily cost cap doesn't apply to it (`/pause` still does).

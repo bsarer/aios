@@ -203,3 +203,16 @@ describe('video_play (V1)', () => {
     expect(played).toEqual([]);
   });
 });
+
+describe('the chat prompt with video_play (V1)', () => {
+  it('says the chat plays videos, sends them to video_play, and overrides old refusals', async () => {
+    const { chatSystemPrompt } = await import('../src/prompts.js');
+    const on = chatSystemPrompt({ userName: 'John', now: 'now', video: true, documents: true });
+    expect(on).toContain('You play videos in mpv');
+    expect(on).toContain('videos are played with video_play, not open_app');
+    expect(on).toMatch(/said you cannot play videos .* out of date/);
+    expect(on).toContain('~/Videos');
+    const off = chatSystemPrompt({ userName: 'John', now: 'now' });
+    expect(off).not.toContain('video_play');
+  });
+});

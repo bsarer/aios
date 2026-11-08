@@ -6,10 +6,29 @@ interface Props {
   disabled: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** Messages the user sent, oldest first; Up and Down step through them like a shell. */
+  history: readonly string[];
 }
 
-export function Composer({ working, disabled, onSend, onStop }: Props) {
+/**
+ * Up recalls the previous message when the box is empty or already shows a recalled one,
+ * so it never takes over the arrow keys while you edit a message of your own. Down steps
+ * forward again and, past the newest, brings back what you had typed.
+ */
+export function stepHistory(history: readonly string[], at: number | null, key: 'up' | 'down'): number | null | undefined {
+  if (key === 'up') {
+    const next = (at ?? history.length) - 1;
+    return next >= 0 ? next : undefined;
+  }
+  if (at === null) return undefined;
+  return at + 1 < history.length ? at + 1 : null;
+}
+
+export function Composer({ working, disabled, onSend, onStop, history }: Props) {
   const [text, setText] = useState('');
+  // Which history entry the box shows (null: the user's own text), and that text to come back to.
+  const [at, setAt] = useState<number | null>(null);
+  const [draft, setDraft] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
 
   // Kiosk: the input should always have focus.
@@ -44,6 +63,22 @@ export function Composer({ working, disabled, onSend, onStop }: Props) {
     if (!t || disabled) return;
     onSend(t);
     setText('');
+    setAt(null);
+  };
+
+  const recall = (e: React.KeyboardEvent<HTMLTextAreaElement>, key: 'up' | 'down') => {
+    const showingRecalled = at !== null && text === history[at];
+    if (key === 'up' && text !== '' && !showingRecalled) return;
+    if (key === 'down' && !showingRecalled) return;
+    const next = stepHistory(history, showingRecalled ? at : null, key);
+    if (next === undefined) return;
+    e.preventDefault();
+    if (at === null) setDraft(text);
+    setAt(next);
+    const value = next === null ? draft : (history[next] ?? '');
+    setText(value);
+    // Caret at the end, as a shell does.
+    requestAnimationFrame(() => ref.current?.setSelectionRange(value.length, value.length));
   };
 
   return (
@@ -56,8 +91,15 @@ export function Composer({ working, disabled, onSend, onStop }: Props) {
           aria-label="Message"
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setAt(null);
+          }}
           onKeyDown={(e) => {
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              if (!e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) recall(e, e.key === 'ArrowUp' ? 'up' : 'down');
+              return;
+            }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
@@ -96,7 +138,7 @@ export function Composer({ working, disabled, onSend, onStop }: Props) {
         )}
       </div>
       <div className="pt-2 text-center text-[13px]" style={{ color: 'var(--muted)' }}>
-        Enter to send · Shift+Enter for a new line · Esc to stop · /help for commands
+        Enter to send · Shift+Enter for a new line · ↑ for earlier messages · Esc to stop · /help for commands
       </div>
     </div>
   );

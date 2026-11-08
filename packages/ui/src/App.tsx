@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
@@ -56,6 +56,11 @@ export function App() {
 
   // Before the first message of the session, the greeting sits mid-screen with a few starters.
   const fresh = !state.items.some((i) => i.kind === 'user');
+  // Up-arrow recall in the input: what the user sent, oldest first, repeats collapsed.
+  const history = useMemo(
+    () => state.items.flatMap((i) => (i.kind === 'user' ? [i.text] : [])).filter((t, n, all) => t !== all[n - 1]),
+    [state.items],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -95,7 +100,7 @@ export function App() {
           <div ref={bottom} />
         </div>
       </main>
-      <Composer working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} />
+      <Composer history={history} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} />
     </div>
   );
 }

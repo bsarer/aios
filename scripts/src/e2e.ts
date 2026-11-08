@@ -620,6 +620,16 @@ async function main(): Promise<void> {
     check('cost in status strip updates', await waitFor(async () => (await page.getByTestId('cost').innerText()) !== costBefore), `${costBefore} → ${await page.getByTestId('cost').innerText()}`);
     await shot(page, '2-chat');
 
+    // Up in the empty box brings back the last message; Down returns to what was typed (empty).
+    await input.press('ArrowUp');
+    check('Up recalls the previous message', (await input.inputValue()) === 'hello', await input.inputValue());
+    await input.press('ArrowDown');
+    check('Down goes back to the empty box', (await input.inputValue()) === '', await input.inputValue());
+    await input.fill('half typed');
+    await input.press('ArrowUp');
+    check('Up leaves a message being typed alone', (await input.inputValue()) === 'half typed', await input.inputValue());
+    await input.fill('');
+
     // 3. now() tool round trip.
     await input.fill('what time is it?');
     await input.press('Enter');

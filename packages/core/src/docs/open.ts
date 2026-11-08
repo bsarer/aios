@@ -8,6 +8,9 @@ import { isAbsolute } from 'node:path';
 import { onPath } from '../apps/desktop.js';
 import type { DocKind } from './files.js';
 
+/** The app each kind of document opens in. */
+export const APP_NAME = { word: 'WordCraft', sheet: 'GridCraft' } as const;
+
 export type OpenDocument = (kind: DocKind, path: string) => Promise<void>;
 
 const EARLY_EXIT_MS = 1500;

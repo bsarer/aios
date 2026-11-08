@@ -63,6 +63,8 @@ export interface MessageActions {
   onFileChangeDiscard: (id: string) => void;
   /** F1: Save on an attachment card, into the folder picked (by its index on the card). */
   onAttachmentSave: (id: string, folder: number) => void;
+  /** D3: Edit on a document card or its viewer; opens the card's file in WordCraft or GridCraft. */
+  onDocumentEdit: (id: string) => void;
   /** Stop on a running build (S4). */
   onActionStop: (id: string) => void;
   /** Open on a finished build's message (S4); names the Build card, not the app. */
@@ -486,9 +488,14 @@ function EventCard({ item, actions }: { item: EventItem; actions: MessageActions
 
 type DocumentItem = Extract<ChatItem, { kind: 'document' }>;
 
-/** A Word or Excel file the user can open (D1). File names can come from anyone: plain text only. */
-function DocumentCard({ item }: { item: DocumentItem }) {
+/** A Word or Excel file the user can open (D1) or edit in its app (D3). File names can come from anyone: plain text only. */
+function DocumentCard({ item, actions }: { item: DocumentItem; actions: MessageActions }) {
   const [open, setOpen] = useState(false);
+  const app = item.fileKind === 'word' ? 'WordCraft' : 'GridCraft';
+  const edit = () => {
+    setOpen(false);
+    actions.onDocumentEdit(item.id);
+  };
   return (
     <div data-kind="document" className="card flex items-center gap-3 px-4 py-3">
       <span className="tile">
@@ -505,7 +512,10 @@ function DocumentCard({ item }: { item: DocumentItem }) {
       <button type="button" data-testid="document-open" className="btn btn-primary" onClick={() => setOpen(true)}>
         Open
       </button>
-      {open && <DocumentViewer item={item} onClose={() => setOpen(false)} />}
+      <button type="button" data-testid="document-edit" className="btn btn-secondary" title={`Edit in ${app}`} onClick={edit}>
+        Edit
+      </button>
+      {open && <DocumentViewer item={item} onClose={() => setOpen(false)} onEdit={edit} />}
     </div>
   );
 }
@@ -1011,7 +1021,7 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
     case 'attachment':
       return <AttachmentCard item={item} actions={actions} />;
     case 'document':
-      return <DocumentCard item={item} />;
+      return <DocumentCard item={item} actions={actions} />;
     case 'build_result':
       return (
         <div data-kind="build_result" data-ok={item.ok} data-tone={item.ok ? undefined : 'danger'} className="card flex items-center gap-3 px-4 py-3">

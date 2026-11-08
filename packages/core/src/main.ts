@@ -218,8 +218,16 @@ async function main(): Promise<void> {
     docFilesForShow = docFiles;
     const engine = new DocEngine({ wordCli: d.wordCli, sheetCli: d.sheetCli, timeoutMs: d.timeoutSeconds * 1000 });
     docEngine = engine;
-    documentFiles = new DocumentFiles({ store, files: docFiles, engine, audit, post: (item) => shell?.agent.post(item) });
     const open = createDocumentOpener({ word: d.wordApp, sheet: d.sheetApp });
+    // D3: the Edit button on a document card opens it in its app, from the click alone.
+    documentFiles = new DocumentFiles({
+      store,
+      files: docFiles,
+      engine,
+      audit,
+      post: (item) => shell?.agent.post(item),
+      edit: { open, window: chatWindow, notice: (level, text) => shell?.agent.notice(level, text) },
+    });
     // doc_open_app is device tier like open_app, so it shares open_app's confirm card.
     apps.push(...docTools({ files: docFiles, engine, viewer: documentFiles, open, window: chatWindow }));
     // D2: changes go on a card; the Save click writes a new file (or, when asked, over the original after a backup).
@@ -443,6 +451,7 @@ async function main(): Promise<void> {
     ...(fileActions ? { fileActions } : {}),
     ...(fileIndexer ? { fileIndex: fileIndexer } : {}),
     attachments: attachmentFiles,
+    ...(documentFiles ? { documents: documentFiles } : {}),
     chatWindow,
     ...(review ? { cleanup: review } : {}),
     ...(todos ? { todos } : {}),

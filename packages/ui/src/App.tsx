@@ -37,6 +37,7 @@ export function App() {
     onFileChangeConfirm: (id, hash) => send({ type: 'file_change_confirm', id, hash }),
     onFileChangeDiscard: (id) => send({ type: 'file_change_discard', id }),
     onAttachmentSave: (id, folder) => send({ type: 'attachment_save', id, folder }),
+    onDocumentEdit: (id) => send({ type: 'document_edit', id }),
     onActionStop: (id) => send({ type: 'action_stop', id }),
     onAppOpen: (actionId) => send({ type: 'app_open', actionId }),
     onCleanup: (id, list, n, action, hash) => send({ type: 'cleanup_action', id, list, n, action, hash }),

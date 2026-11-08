@@ -516,6 +516,12 @@ async function main(): Promise<void> {
   const port = 17_000 + Math.floor(Math.random() * 1000);
   // D1: fixture documents and pretend WordCraft/GridCraft tools.
   const docs = makeDocFixture();
+  // D3: pretend WordCraft and GridCraft apps that only note the file they were given.
+  const appsOpened = join(tmp, 'apps-opened.txt');
+  for (const name of ['pretend-wordcraft', 'pretend-gridcraft']) {
+    writeFileSync(join(tmp, name), `#!/bin/sh\nprintf '%s %s\\n' "${name}" "$1" >> "${appsOpened}"\n`);
+    chmodSync(join(tmp, name), 0o755);
+  }
   // L1: an old, big-enough download for the morning tidy-up. The review only runs from /checkup here,
   // and the resource monitor is off so the test machine's own numbers can't post alerts.
   const downloads = join(tmp, 'Downloads');
@@ -533,7 +539,7 @@ async function main(): Promise<void> {
       `[mail]\naddress = "john@aios.test"\nusername = "john@aios.test"\npasswordRef = "keyring:mail"\nbatchWindowSeconds = 2\n` +
       `imap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n` +
       `[calendar]\nclientId = "${FAKE_CLIENT_ID}"\napiBaseUrl = "${gcal.apiBaseUrl}"\ntokenUrl = "${gcal.tokenUrl}"\n` +
-      `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
+      `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\nwordApp = "${join(tmp, 'pretend-wordcraft')}"\nsheetApp = "${join(tmp, 'pretend-gridcraft')}"\n` +
       `[files]\nroots = ["${docs.documents}", "${downloads}"]\n` +
       `[assistant.monitor]\nenabled = false\n[assistant.review]\nenabled = false\nminFileMb = 1\n` +
       // T2: the brief is due from midnight here, so it comes at boot whatever time the test runs.
@@ -915,6 +921,16 @@ async function main(): Promise<void> {
     await shot(page, '14-document-sheet');
     await page.keyboard.press('Escape');
     check('Esc closes the document', await waitFor(async () => (await page.getByTestId('document-viewer').count()) === 0));
+    // D3: Edit in the viewer closes it and opens the file in GridCraft, from the click alone.
+    await page.getByTestId('document-open').click();
+    check('the viewer has an Edit button', (await page.getByTestId('document-viewer-edit').innerText()) === 'Edit in GridCraft');
+    await page.getByTestId('document-viewer-edit').click();
+    check('Edit closes the viewer', await waitFor(async () => (await page.getByTestId('document-viewer').count()) === 0));
+    const salesPath = join(docs.documents, 'Finance', 'sales.xlsx');
+    check('Edit opens the file in GridCraft', await waitFor(async () => existsSync(appsOpened) && readFileSync(appsOpened, 'utf8') === `pretend-gridcraft ${salesPath}\n`, 10_000));
+    check('the chat says where it opened', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).includes('Opened sales.xlsx in GridCraft')));
+    await page.getByTestId('document-edit').click();
+    check('Edit on the card opens it too', await waitFor(async () => readFileSync(appsOpened, 'utf8').split('\n').filter(Boolean).length === 2, 10_000));
     // 12. Editing documents (D2): the change waits on a card; Save writes a new file next to the original.
     const reportBefore = readFileSync(join(docs.documents, 'report.docx'));
     await input.fill('move the lease date in report.docx to 30 November');

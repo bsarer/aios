@@ -379,6 +379,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('file_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('file_change_discard'), id: z.string().max(100) }),
   /** F1: Save on an attachment card, into one of the folders the card offers (by index). */
+  /** D3: Edit on a document card or in its viewer; names the card, never a path or app. */
+  z.strictObject({ type: z.literal('document_edit'), id: z.string().max(100) }),
   z.strictObject({ type: z.literal('attachment_save'), id: z.string().max(100), folder: z.int().min(0).max(20) }),
   /** L1: a button on one row of the morning review, echoing that row's hash. */
   z.strictObject({

@@ -15,6 +15,7 @@ import type { CalendarActions } from './calendar/actions.js';
 import type { DocActions } from './docs/actions.js';
 import type { FileActions } from './files/actions.js';
 import type { AttachmentFiles } from './mail/attachments.js';
+import type { DocumentFiles } from './docs/viewer.js';
 import type { ApprovalBroker } from './mail/approvals.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
@@ -55,6 +56,8 @@ export interface ShellOptions {
   fileIndex?: Pick<FileIndexer, 'reindex' | 'status'>;
   /** Save buttons on attachment cards (F1). Without it, attachment_save is ignored. */
   attachments?: Pick<AttachmentFiles, 'save'>;
+  /** D3: Edit on a document card. Without it, document_edit is ignored. */
+  documents?: Pick<DocumentFiles, 'edit'>;
   /** S7: where apps open now, for the status strip's hint. Without it, the hint is left out. */
   chatWindow?: { readonly appsAt: 'screen' | 'workspace' | null };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
@@ -194,6 +197,8 @@ export class Shell {
     if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
     // The user's own click on Save, so like Send on a draft it works while paused.
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
+    // D3: the user's own click on Edit; the card's file is checked again before its app opens. Works while paused.
+    if (msg.type === 'document_edit') return this.o.documents?.edit(msg.id);
     // L1: the user's own click on a morning review row; the review checks its hash and the file or window first.
     if (msg.type === 'cleanup_action') return this.o.cleanup?.act(msg.id, msg.list, msg.n, msg.action, msg.hash);
     // T1: the user's own click on a to-do row; checked against its hash and the list first. Works while paused.

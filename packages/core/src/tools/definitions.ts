@@ -270,6 +270,19 @@ export const ALPHA_TOOLS = [
       'Open a Word file in WordCraft or an Excel file in GridCraft, in its own window. It opens away from the chat, like any app.',
     input: z.strictObject({ path: z.string().min(1).max(1000) }),
   }),
+  // ── Videos (V1) ──
+  def({
+    name: 'video_play',
+    tier: 'device',
+    description:
+      'Play one video in mpv, in its own window away from the chat. Give `path` for a video file in the allowed folders (find it with files_list or files_search), or `url` for an https link the user gave (YouTube and most video sites).',
+    input: z
+      .strictObject({
+        path: z.string().min(1).max(1000).optional().describe('e.g. "~/Downloads/holiday.mp4"'),
+        url: z.string().min(1).max(2000).optional().describe('e.g. "https://www.youtube.com/watch?v=…"'),
+      })
+      .refine((a) => (a.path === undefined) !== (a.url === undefined), 'give either path or url, not both'),
+  }),
   // ── Files (F1) ──
   def({
     name: 'files_list',

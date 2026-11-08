@@ -39,6 +39,8 @@ import { fileTools } from './files/tools.js';
 import { DocFiles } from './docs/files.js';
 import { createDocumentOpener } from './docs/open.js';
 import { docTools } from './docs/tools.js';
+import { createVideoPlayer } from './video/play.js';
+import { videoTools } from './video/tools.js';
 import { DocumentFiles } from './docs/viewer.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
@@ -241,6 +243,10 @@ async function main(): Promise<void> {
       show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
     });
     for (const t of editTools({ files: docFiles, engine, actions: docActions })) tools.register(t);
+  }
+  // V1: videos in mpv. Device tier like open_app, so it shares open_app's confirm card.
+  if (config.video.enabled) {
+    apps.push(...videoTools({ play: createVideoPlayer(config.video.player), window: chatWindow, links: config.video.links, ...(fileRoots ? { roots: fileRoots } : {}) }));
   }
   // F1: managing files. Changes go on a card; the click renames, copies or creates, never replacing anything.
   let fileActions: FileActions | undefined;

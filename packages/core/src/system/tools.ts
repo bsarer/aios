@@ -65,6 +65,19 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
       const file = String(args.path ?? '').split('/').pop() ?? '';
       return `Open ${q(cleanName(file))} in ${/\.xlsx$/i.test(file) ? 'GridCraft' : 'WordCraft'}`;
     }
+    case 'video_play': {
+      if (typeof args.url === 'string') {
+        // The site's name only, worked out by code: what the card asks is where the video comes from.
+        let host = '';
+        try {
+          host = new URL(args.url).hostname;
+        } catch {
+          // The click checks the link again and refuses it.
+        }
+        return `Play the video at ${q(cleanName(host || 'an unreadable link'))} in mpv`;
+      }
+      return `Play ${q(cleanName(String(args.path ?? '').split('/').pop() ?? ''))} in mpv`;
+    }
     default:
       return `Run ${tool}`;
   }

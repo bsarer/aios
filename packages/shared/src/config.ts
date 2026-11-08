@@ -221,6 +221,19 @@ export const BriefConfig = z.strictObject({
 });
 export type BriefConfig = z.infer<typeof BriefConfig>;
 
+/**
+ * V1: watching videos in mpv from the chat. `player` is started with options aios-core
+ * chooses, then `--`, then one absolute file path or one https link.
+ */
+export const VideoConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** mpv's command. An absolute path when the service doesn't see it on PATH. */
+  player: z.string().min(1).max(500).default('mpv'),
+  /** Play https links (YouTube and other sites mpv opens through yt-dlp). Off: only video files in `[files] roots`. */
+  links: z.boolean().default(true),
+});
+export type VideoConfig = z.infer<typeof VideoConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -289,6 +302,8 @@ export const AiosConfig = z.strictObject({
   todos: TodosConfig.prefault({}),
   /** T2: the morning brief. */
   brief: BriefConfig.prefault({}),
+  /** V1: watching videos in mpv. */
+  video: VideoConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

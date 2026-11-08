@@ -53,6 +53,12 @@ export interface RegisteredTool {
    * the only untrusted text in view is from documents. Never while an email or calendar event is.
    */
   allowWithDocuments?: boolean;
+  /**
+   * V1: a device-tier tool that may still run at once, without a card, when the only untrusted
+   * text in view is from documents and these arguments are safe then (a video file from the
+   * user's own folders, not a link). Never while an email or calendar event is in view.
+   */
+  runWithDocuments?: (args: unknown) => boolean;
   /** What the audit log records of valid arguments, when they hold the user's own words (S4). Default: all of them. */
   auditArgs?: (args: unknown) => unknown;
 }
@@ -151,10 +157,11 @@ export class ToolRegistry {
     const tier = tool.def.tier;
     // Changes to this computer never run from a context an email is in. A device change may
     // become a card the user confirms (below); anything else is refused.
-    const asCard = ctx.untrustedInContext && tier === 'device' && !!tool.confirmWhenUntrusted;
+    const docRun = ctx.untrustedInContext && tier === 'device' && !!tool.runWithDocuments?.(parsed.data) && onlyDocuments(ctx);
+    const asCard = ctx.untrustedInContext && tier === 'device' && !docRun && !!tool.confirmWhenUntrusted;
     // D2: an edit card may still be shown while only document text is in view.
     const docCard = tier === 'write' && !!tool.propose && !!tool.allowWithDocuments && onlyDocuments(ctx);
-    if (ctx.untrustedInContext && !asCard && !docCard && (tier === 'device' || (tier === 'write' && tool.propose))) {
+    if (ctx.untrustedInContext && !asCard && !docCard && !docRun && (tier === 'device' || (tier === 'write' && tool.propose))) {
       log({ decision: 'denied', reason: 'untrusted content in context', untrustedInContext: true, args });
       return { ok: false, content: UNTRUSTED_REFUSAL, label };
     }

@@ -15,7 +15,7 @@ import { SystemActions } from '../src/system/actions.js';
 import { SystemControls } from '../src/system/controls.js';
 import type { Run } from '../src/system/run.js';
 import { systemTools } from '../src/system/tools.js';
-import { ToolRegistry } from '../src/tools/registry.js';
+import { ToolRegistry, type UntrustedSource } from '../src/tools/registry.js';
 import { checkVideoLink, createVideoPlayer, playerArgs, type VideoSource, videoFormat } from '../src/video/play.js';
 import { videoTools } from '../src/video/tools.js';
 
@@ -124,8 +124,11 @@ describe('video_play (V1)', () => {
     const actions = new SystemActions({ store, controls: new SystemControls(run), audit, show: (i, isNew) => (isNew ? shown.push(i) : shown.splice(shown.findIndex((x) => x.id === i.id), 1, i)), notice: () => undefined, isPaused: () => paused });
     const tools = new ToolRegistry(audit, { isPaused: () => paused });
     for (const t of systemTools({ controls: new SystemControls(run), actions, extra: video })) tools.register(t);
-    const call = (args: unknown, untrustedInContext = false) =>
-      tools.execute({ id: 'v', name: 'video_play', arguments: JSON.stringify(args) }, { signal: new AbortController().signal, untrustedInContext, userText: 'play it' });
+    const call = (args: unknown, untrustedInContext = false, sources?: UntrustedSource[]) =>
+      tools.execute(
+        { id: 'v', name: 'video_play', arguments: JSON.stringify(args) },
+        { signal: new AbortController().signal, untrustedInContext, userText: 'play it', ...(sources ? { untrustedSources: new Set(sources) } : {}) },
+      );
     const log = () => readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
     const cards = () => shown.filter((i): i is Extract<ChatItem, { kind: 'action' }> => i.kind === 'action');
     return { home, tools, call, played, steps, log, cards, actions, setPaused: (p: boolean) => (paused = p) };
@@ -193,6 +196,21 @@ describe('video_play (V1)', () => {
     expect(played).toEqual([{ kind: 'link', url: 'https://evil.example.com/watch?v=1' }]);
   });
 
+  it('after listing files (only file names in view) a video file plays at once, but a link still waits for a click', async () => {
+    const { home, call, played, cards, log } = rig();
+    const r = await call({ path: 'holiday.mp4' }, true, ['document']);
+    expect(r.content).toMatch(/^The video is playing in mpv/);
+    expect(played).toEqual([{ kind: 'file', path: join(home, 'holiday.mp4') }]);
+    expect(log().at(-1)).toMatchObject({ tool: 'video_play', decision: 'allowed', untrustedInContext: true });
+    expect((await call({ url: 'https://www.youtube.com/watch?v=1' }, true, ['document'])).content).toMatch(/card now asks the user to confirm/);
+    expect(played).toHaveLength(1);
+    expect(cards()).toHaveLength(1);
+    // With an email or event in view, even a file waits for a click.
+    expect((await call({ path: 'holiday.mp4' }, true, ['document', 'email'])).content).toMatch(/card now asks the user to confirm/);
+    expect((await call({ path: 'holiday.mp4' }, true, ['calendar'])).content).toMatch(/card now asks the user to confirm/);
+    expect(played).toHaveLength(1);
+  });
+
   it('a file asked for while outside text is in view also waits for a click; paused refuses it', async () => {
     const { call, played, cards, setPaused } = rig();
     await call({ path: 'holiday.mp4' }, true);
@@ -214,5 +232,25 @@ describe('the chat prompt with video_play (V1)', () => {
     expect(on).toContain('~/Videos');
     const off = chatSystemPrompt({ userName: 'John', now: 'now' });
     expect(off).not.toContain('video_play');
+  });
+});
+
+describe('file_show and file_read on a video (V1)', () => {
+  it('send the model to video_play instead of saying videos cannot be shown', async () => {
+    const { fileTools } = await import('../src/files/tools.js');
+    const dir = tmp('vshow');
+    const home = join(dir, 'Videos');
+    mkdirSync(home);
+    writeFileSync(join(home, 'screenrecording.mp4'), MP4);
+    const make = (videos: boolean) =>
+      fileTools({ roots: new FileRoots({ roots: [home] }), actions: { propose: () => { throw new Error('no'); } }, viewer: { showFile: () => { throw new Error('no'); } }, videos });
+    const ctx = { signal: new AbortController().signal, untrustedInContext: false, userText: 'show me my latest video' };
+    const byName = (v: boolean, n: string) => make(v).find((t) => t.def.name === n)!;
+    const shown = await byName(true, 'file_show').handler({ path: 'screenrecording.mp4' }, ctx);
+    expect(typeof shown === 'string' ? shown : shown.content).toMatch(/is a video: it can't be shown in the chat, but you can play it. Call video_play/);
+    const read = await byName(true, 'file_read').handler({ path: 'screenrecording.mp4' }, ctx);
+    expect(read).toMatch(/Call video_play/);
+    const off = await byName(false, 'file_show').handler({ path: 'screenrecording.mp4' }, ctx);
+    expect(typeof off === 'string' ? off : off.content).toMatch(/can't be shown in the chat; only PDFs/);
   });
 });

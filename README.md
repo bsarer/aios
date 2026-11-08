@@ -119,7 +119,7 @@ The chat reads, summarizes and shows `.docx` and `.xlsx` files from your documen
 
 ## Files
 
-The chat looks after files in your folders (F1), by default `~/Documents` and `~/Downloads`.
+The chat looks after files in your folders (F1), by default `~/Documents`, `~/Downloads` and `~/Videos` (V1 added `~/Videos`).
 
 - **Look around:** "what's in Downloads", "find the lease PDF", "how big is report.pdf", "show me photo.png", "what does notes.txt say". PDFs, pictures and text files open in the chat's viewer; Word and Excel files use the document card.
 - **Change things:** "rename it to lease-2026.pdf", "copy the invoice to Documents/Taxes", "make a folder Taxes in Documents", "write a note called packing with passport and charger", "make a new budget spreadsheet in Documents/Home". Each shows a card; nothing changes until you click it. Nothing is ever replaced or deleted: a taken name, or a file that changed after the card appeared, stops the change and the card says why.
@@ -147,7 +147,7 @@ Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[br
 
 ## Videos
 
-"Play holiday.mp4 from Downloads" or "watch this: https://www.youtube.com/watch?v=…" plays the video in mpv, on another screen or the next workspace, like any app. Files must be videos in your allowed folders (`[files] roots`); links must be `https://` links to a site by name (no IP addresses, local names or ports). YouTube and most sites need `yt-dlp` installed next to mpv. A link that comes from an email, invite or document never starts by itself: a card asks you first.
+"Play holiday.mp4 from Downloads" or "watch this: https://www.youtube.com/watch?v=…" plays the video in mpv, on another screen or the next workspace, like any app. Files must be videos in your allowed folders (`[files] roots`, which now include `~/Videos` by default; if your config lists its own `roots`, add `"~/Videos"` there); links must be `https://` links to a site by name (no IP addresses, local names or ports). YouTube and most sites need `yt-dlp` installed next to mpv. A link that comes from an email, invite or document never starts by itself: a card asks you first.
 
 Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
 

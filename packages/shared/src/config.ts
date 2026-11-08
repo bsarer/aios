@@ -188,7 +188,7 @@ export type DocsConfig = z.infer<typeof DocsConfig>;
  */
 export const FilesConfig = z.strictObject({
   enabled: z.boolean().default(true),
-  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads']),
+  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads', '~/Videos']),
   /** Where an attachment's Save button saves unless another folder is picked on the card. */
   saveTo: z.string().min(1).max(500).default('~/Downloads'),
   /** F2: keep an index of the files (facts, summaries, tags) for files_search. */
@@ -295,7 +295,7 @@ export const AiosConfig = z.strictObject({
     timeoutSeconds: 12,
   }),
   /** F1: managing files in a few folders. */
-  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
+  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads', '~/Videos'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
   /** L1: the background system assistant on the local model. */
   assistant: AssistantConfig.prefault({}),
   /** T1: to-dos and reminders. */

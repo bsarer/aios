@@ -288,7 +288,7 @@ export const ALPHA_TOOLS = [
     name: 'files_list',
     tier: 'read',
     description:
-      "Files and folders in the user's allowed folders (by default ~/Documents and ~/Downloads): name, type, size and date, folders first, newest first. With `folder`, that folder's contents; with `query`, every file whose path contains it, anywhere below. Gives the paths the other file tools take.",
+      "Files and folders in the user's allowed folders (by default ~/Documents, ~/Downloads and ~/Videos): name, type, size and date, folders first, newest first. With `folder`, that folder's contents; with `query`, every file whose path contains it, anywhere below. Gives the paths the other file tools take.",
     input: z.strictObject({
       folder: z.string().min(1).max(1000).optional().describe('e.g. "~/Downloads" or "Documents/Legal"; all allowed folders when left out'),
       query: z.string().min(1).max(200).optional().describe('Part of a name, e.g. "invoice" or ".pdf"'),

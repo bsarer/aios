@@ -44,6 +44,9 @@ export function videoTools(o: VideoToolsOptions): RegisteredTool[] {
           return { host: null };
         }
       },
+      // Looking a video up (files_list, files_search) puts file names in view. Playing a file
+      // from the user's own folders then is harmless, so it still runs at once; a link waits for a card.
+      runWithDocuments: (args) => (args as VideoPlayArgs).url === undefined,
       async handler(args) {
         const a = args as VideoPlayArgs;
         let source: VideoSource;

@@ -285,7 +285,7 @@ async function main(): Promise<void> {
           return `A card for the ${card.fileKind === 'word' ? 'Word' : 'Excel'} file is in the chat; the user opens it with its Open button. Say so in one line.`;
         }
       : undefined;
-    for (const t of fileTools({ roots: fileRoots, actions: fileActions, viewer: attachmentFiles, ...(showDocument ? { showDocument } : {}) })) tools.register(t);
+    for (const t of fileTools({ roots: fileRoots, actions: fileActions, viewer: attachmentFiles, videos: config.video.enabled, ...(showDocument ? { showDocument } : {}) })) tools.register(t);
   }
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
   const buildLog = new BuildLog(store);

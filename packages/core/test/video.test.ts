@@ -254,3 +254,74 @@ describe('file_show and file_read on a video (V1)', () => {
     expect(typeof off === 'string' ? off : off.content).toMatch(/can't be shown in the chat; only PDFs/);
   });
 });
+
+describe('/play (V1)', () => {
+  it('parses as a command, never a message for the model', async () => {
+    const { parseCommand } = await import('../src/commands.js');
+    expect(parseCommand('/play')).toEqual({ name: 'play', text: '' });
+    expect(parseCommand('/play screen recording')).toEqual({ name: 'play', text: 'screen recording' });
+  });
+
+  it('picks a link, an exact path, or the newest video whose name contains the words', async () => {
+    const { pickVideo } = await import('../src/video/tools.js');
+    const { utimesSync } = await import('node:fs');
+    const dir = tmp('vpick');
+    const home = join(dir, 'Videos');
+    mkdirSync(join(home, 'trips'), { recursive: true });
+    writeFileSync(join(home, 'old-recording.mp4'), MP4);
+    writeFileSync(join(home, 'trips', 'screenrecording-2026-11-08.mp4'), MKV);
+    writeFileSync(join(home, 'newer-notes.txt'), 'not a video');
+    utimesSync(join(home, 'old-recording.mp4'), new Date('2026-01-01'), new Date('2026-01-01'));
+    utimesSync(join(home, 'trips', 'screenrecording-2026-11-08.mp4'), new Date('2026-11-08'), new Date('2026-11-08'));
+    const roots = new FileRoots({ roots: [home] });
+    expect(await pickVideo(roots, '')).toEqual({ args: { path: join(home, 'trips', 'screenrecording-2026-11-08.mp4') } });
+    expect(await pickVideo(roots, 'old')).toEqual({ args: { path: join(home, 'old-recording.mp4') } });
+    expect(await pickVideo(roots, 'old-recording.mp4')).toEqual({ args: { path: join(home, 'old-recording.mp4') } });
+    expect(await pickVideo(roots, 'https://www.youtube.com/watch?v=1')).toEqual({ args: { url: 'https://www.youtube.com/watch?v=1' } });
+    expect(await pickVideo(roots, 'notes')).toMatchObject({ error: expect.stringMatching(/No video in .* has "notes"/) });
+    expect(await pickVideo(undefined, 'x')).toMatchObject({ error: expect.stringMatching(/only links/) });
+  });
+});
+
+describe('/play in the shell (V1)', () => {
+  it('plays through the registry without the model, audits it, and says what is playing', async () => {
+    const { Shell } = await import('../src/shell.js');
+    const { pickVideo } = await import('../src/video/tools.js');
+    const dir = tmp('vshell');
+    const home = join(dir, 'Videos');
+    mkdirSync(home);
+    writeFileSync(join(home, 'screenrecording.mp4'), MP4);
+    const roots = new FileRoots({ roots: [home] });
+    const auditPath = join(dir, 'audit.jsonl');
+    const audit = new AuditLog(auditPath);
+    const played: VideoSource[] = [];
+    const tools = new ToolRegistry(audit);
+    for (const t of videoTools({ play: async (s) => void played.push(s), window: { appStarting: async () => undefined, appFailed: async () => undefined }, links: true, roots })) tools.register(t);
+    const requests: unknown[] = [];
+    const store = new Store(':memory:');
+    const shell = new Shell({
+      store,
+      model: { stream: () => { requests.push(1); throw new Error('the model is never called'); } },
+      tools,
+      audit,
+      userName: 'John',
+      timeZone: 'Europe/Istanbul',
+      modelName: 'fake',
+      costCapUsd: 2,
+      readBattery: async () => null,
+      readWifi: async () => null,
+      video: { pick: (text) => pickVideo(roots, text) },
+    });
+    await shell.handle({ type: 'send', text: '/play' });
+    expect(played).toEqual([{ kind: 'file', path: join(home, 'screenrecording.mp4') }]);
+    expect(requests).toHaveLength(0);
+    expect(store.recentItems().at(-1)).toMatchObject({ kind: 'notice', text: 'Playing screenrecording.mp4 in mpv.' });
+    const log = readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(log.at(-1)).toMatchObject({ tool: 'video_play', tier: 'device', decision: 'allowed', ok: true });
+    await shell.handle({ type: 'send', text: '/play file:///etc/passwd' });
+    expect(store.recentItems().at(-1)).toMatchObject({ kind: 'notice', text: expect.stringMatching(/^No video in/) });
+    await shell.handle({ type: 'send', text: '/play http://example.com/v' });
+    expect(store.recentItems().at(-1)).toMatchObject({ kind: 'notice', text: 'only https:// links can be played.' });
+    expect(played).toHaveLength(1);
+  });
+});

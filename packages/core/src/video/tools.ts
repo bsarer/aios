@@ -9,7 +9,7 @@
  * model gets no file name back: names come from the disk, and the user sees mpv's window.
  */
 import type { ChatWindow } from '../apps/window.js';
-import type { FileRoots } from '../files/roots.js';
+import type { FileEntry, FileRoots } from '../files/roots.js';
 import { FilePathError } from '../files/roots.js';
 import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool } from '../tools/registry.js';
@@ -83,4 +83,31 @@ export function videoTools(o: VideoToolsOptions): RegisteredTool[] {
       },
     },
   ];
+}
+
+/** Videos in the folders whose path contains `query` (all when empty), newest first. */
+export async function findVideos(roots: FileRoots, query: string, limit = 5): Promise<FileEntry[]> {
+  // An empty query lists only the top of each folder; "." walks below, since video names have one.
+  const { entries } = await roots.list(null, query.trim() || '.');
+  const files = entries.filter((e) => !e.isDir).sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const out: FileEntry[] = [];
+  for (const f of files.slice(0, 400)) {
+    if (await videoFormatOf(f.path)) out.push(f);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** /play's words: an https link, a path, or the newest video whose name contains them. */
+export async function pickVideo(roots: FileRoots | undefined, text: string): Promise<{ args: { path: string } | { url: string } } | { error: string }> {
+  const t = text.trim();
+  if (/^https?:\/\//i.test(t)) return { args: { url: t } };
+  if (!roots) return { error: 'Files are turned off in config [files], so only links can be played: /play https://…' };
+  if (t) {
+    const exact = await roots.resolve(t, 'file').catch(() => null);
+    if (exact) return { args: { path: exact.path } };
+  }
+  const [newest] = await findVideos(roots, t, 1);
+  if (!newest) return { error: t ? `No video in ${roots.rootsText()} has "${t.slice(0, 100)}" in its name.` : `There are no videos in ${roots.rootsText()}.` };
+  return { args: { path: newest.path } };
 }

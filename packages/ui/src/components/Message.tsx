@@ -3,36 +3,40 @@ import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import { AttachmentViewer } from './AttachmentViewer';
 import { DocumentViewer } from './DocumentViewer';
+import { Card, CardActions, Icon, Mark, NEEDS_OK } from './ui';
 
 /** react-markdown renders no raw HTML by default, which matters: replies can quote email text. */
 function MemoryCard({ item, onDecide }: { item: Extract<ChatItem, { kind: 'memory' }>; onDecide: (decision: 'save' | 'skip') => void }) {
   const fromEmail = item.source === 'email';
   return (
-    <div data-kind="memory" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${fromEmail ? 'var(--warning)' : 'var(--accent)'}` }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {item.target === 'profile' ? 'Add to your profile?' : 'Remember this?'}
-      </div>
-      <div className="mt-1">{item.text}</div>
+    <Card
+      data-kind="memory"
+      data-state={item.state}
+      icon="memory"
+      title={item.target === 'profile' ? 'Add to your profile?' : 'Remember this?'}
+      badge={fromEmail ? { text: 'From an email or document', tone: 'warning' } : false}
+    >
+      <div>{item.text}</div>
       {fromEmail && (
         <div className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
           Suggested while an email or document was being read. They can try to plant false memories, so only save this if you know it is true.
         </div>
       )}
       {item.state === 'pending' ? (
-        <div className="mt-3 flex gap-2">
-          <button type="button" data-testid="memory-save" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => onDecide('save')}>
+        <CardActions>
+          <button type="button" data-testid="memory-save" className="btn btn-primary" onClick={() => onDecide('save')}>
             Save
           </button>
-          <button type="button" data-testid="memory-skip" className="glass rounded-lg px-3 py-1" onClick={() => onDecide('skip')}>
+          <button type="button" data-testid="memory-skip" className="btn btn-secondary" onClick={() => onDecide('skip')}>
             Skip
           </button>
-        </div>
+        </CardActions>
       ) : (
         <div className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
           {item.state === 'saved' ? '✓ Saved' : 'Skipped'}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -111,7 +115,7 @@ function ActionProgress({ item, progress, onStop }: { item: ActionItem; progress
       <button
         type="button"
         data-testid="action-stop"
-        className="glass rounded-lg px-3 py-0.5"
+        className="btn btn-secondary btn-sm"
         disabled={stopping}
         onClick={() => {
           setStopping(true);
@@ -126,9 +130,12 @@ function ActionProgress({ item, progress, onStop }: { item: ActionItem; progress
 }
 
 function ActionCard({ item, actions }: { item: ActionItem; actions: MessageActions }) {
-  const primary = { background: 'var(--accent)', color: 'var(--bg)' };
+  // S4 builds use this card too; only they carry spending-cap choices or progress.
+  const build = item.choices !== undefined || item.progress !== undefined;
+  const badge =
+    item.state === 'pending' ? { text: NEEDS_OK, tone: 'warning' as const } : item.state === 'running' ? { text: 'Running', tone: 'accent' as const } : item.state === 'failed' ? { text: "Didn't work", tone: 'danger' as const } : false;
   return (
-    <div data-kind="action" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--warning)' }}>
+    <Card data-kind="action" data-state={item.state} icon={build ? 'box' : 'system'} tone={item.state === 'failed' ? 'danger' : build ? 'accent' : 'warning'} title={build ? 'App build' : 'System change'} badge={badge}>
       <div data-testid="action-title">{item.title}</div>
       {item.note && item.state === 'pending' && (
         <div data-testid="action-note" className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
@@ -136,22 +143,22 @@ function ActionCard({ item, actions }: { item: ActionItem; actions: MessageActio
         </div>
       )}
       {item.state === 'pending' ? (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <CardActions>
           {item.choices ? (
             item.choices.map((c) => (
-              <button key={c.value} type="button" data-testid="action-choice" data-value={c.value} className="rounded-lg px-3 py-1" style={primary} onClick={() => actions.onActionConfirm(item.id, item.hash, c.value)}>
+              <button key={c.value} type="button" data-testid="action-choice" data-value={c.value} className="btn btn-primary" onClick={() => actions.onActionConfirm(item.id, item.hash, c.value)}>
                 {c.label}
               </button>
             ))
           ) : (
-            <button type="button" data-testid="action-confirm" className="rounded-lg px-3 py-1" style={primary} onClick={() => actions.onActionConfirm(item.id, item.hash)}>
+            <button type="button" data-testid="action-confirm" className="btn btn-primary" onClick={() => actions.onActionConfirm(item.id, item.hash)}>
               {item.confirm}
             </button>
           )}
-          <button type="button" data-testid="action-cancel" className="glass rounded-lg px-3 py-1" onClick={() => actions.onActionCancel(item.id)}>
+          <button type="button" data-testid="action-cancel" className="btn btn-secondary" onClick={() => actions.onActionCancel(item.id)}>
             Cancel
           </button>
-        </div>
+        </CardActions>
       ) : item.state === 'running' && item.progress ? (
         <ActionProgress item={item} progress={item.progress} onStop={() => actions.onActionStop(item.id)} />
       ) : (
@@ -159,7 +166,7 @@ function ActionCard({ item, actions }: { item: ActionItem; actions: MessageActio
           {item.result ?? ACTION_STATE_TEXT[item.state]}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -187,7 +194,7 @@ function DraftFiles({ files, removed, onToggle }: { files: NonNullable<DraftItem
           </span>
           <span style={{ color: 'var(--muted)' }}>{fileSize(f.bytes)}</span>
           {onToggle && (
-            <button type="button" data-testid="draft-file-remove" className="glass ml-auto rounded-lg px-2 py-0.5" onClick={() => onToggle(i)}>
+            <button type="button" data-testid="draft-file-remove" className="btn btn-secondary btn-sm ml-auto" onClick={() => onToggle(i)}>
               {removed?.has(i) ? 'Keep' : 'Remove'}
             </button>
           )}
@@ -225,12 +232,16 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
   const field = 'w-full rounded-lg bg-transparent px-2 py-1 outline-none';
   const fieldStyle = { border: '1px solid var(--muted)' };
   return (
-    <div data-kind="draft" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.warnings.length ? 'var(--warning)' : 'var(--accent)'}` }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {item.inReplyTo ? 'Reply draft' : 'Email draft'}
-      </div>
+    <Card
+      data-kind="draft"
+      data-state={item.state}
+      icon="mail"
+      tone={item.warnings.length ? 'warning' : 'accent'}
+      title={item.inReplyTo ? 'Reply draft' : 'Email draft'}
+      badge={open ? { text: item.state === 'failed' ? "Didn't send" : NEEDS_OK, tone: item.state === 'failed' ? 'danger' : 'warning' } : false}
+    >
       {editing ? (
-        <div className="mt-2 flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
           <label className="text-sm" style={{ color: 'var(--muted)' }}>
             To
             <input data-testid="draft-to" className={field} style={fieldStyle} value={to} onChange={(e) => setTo(e.target.value)} />
@@ -246,8 +257,7 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
               type="button"
               data-testid="draft-save"
               disabled={!validTo}
-              className="rounded-lg px-3 py-1 disabled:opacity-40"
-              style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+              className="btn btn-primary"
               onClick={() => {
                 actions.onDraftEdit(item.id, { to: recipients, subject, body, ...(removed.size ? { keep: files.flatMap((_, i) => (removed.has(i) ? [] : [i])) } : {}) });
                 setEditing(false);
@@ -255,20 +265,20 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
             >
               Save changes
             </button>
-            <button type="button" className="glass rounded-lg px-3 py-1" onClick={() => setEditing(false)}>
+            <button type="button" className="btn btn-quiet" onClick={() => setEditing(false)}>
               Cancel
             </button>
           </div>
         </div>
       ) : (
         <>
-          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-[15px]">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[15px]">
             <dt style={{ color: 'var(--muted)' }}>To</dt>
             <dd data-testid="draft-to-text">{item.to.join(', ')}</dd>
             <dt style={{ color: 'var(--muted)' }}>Subject</dt>
             <dd>{item.subject}</dd>
           </dl>
-          <div data-testid="draft-body-text" className="mt-2 whitespace-pre-wrap rounded-lg px-3 py-2" style={{ background: 'rgba(127,127,127,0.08)' }}>
+          <div data-testid="draft-body-text" className="inset mt-3 whitespace-pre-wrap px-3.5 py-3 text-[15px]">
             {item.body}
           </div>
           {files.length > 0 && <DraftFiles files={files} />}
@@ -285,17 +295,17 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
         </div>
       )}
       {open && !editing ? (
-        <div className="mt-3 flex gap-2">
-          <button type="button" data-testid="draft-send" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onDraftSend(item.id, item.hash)}>
+        <CardActions>
+          <button type="button" data-testid="draft-send" className="btn btn-primary" onClick={() => actions.onDraftSend(item.id, item.hash)}>
             {item.state === 'failed' ? 'Try again' : 'Send'}
           </button>
-          <button type="button" data-testid="draft-edit" className="glass rounded-lg px-3 py-1" onClick={startEdit}>
+          <button type="button" data-testid="draft-edit" className="btn btn-secondary" onClick={startEdit}>
             Edit
           </button>
-          <button type="button" data-testid="draft-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onDraftDiscard(item.id)}>
+          <button type="button" data-testid="draft-discard" className="btn btn-quiet" onClick={() => actions.onDraftDiscard(item.id)}>
             Discard
           </button>
-        </div>
+        </CardActions>
       ) : (
         !open && (
           <div data-testid="draft-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
@@ -303,7 +313,7 @@ function DraftCard({ item, actions }: { item: DraftItem; actions: MessageActions
           </div>
         )
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -340,17 +350,23 @@ function DocChangeCard({ item, actions }: { item: DocChangeItem; actions: Messag
   const heading = item.change === 'create' ? `Create a new ${app} file?` : item.overwrite ? `Change this ${app} file and save over it?` : `Change this ${app} file?`;
   const confirm = item.overwrite ? 'Overwrite' : item.change === 'create' ? 'Create' : 'Save as new file';
   const quote = (text: string, testid: string, strike = false) => (
-    <div data-testid={testid} className="mt-1 whitespace-pre-wrap break-words rounded-md px-2 py-1 text-[14px]" style={{ background: 'var(--panel)', textDecoration: strike ? 'line-through' : undefined, opacity: strike ? 0.75 : 1 }}>
+    <div data-testid={testid} className="inset mt-1 whitespace-pre-wrap break-words px-2.5 py-1.5 text-[14px]" style={{ textDecoration: strike ? 'line-through' : undefined, opacity: strike ? 0.75 : 1 }}>
       {text}
     </div>
   );
   return (
-    <div data-kind="doc_change" data-change={item.change} data-state={item.state} data-overwrite={item.overwrite} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.overwrite ? 'var(--danger)' : 'var(--accent)'}` }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {heading}
-      </div>
+    <Card
+      data-kind="doc_change"
+      data-change={item.change}
+      data-state={item.state}
+      data-overwrite={item.overwrite}
+      icon="file"
+      tone={item.overwrite ? 'danger' : 'accent'}
+      title={heading}
+      badge={open ? { text: NEEDS_OK, tone: item.overwrite ? 'danger' : 'warning' } : false}
+    >
       {item.file && (
-        <div data-testid="doc-change-file" className="mt-1 break-all font-medium">
+        <div data-testid="doc-change-file" className="break-all font-medium">
           {item.file}
         </div>
       )}
@@ -377,26 +393,25 @@ function DocChangeCard({ item, actions }: { item: DocChangeItem; actions: Messag
         </div>
       )}
       {open ? (
-        <div className="mt-3 flex gap-2">
+        <CardActions>
           <button
             type="button"
             data-testid="doc-change-confirm"
-            className="rounded-lg px-3 py-1"
-            style={{ background: item.overwrite ? 'var(--danger)' : 'var(--accent)', color: 'var(--bg)' }}
+            className={item.overwrite ? 'btn btn-danger' : 'btn btn-primary'}
             onClick={() => actions.onDocChangeConfirm(item.id, item.hash)}
           >
             {item.state === 'failed' ? `Try again: ${confirm}` : confirm}
           </button>
-          <button type="button" data-testid="doc-change-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onDocChangeDiscard(item.id)}>
+          <button type="button" data-testid="doc-change-discard" className="btn btn-quiet" onClick={() => actions.onDocChangeDiscard(item.id)}>
             Discard
           </button>
-        </div>
+        </CardActions>
       ) : (
         <div data-testid="doc-change-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
           {item.result ?? DOC_CHANGE_STATE_TEXT[item.state]}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -415,11 +430,16 @@ function EventCard({ item, actions }: { item: EventItem; actions: MessageActions
     </div>
   );
   return (
-    <div data-kind="event" data-change={item.change} data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.change === 'cancel' ? 'var(--danger)' : 'var(--accent)'}` }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {t.heading}
-      </div>
-      <div data-testid="event-title" className="mt-1 font-medium">
+    <Card
+      data-kind="event"
+      data-change={item.change}
+      data-state={item.state}
+      icon="calendar"
+      tone={item.change === 'cancel' ? 'danger' : 'accent'}
+      title={t.heading}
+      badge={open ? { text: NEEDS_OK, tone: item.change === 'cancel' ? 'danger' : 'warning' } : false}
+    >
+      <div data-testid="event-title" className="font-medium">
         {item.title}
       </div>
       <div className="mt-1 space-y-0.5">
@@ -444,26 +464,25 @@ function EventCard({ item, actions }: { item: EventItem; actions: MessageActions
         </div>
       )}
       {open ? (
-        <div className="mt-3 flex gap-2">
+        <CardActions>
           <button
             type="button"
             data-testid="event-confirm"
-            className="rounded-lg px-3 py-1"
-            style={{ background: item.change === 'cancel' ? 'var(--danger)' : 'var(--accent)', color: 'var(--bg)' }}
+            className={item.change === 'cancel' ? 'btn btn-danger' : 'btn btn-primary'}
             onClick={() => actions.onEventConfirm(item.id, item.hash)}
           >
             {item.state === 'failed' ? `Try again: ${t.confirm}` : t.confirm}
           </button>
-          <button type="button" data-testid="event-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onEventDiscard(item.id)}>
+          <button type="button" data-testid="event-discard" className="btn btn-quiet" onClick={() => actions.onEventDiscard(item.id)}>
             Discard
           </button>
-        </div>
+        </CardActions>
       ) : (
         <div data-testid="event-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
           {item.result ?? EVENT_STATE_TEXT[item.state]}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -478,7 +497,10 @@ function DocumentCard({ item, actions }: { item: DocumentItem; actions: MessageA
     actions.onDocumentEdit(item.id);
   };
   return (
-    <div data-kind="document" className="glass flex items-center gap-3 rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+    <div data-kind="document" className="card flex items-center gap-3 px-4 py-3">
+      <span className="tile">
+        <Icon name="file" />
+      </span>
       <div className="min-w-0 flex-1">
         <div data-testid="document-name" className="break-all">
           {item.name}
@@ -487,10 +509,10 @@ function DocumentCard({ item, actions }: { item: DocumentItem; actions: MessageA
           {item.fileKind === 'word' ? 'Word document' : 'Excel spreadsheet'}
         </div>
       </div>
-      <button type="button" data-testid="document-open" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(true)}>
+      <button type="button" data-testid="document-open" className="btn btn-primary" onClick={() => setOpen(true)}>
         Open
       </button>
-      <button type="button" data-testid="document-edit" className="glass rounded-lg px-3 py-1" title={`Edit in ${app}`} onClick={edit}>
+      <button type="button" data-testid="document-edit" className="btn btn-secondary" title={`Edit in ${app}`} onClick={edit}>
         Edit
       </button>
       {open && <DocumentViewer item={item} onClose={() => setOpen(false)} onEdit={edit} />}
@@ -510,8 +532,11 @@ function AttachmentCard({ item, actions }: { item: AttachmentItem; actions: Mess
   const fromMail = item.mailId !== undefined;
   const canSave = fromMail && !!item.folders?.length && !item.saved;
   return (
-    <div data-kind="attachment" data-file-kind={item.fileKind} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+    <div data-kind="attachment" data-file-kind={item.fileKind} className="card px-4 py-3">
       <div className="flex items-center gap-3">
+        <span className="tile">
+          <Icon name="clip" />
+        </span>
         <div className="min-w-0 flex-1">
           <div data-testid="attachment-name" className="break-all">
             {item.name}
@@ -523,15 +548,15 @@ function AttachmentCard({ item, actions }: { item: AttachmentItem; actions: Mess
           </div>
         </div>
         {item.fileKind !== 'other' && (
-          <button type="button" data-testid="attachment-open" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(true)}>
+          <button type="button" data-testid="attachment-open" className="btn btn-primary" onClick={() => setOpen(true)}>
             Open
           </button>
         )}
       </div>
       {canSave && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <div className="mt-3 flex flex-wrap items-center gap-2 pl-10 text-sm">
           <span style={{ color: 'var(--muted)' }}>Save to</span>
-          <select data-testid="attachment-folder" className="glass rounded-lg px-2 py-1" value={folder} onChange={(e) => setFolder(Number(e.target.value))}>
+          <select data-testid="attachment-folder" className="h-8 rounded-lg border px-2" style={{ background: 'var(--surface)', borderColor: 'var(--line-strong)' }} value={folder} onChange={(e) => setFolder(Number(e.target.value))}>
             {item.folders!.map((f, i) => (
               <option key={f} value={i}>
                 {f}
@@ -542,7 +567,7 @@ function AttachmentCard({ item, actions }: { item: AttachmentItem; actions: Mess
             type="button"
             data-testid="attachment-save"
             disabled={saving}
-            className="glass rounded-lg px-3 py-1"
+            className="btn btn-secondary btn-sm"
             onClick={() => {
               setSaving(true);
               actions.onAttachmentSave(item.id, folder);
@@ -553,7 +578,7 @@ function AttachmentCard({ item, actions }: { item: AttachmentItem; actions: Mess
         </div>
       )}
       {item.saved && (
-        <div data-testid="attachment-saved" className="mt-2 text-sm" style={{ color: item.saved.startsWith("Didn't") ? 'var(--danger)' : 'var(--muted)' }}>
+        <div data-testid="attachment-saved" className="mt-2 pl-10 text-sm" style={{ color: item.saved.startsWith("Didn't") ? 'var(--danger)' : 'var(--muted)' }}>
           {item.saved.startsWith("Didn't") ? item.saved : `✓ Saved as ${item.saved}`}
         </div>
       )}
@@ -589,17 +614,14 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
     </div>
   );
   return (
-    <div data-kind="file_change" data-change={item.change} data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {t.heading}
-      </div>
-      <div className="mt-1 space-y-0.5">
+    <Card data-kind="file_change" data-change={item.change} data-state={item.state} icon="folder" title={t.heading} badge={open ? { text: NEEDS_OK, tone: 'warning' } : false}>
+      <div className="space-y-0.5">
         {item.from !== undefined && row('From', item.from, 'file-change-from')}
         {row(item.change === 'tag' ? 'File' : item.from !== undefined ? 'To' : 'New', item.to, 'file-change-to')}
         {item.tags !== undefined && row('Tags', item.tags.length ? item.tags.join(', ') : '(none)', 'file-change-tags')}
       </div>
       {item.preview !== undefined && (
-        <div data-testid="file-change-preview" className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md px-2 py-1 text-[14px]" style={{ background: 'var(--panel)' }}>
+        <div data-testid="file-change-preview" className="inset mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words px-2.5 py-1.5 text-[14px]">
           {item.preview || '(empty)'}
         </div>
       )}
@@ -614,20 +636,20 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
         </div>
       )}
       {open ? (
-        <div className="mt-3 flex gap-2">
-          <button type="button" data-testid="file-change-confirm" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onFileChangeConfirm(item.id, item.hash)}>
+        <CardActions>
+          <button type="button" data-testid="file-change-confirm" className="btn btn-primary" onClick={() => actions.onFileChangeConfirm(item.id, item.hash)}>
             {item.state === 'failed' ? `Try again: ${t.confirm}` : t.confirm}
           </button>
-          <button type="button" data-testid="file-change-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onFileChangeDiscard(item.id)}>
+          <button type="button" data-testid="file-change-discard" className="btn btn-quiet" onClick={() => actions.onFileChangeDiscard(item.id)}>
             Discard
           </button>
-        </div>
+        </CardActions>
       ) : (
         <div data-testid="file-change-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
           {item.result ?? FILE_CHANGE_STATE_TEXT[item.state]}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -636,11 +658,15 @@ const RESOURCE_TITLE = { disk: 'Drive space', memory: 'Memory', cpu: 'Processor'
 /** L1: a resource alert. Headline and details are written by code; advice by the local model. Plain text only. */
 function ResourceAlert({ item }: { item: Extract<ChatItem, { kind: 'resource_alert' }> }) {
   return (
-    <div data-kind="resource_alert" data-resource={item.resource} data-resolved={item.resolved ? true : undefined} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.resolved ? 'var(--muted)' : 'var(--warning)'}` }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {RESOURCE_TITLE[item.resource]}
-      </div>
-      <div data-testid="alert-headline" className="mt-1 font-medium">
+    <Card
+      data-kind="resource_alert"
+      data-resource={item.resource}
+      data-resolved={item.resolved ? true : undefined}
+      icon="gauge"
+      tone={item.resolved ? 'muted' : 'warning'}
+      title={RESOURCE_TITLE[item.resource]}
+    >
+      <div data-testid="alert-headline" className="font-medium">
         {item.headline}
       </div>
       {item.details.map((d) => (
@@ -661,7 +687,7 @@ function ResourceAlert({ item }: { item: Extract<ChatItem, { kind: 'resource_ale
           ✓ {item.resolved}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -670,7 +696,7 @@ type CleanupItem = Extract<ChatItem, { kind: 'cleanup' }>;
 /** L1: the morning review. Names, titles and reasons come from files, web pages and the local model: plain text only. */
 function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageActions }) {
   const btn = (testid: string, label: string, onClick: () => void, primary = false) => (
-    <button type="button" data-testid={testid} className={primary ? 'rounded-lg px-2.5 py-0.5' : 'glass rounded-lg px-2.5 py-0.5'} style={primary ? { background: 'var(--accent)', color: 'var(--bg)' } : undefined} onClick={onClick}>
+    <button type="button" data-testid={testid} className={primary ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'} onClick={onClick}>
       {label}
     </button>
   );
@@ -682,15 +708,12 @@ function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageAct
       </div>
     ) : null;
   return (
-    <div data-kind="cleanup" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        Morning tidy-up{item.by === 'local' ? ' · picked by the local model' : ''}
-      </div>
-      <div data-testid="cleanup-intro" className="mt-1">
+    <Card data-kind="cleanup" icon="sweep" title="Morning tidy-up" aside={item.by === 'local' ? <span className="text-[13px]" style={{ color: 'var(--muted)' }}>picked by the local model</span> : undefined}>
+      <div data-testid="cleanup-intro">
         {item.intro}
       </div>
       {item.files.length > 0 && (
-        <ul className="mt-2">
+        <ul className="mt-2 divide-y" style={{ borderColor: 'var(--line)' }}>
           {item.files.map((f) => (
             <li key={f.n} data-testid="cleanup-file" data-state={f.state} className={`py-2 ${f.state === 'trashed' || f.state === 'kept' ? 'opacity-50' : ''}`}>
               <div className="break-all font-medium">{f.name}</div>
@@ -699,7 +722,7 @@ function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageAct
               </div>
               <div className="text-[15px]">{f.reason}</div>
               {open(f.state) && (
-                <div className="mt-1 flex gap-2 text-sm">
+                <div className="mt-2 flex gap-2">
                   {item.trash && btn('cleanup-trash', f.state === 'failed' ? 'Try again: Move to Trash' : 'Move to Trash', () => actions.onCleanup(item.id, 'file', f.n, 'trash', f.hash), true)}
                   {btn('cleanup-keep', 'Keep', () => actions.onCleanup(item.id, 'file', f.n, 'keep', f.hash))}
                 </div>
@@ -710,7 +733,7 @@ function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageAct
         </ul>
       )}
       {item.apps.length > 0 && (
-        <ul className="mt-2">
+        <ul className="mt-2 divide-y" style={{ borderColor: 'var(--line)' }}>
           {item.apps.map((a) => (
             <li key={a.n} data-testid="cleanup-app" data-state={a.state} className={`py-2 ${a.state === 'closed' || a.state === 'kept' ? 'opacity-50' : ''}`}>
               <div className="font-medium">
@@ -722,7 +745,7 @@ function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageAct
               </div>
               <div className="text-[15px]">{a.reason}</div>
               {open(a.state) && (
-                <div className="mt-1 flex gap-2 text-sm">
+                <div className="mt-2 flex gap-2">
                   {btn('cleanup-close', a.state === 'failed' ? 'Try again: Close' : 'Close', () => actions.onCleanup(item.id, 'app', a.n, 'close', a.hash), true)}
                   {btn('cleanup-keep', 'Keep open', () => actions.onCleanup(item.id, 'app', a.n, 'keep', a.hash))}
                 </div>
@@ -732,7 +755,7 @@ function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageAct
           ))}
         </ul>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -752,14 +775,14 @@ function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: '
       </div>
       <div className="ml-5 text-[15px]">{r.summary}</div>
       {!r.ignored && (
-        <div className="ml-5 mt-1 flex gap-2 text-sm">
-          <button type="button" data-testid="mail-read" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onSend(`Read email ${r.id}`)}>
+        <div className="ml-5 mt-2 flex flex-wrap gap-2">
+          <button type="button" data-testid="mail-read" className="btn btn-secondary btn-sm" onClick={() => actions.onSend(`Read email ${r.id}`)}>
             Read
           </button>
-          <button type="button" data-testid="mail-draft-reply" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onSend(`Draft a reply to email ${r.id}`)}>
+          <button type="button" data-testid="mail-draft-reply" className="btn btn-secondary btn-sm" onClick={() => actions.onSend(`Draft a reply to email ${r.id}`)}>
             Draft reply
           </button>
-          <button type="button" data-testid="mail-ignore" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onIgnoreMail(item.id, r.id)}>
+          <button type="button" data-testid="mail-ignore" className="btn btn-secondary btn-sm" onClick={() => actions.onIgnoreMail(item.id, r.id)}>
             Ignore
           </button>
         </div>
@@ -767,9 +790,8 @@ function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: '
     </li>
   );
   return (
-    <div data-kind="notification" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
-      <div className="font-medium">{item.text}</div>
-      {main.length > 0 && <ul className="mt-1">{main.map(row)}</ul>}
+    <Card data-kind="notification" icon="mail" title={item.text}>
+      {main.length > 0 && <ul className="-my-2">{main.map(row)}</ul>}
       {low.length > 0 && (
         // Low priority mail keeps its buttons, so each one can still be read, answered or opened.
         <div data-testid="mail-digest" className="mt-2 text-sm">
@@ -777,29 +799,39 @@ function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: '
           <ul>{low.map(row)}</ul>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
 type TodoItem = Extract<ChatItem, { kind: 'todo' }>;
 
+/** A drawn check box (display only: the buttons beside it do the work). */
+function Box({ done = false }: { done?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className="mr-2.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] align-[-3px]"
+      style={done ? { background: 'var(--accent)', color: 'var(--bg)' } : { border: '1.5px solid var(--line-strong)' }}
+    >
+      {done && <Icon name="check" size={12} strokeWidth={3} />}
+    </span>
+  );
+}
+
 /** T1: what was just saved, in code's words, with click-only buttons. Item text is shown as plain text. */
 function TodoCard({ item, actions }: { item: TodoItem; actions: MessageActions }) {
   const btn = (testid: string, label: string, onClick: () => void, primary = false) => (
-    <button type="button" data-testid={testid} className={primary ? 'rounded-lg px-2.5 py-0.5' : 'glass rounded-lg px-2.5 py-0.5'} style={primary ? { background: 'var(--accent)', color: 'var(--bg)' } : undefined} onClick={onClick}>
+    <button type="button" data-testid={testid} className={primary ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'} onClick={onClick}>
       {label}
     </button>
   );
   return (
-    <div data-kind="todo" data-event={item.event} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.event === 'reminder' ? 'var(--warning)' : 'var(--accent)'}` }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {item.title}
-      </div>
-      <ul className="mt-1">
+    <Card data-kind="todo" data-event={item.event} icon="todo" tone={item.event === 'reminder' ? 'warning' : 'accent'} title={item.title} badge={item.event === 'reminder' ? { text: 'Reminder', tone: 'warning' } : false}>
+      <ul className="-my-1.5">
         {item.rows.map((r) => (
           <li key={r.todoId} data-testid="todo-row" data-state={r.state} className={`py-1.5 ${r.state === 'removed' ? 'opacity-50' : ''}`}>
             <div className={r.state === 'done' ? 'line-through opacity-60' : ''}>
-              <span className="mr-2">{r.state === 'done' ? '☑' : '☐'}</span>
+              <Box done={r.state === 'done'} />
               {r.text}
             </div>
             {(r.when || r.due) && (
@@ -808,7 +840,7 @@ function TodoCard({ item, actions }: { item: TodoItem; actions: MessageActions }
               </div>
             )}
             {r.state !== 'removed' && (
-              <div className="ml-6 mt-1 flex gap-2 text-sm">
+              <div className="ml-6 mt-1.5 flex flex-wrap gap-2">
                 {r.state === 'open' && btn('todo-done', 'Done', () => actions.onTodo(item.id, r.todoId, 'done', r.hash), item.event === 'reminder')}
                 {r.state === 'open' && item.event === 'reminder' && btn('todo-snooze', 'Later', () => actions.onTodo(item.id, r.todoId, 'snooze', r.hash))}
                 {r.state === 'done' && btn('todo-reopen', 'Not done', () => actions.onTodo(item.id, r.todoId, 'reopen', r.hash))}
@@ -823,7 +855,7 @@ function TodoCard({ item, actions }: { item: TodoItem; actions: MessageActions }
           </li>
         ))}
       </ul>
-    </div>
+    </Card>
   );
 }
 
@@ -832,17 +864,13 @@ type BriefItem = Extract<ChatItem, { kind: 'brief' }>;
 /** T2: the morning brief. Read only; mail and event text is shown as plain text. */
 function BriefCard({ item, actions }: { item: BriefItem; actions: MessageActions }) {
   const head = (t: string) => (
-    <div className="mt-3 text-sm font-medium" style={{ color: 'var(--muted)' }}>
+    <div className="mb-1 mt-4 text-[13px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
       {t}
     </div>
   );
   return (
-    <div data-kind="brief" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
-      <div className="text-sm" style={{ color: 'var(--muted)' }}>
-        {item.title}
-        {item.by === 'local' ? ' · written by the local model' : ''}
-      </div>
-      <div data-testid="brief-intro" className="mt-1">
+    <Card data-kind="brief" icon="sun" title={item.title} aside={item.by === 'local' ? <span className="text-[13px]" style={{ color: 'var(--muted)' }}>written by the local model</span> : undefined}>
+      <div data-testid="brief-intro">
         {item.intro}
       </div>
       {head(item.mails.length ? 'Urgent mail' : 'Mail')}
@@ -854,7 +882,7 @@ function BriefCard({ item, actions }: { item: BriefItem; actions: MessageActions
                 <span style={{ color: URGENCY_COLOR[m.urgency] }}>●</span>
                 <span className="font-medium">{m.from.replace(/\s*<[^>]*>$/, '')}</span>
                 <span style={{ color: 'var(--muted)' }}>· {m.subject}</span>
-                <button type="button" data-testid="brief-mail-read" className="glass ml-auto rounded-lg px-2.5 py-0.5 text-sm" onClick={() => actions.onSend(`Read email ${m.id}`)}>
+                <button type="button" data-testid="brief-mail-read" className="btn btn-secondary btn-sm ml-auto" onClick={() => actions.onSend(`Read email ${m.id}`)}>
                   Read
                 </button>
               </div>
@@ -900,7 +928,7 @@ function BriefCard({ item, actions }: { item: BriefItem; actions: MessageActions
         <ul data-testid="brief-todos">
           {item.todos.map((t, i) => (
             <li key={i} className="py-0.5 text-[15px]">
-              <span className="mr-2">☐</span>
+              <Box />
               {t.text}
               {t.when && <span style={{ color: t.overdue ? 'var(--warning)' : 'var(--muted)' }}> · {t.when}</span>}
               {t.overdue && !t.when && <span style={{ color: 'var(--warning)' }}> · overdue</span>}
@@ -913,7 +941,7 @@ function BriefCard({ item, actions }: { item: BriefItem; actions: MessageActions
           {item.moreTodos} more on your list without a date.
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -922,16 +950,26 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
     case 'user':
       return (
         <div className="flex justify-end" data-kind="user">
-          <div className="glass max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-md px-4 py-2.5">{item.text}</div>
+          <div
+            className="max-w-[80%] whitespace-pre-wrap rounded-[20px] rounded-br-md px-4 py-3"
+            style={{ background: 'color-mix(in srgb, var(--accent) 16%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 26%, transparent)' }}
+          >
+            {item.text}
+          </div>
         </div>
       );
     case 'assistant':
       return (
-        <div data-kind="assistant" data-streaming={item.streaming || undefined} className="max-w-[92%]">
-          <div className={`md ${item.streaming ? 'caret' : ''}`}>
-            <Markdown>{item.text}</Markdown>
+        <div data-kind="assistant" data-streaming={item.streaming || undefined} className="flex items-start gap-3.5">
+          <span className="mt-0.5 shrink-0">
+            <Mark />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className={`md ${item.streaming ? 'caret' : ''}`}>
+              <Markdown>{item.text}</Markdown>
+            </div>
+            {item.stopped && <div className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>Stopped</div>}
           </div>
-          {item.stopped && <div className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>Stopped</div>}
         </div>
       );
     case 'tool':
@@ -940,16 +978,21 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
           {item.state === 'running' ? (
             <span className="spin inline-block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent" />
           ) : (
-            <span style={{ color: item.state === 'failed' ? 'var(--danger)' : 'var(--accent)' }}>{item.state === 'failed' ? '✕' : '✓'}</span>
+            <span style={{ color: item.state === 'failed' ? 'var(--danger)' : 'var(--accent)' }}>
+              <Icon name={item.state === 'failed' ? 'cross' : 'check'} strokeWidth={2.2} />
+            </span>
           )}
           <span>{item.state === 'running' ? item.label : item.label.replace(/…$/, '')}</span>
         </div>
       );
     case 'notice': {
-      const color = item.level === 'error' ? 'var(--danger)' : item.level === 'warning' ? 'var(--warning)' : 'var(--accent)';
+      const tone = item.level === 'error' ? 'danger' : item.level === 'warning' ? 'warning' : 'accent';
       return (
-        <div data-kind="notice" className="glass whitespace-pre-wrap rounded-xl px-4 py-2.5 text-[15px]" style={{ borderLeft: `3px solid ${color}` }}>
-          {item.text}
+        <div data-kind="notice" data-tone={tone === 'danger' ? 'danger' : undefined} className="card flex items-start gap-3 px-4 py-3 text-[15px]">
+          <span className="tile" data-tone={tone}>
+            <Icon name={tone === 'accent' ? 'info' : 'alert'} />
+          </span>
+          <div className="min-w-0 flex-1 whitespace-pre-wrap pt-0.5">{item.text}</div>
         </div>
       );
     }
@@ -981,10 +1024,15 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <DocumentCard item={item} actions={actions} />;
     case 'build_result':
       return (
-        <div data-kind="build_result" data-ok={item.ok} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.ok ? 'var(--accent)' : 'var(--danger)'}` }}>
-          <div data-testid="build-result-text">{item.text}</div>
+        <div data-kind="build_result" data-ok={item.ok} data-tone={item.ok ? undefined : 'danger'} className="card flex items-center gap-3 px-4 py-3">
+          <span className="tile" data-tone={item.ok ? 'accent' : 'danger'}>
+            <Icon name={item.ok ? 'box' : 'alert'} />
+          </span>
+          <div data-testid="build-result-text" className="min-w-0 flex-1">
+            {item.text}
+          </div>
           {item.ok && (
-            <button type="button" data-testid="build-open" className="mt-3 rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onAppOpen(item.actionId)}>
+            <button type="button" data-testid="build-open" className="btn btn-primary" onClick={() => actions.onAppOpen(item.actionId)}>
               Open
             </button>
           )}

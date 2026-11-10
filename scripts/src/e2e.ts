@@ -607,7 +607,7 @@ async function main(): Promise<void> {
     const hhmm = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const shownClock = await page.getByTestId('clock').innerText();
     check('status strip shows the current time', [hhmm(Date.now()), hhmm(Date.now() - 60_000)].includes(shownClock), shownClock);
-    check('agent idle at start', (await agentState.innerText()).includes('idle'));
+    check('agent idle at start', (await agentState.innerText()).toLowerCase().includes('idle'));
     const costBefore = await page.getByTestId('cost').innerText();
     await shot(page, '1-boot');
 
@@ -620,6 +620,16 @@ async function main(): Promise<void> {
     check('cost in status strip updates', await waitFor(async () => (await page.getByTestId('cost').innerText()) !== costBefore), `${costBefore} → ${await page.getByTestId('cost').innerText()}`);
     await shot(page, '2-chat');
 
+    // Up in the empty box brings back the last message; Down returns to what was typed (empty).
+    await input.press('ArrowUp');
+    check('Up recalls the previous message', (await input.inputValue()) === 'hello', await input.inputValue());
+    await input.press('ArrowDown');
+    check('Down goes back to the empty box', (await input.inputValue()) === '', await input.inputValue());
+    await input.fill('half typed');
+    await input.press('ArrowUp');
+    check('Up leaves a message being typed alone', (await input.inputValue()) === 'half typed', await input.inputValue());
+    await input.fill('');
+
     // 3. now() tool round trip.
     await input.fill('what time is it?');
     await input.press('Enter');
@@ -630,26 +640,26 @@ async function main(): Promise<void> {
     // 4. Esc stops generation.
     await input.fill('write a long essay');
     await input.press('Enter');
-    check('agent shows working while streaming', await waitFor(async () => (await agentState.innerText()).includes('working')));
+    check('agent shows working while streaming', await waitFor(async () => (await agentState.innerText()).toLowerCase().includes('working')));
     await sleep(500);
     await page.keyboard.press('Escape');
     check('Esc stops the reply', await waitFor(async () => (await lastAssistant().innerText()).includes('Stopped')));
     const words = ((await lastAssistant().innerText()).match(/Word\d+/g) ?? []).length;
     check('partial text kept, stream cut short', words > 0 && words < 200, `${words} words`);
-    check('agent back to idle', await waitFor(async () => (await agentState.innerText()).includes('idle')));
+    check('agent back to idle', await waitFor(async () => (await agentState.innerText()).toLowerCase().includes('idle')));
     await shot(page, '4-stopped');
 
     // 5. Slash commands.
     await input.fill('/pause');
     await input.press('Enter');
-    check('/pause shows paused in status strip', await waitFor(async () => (await agentState.innerText()).includes('paused')));
+    check('/pause shows paused in status strip', await waitFor(async () => (await agentState.innerText()).toLowerCase().includes('paused')));
     await input.fill('/cost');
     await input.press('Enter');
     check('/cost reports spend', await waitFor(async () => /Today: \$0\.\d{4} across \d+ model calls/.test(await page.locator('[data-kind="notice"]').last().innerText())));
     await shot(page, '5-commands');
     await input.fill('/resume');
     await input.press('Enter');
-    check('/resume returns to idle', await waitFor(async () => (await agentState.innerText()).includes('idle')));
+    check('/resume returns to idle', await waitFor(async () => (await agentState.innerText()).toLowerCase().includes('idle')));
 
     // 6. History survives a reload.
     await page.reload();
@@ -669,7 +679,7 @@ async function main(): Promise<void> {
     await stopCore();
     await startCore();
     await page.reload();
-    await waitFor(async () => (await agentState.innerText()).includes('idle'));
+    await waitFor(async () => (await agentState.innerText()).toLowerCase().includes('idle'));
     await input.fill('/memory');
     await input.press('Enter');
     check('fact persists across a restart', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).includes('- Sara prefers short emails')));
@@ -811,7 +821,7 @@ async function main(): Promise<void> {
     await shot(page, 's4-failed');
     // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
     if (await mailStackUp()) {
-      check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Mail: connected'), 15_000));
+      check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('mail-state').getAttribute('title')) === 'Mail: connected', 15_000));
       const stamp = Date.now();
       await deliverTestMail(`E2E urgent ${stamp}`);
       await deliverTestMail(`E2E normal ${stamp}`);

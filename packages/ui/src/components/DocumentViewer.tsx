@@ -87,10 +87,10 @@ export function DocumentViewer({ item, onClose, onEdit }: { item: DocumentItem; 
     <div data-testid="document-viewer" data-state={view.state} role="dialog" aria-label={item.name} className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bg)' }}>
       <div className="glass flex items-center gap-3 px-4 py-2">
         <div className="flex-1 truncate font-medium">{item.name}</div>
-        <button type="button" data-testid="document-viewer-edit" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={onEdit}>
+        <button type="button" data-testid="document-viewer-edit" className="btn btn-primary" onClick={onEdit}>
           Edit in {item.fileKind === 'word' ? 'WordCraft' : 'GridCraft'}
         </button>
-        <button type="button" data-testid="document-close" className="glass rounded-lg px-3 py-1" onClick={onClose}>
+        <button type="button" data-testid="document-close" className="btn btn-secondary" onClick={onClose}>
           Close
         </button>
       </div>

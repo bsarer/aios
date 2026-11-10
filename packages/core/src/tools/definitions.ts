@@ -349,7 +349,7 @@ export const ALPHA_TOOLS = [
     name: 'files_search',
     tier: 'read',
     description:
-      "Search the index of the user's files by what they are about, not just their name: each file has facts (type, size, dates, pages, sheets, title, author), a short description and keywords written when it was indexed, and the user's own tags. Use it for questions like \"the lease I signed last spring\", \"invoices from Hetzner\" or \"spreadsheets about the budget\". Words match as word starts, best first; with no query, the newest files matching the filters. Then use the paths with file_read, doc_read, file_show and so on.",
+      "Search the index of the user's files by what they are about or what is in them, not just their name: each file has facts (type, size, dates, pages, sheets, title, author), a short description and keywords written when it was indexed, its text, and the user's own tags; when the local embedding model is on, files close in meaning match too (\"car insurance\" finds an auto policy). Use it for questions like \"the lease I signed last spring\", \"the contract that mentions a 90-day notice period\", \"invoices from Hetzner\" or \"spreadsheets about the budget\". Put the user's describing words in query. Best first; with no query, the newest files matching the filters. With a query, a card with the best 3 and Open buttons is shown to the user; pass card: false when you are looking for a file for your own next step (to attach or play it, say). Then use the paths with file_read, doc_read, file_show and so on.",
     input: z.strictObject({
       query: z.string().min(1).max(300).optional().describe('Words to look for, e.g. "lease apartment 2026"'),
       kinds: z.array(z.enum(['pdf', 'image', 'word', 'sheet', 'text', 'other'])).max(6).optional(),
@@ -357,6 +357,7 @@ export const ALPHA_TOOLS = [
       modifiedAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, in the user\'s timezone'),
       modifiedBefore: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, not included'),
       limit: z.int().min(1).max(50).optional(),
+      card: z.boolean().optional().describe('Show the best 3 on a card with Open buttons (default true when there is a query)'),
     }),
   }),
   def({

@@ -468,6 +468,64 @@ function EventCard({ item, actions }: { item: EventItem; actions: MessageActions
 }
 
 type DocumentItem = Extract<ChatItem, { kind: 'document' }>;
+type FileResultsItem = Extract<ChatItem, { kind: 'file_results' }>;
+type FileResultRow = FileResultsItem['files'][number];
+
+const RESULT_KIND: Record<FileResultRow['fileKind'], string> = { pdf: 'PDF', image: 'Picture', word: 'Word document', sheet: 'Excel spreadsheet', text: 'Text file', other: 'File' };
+
+/** F3: the best files of a search, why each matched, and Open. Names, folders and snippets come from files: plain text only. */
+function FileResultsCard({ item, actions }: { item: FileResultsItem; actions: MessageActions }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const row = open === null ? undefined : item.files[open];
+  return (
+    <div data-kind="file_results" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="mb-2 text-sm" style={{ color: 'var(--muted)' }}>
+        {item.files.length === 1 ? 'Best match' : `Best ${item.files.length} matches`}
+      </div>
+      <ol className="flex flex-col gap-3">
+        {item.files.map((r, n) => (
+          <li key={r.id} data-testid="file-result" className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div data-testid="file-result-name" className="break-all font-medium">
+                {r.name}
+              </div>
+              <div className="break-all text-sm" style={{ color: 'var(--muted)' }}>
+                {RESULT_KIND[r.fileKind]} in {r.folder}
+              </div>
+              <div data-testid="file-result-why" className="text-sm">
+                {r.why}
+              </div>
+              {r.snippet && (
+                <div data-testid="file-result-snippet" className="mt-1 text-sm italic" style={{ color: 'var(--muted)' }}>
+                  “{r.snippet}”
+                </div>
+              )}
+            </div>
+            {r.open && (
+              <button type="button" data-testid="file-result-open" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(n)}>
+                Open
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
+      {row?.open === 'attachment' && (row.fileKind === 'pdf' || row.fileKind === 'text' || row.fileKind === 'image') && (
+        <AttachmentViewer item={{ kind: 'attachment', id: row.id, name: row.name, fileKind: row.fileKind, path: row.path, at: item.at }} onClose={() => setOpen(null)} />
+      )}
+      {row?.open === 'document' && (row.fileKind === 'word' || row.fileKind === 'sheet') && (
+        <DocumentViewer
+          item={{ kind: 'document', id: row.id, name: row.name, fileKind: row.fileKind, path: row.path, at: item.at }}
+          onClose={() => setOpen(null)}
+          onEdit={() => {
+            setOpen(null);
+            actions.onDocumentEdit(row.id);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 
 /** A Word or Excel file the user can open (D1) or edit in its app (D3). File names can come from anyone: plain text only. */
 function DocumentCard({ item, actions }: { item: DocumentItem; actions: MessageActions }) {
@@ -979,6 +1037,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <AttachmentCard item={item} actions={actions} />;
     case 'document':
       return <DocumentCard item={item} actions={actions} />;
+    case 'file_results':
+      return <FileResultsCard item={item} actions={actions} />;
     case 'build_result':
       return (
         <div data-kind="build_result" data-ok={item.ok} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${item.ok ? 'var(--accent)' : 'var(--danger)'}` }}>

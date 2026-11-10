@@ -35,6 +35,8 @@ import { FileCatalog } from './files/catalog.js';
 import { FactReader } from './files/facts.js';
 import { FileIndexer } from './files/indexer.js';
 import { fileSearchTools } from './files/search-tools.js';
+import type { Embedder } from './files/meaning.js';
+import { resultRowItem } from './files/results.js';
 import { fileTools } from './files/tools.js';
 import { DocFiles } from './docs/files.js';
 import { createDocumentOpener } from './docs/open.js';
@@ -132,6 +134,7 @@ async function main(): Promise<void> {
     patch: (item) => shell?.patchItem(item),
     ...(fileRoots ? { roots: fileRoots, saveTo: config.files.saveTo } : {}),
     onSaved: () => fileIndexer?.soon(),
+    innerItem: (id) => resultRowItem(store, id),
   });
   for (const t of attachmentTools({ mail: mailClient, files: attachmentFiles })) tools.register(t);
   const outbox = new ImapSmtpOutbox(mailClient, {
@@ -228,6 +231,7 @@ async function main(): Promise<void> {
       engine,
       audit,
       post: (item) => shell?.agent.post(item),
+      innerItem: (id) => resultRowItem(store, id),
       edit: { open, window: chatWindow, notice: (level, text) => shell?.agent.notice(level, text) },
     });
     // doc_open_app is device tier like open_app, so it shares open_app's confirm card.
@@ -255,11 +259,16 @@ async function main(): Promise<void> {
     // F2: the file index for files_search, kept current by the indexer.
     const catalog = config.files.index ? new FileCatalog(store) : undefined;
     fileCatalog = catalog;
+    // F3: files by meaning, from the local embedding model when [models.embeddings] is set.
+    const emb = config.models.embeddings;
+    const embedder: Embedder | undefined =
+      emb && config.files.meaning ? { model: emb.model, batchSize: emb.batchSize, embed: (texts, signal) => model.embed(texts, signal) } : undefined;
     if (catalog) {
       fileIndexer = new FileIndexer({
         roots: fileRoots,
         catalog,
-        facts: new FactReader({ engine: docEngine }),
+        facts: new FactReader({ engine: docEngine, fullTextChars: config.files.fullTextChars }),
+        embedder,
         model: config.files.summaries ? model : undefined,
         summaryRole: roleFor(config, 'fileSummaries', 'triage'),
         store,
@@ -278,7 +287,20 @@ async function main(): Promise<void> {
       onChanged: (c) => (c.op === 'renamed' ? void indexer?.renamed(c.from, c.to) : indexer?.soon()),
       ...(catalog ? { setTags: (path: string, tags: string[]) => catalog.setTags(path, tags) } : {}),
     });
-    if (catalog && indexer) for (const t of fileSearchTools({ roots: fileRoots, catalog, indexer, actions: fileActions, timeZone: config.user.timezone })) tools.register(t);
+    if (catalog && indexer) {
+      const search = fileSearchTools({
+        roots: fileRoots,
+        catalog,
+        indexer,
+        actions: fileActions,
+        timeZone: config.user.timezone,
+        embedder,
+        meaningMinScore: config.files.meaningMinScore,
+        post: (item) => shell?.agent.post(item),
+        documents: !!documentFiles,
+      });
+      for (const t of search) tools.register(t);
+    }
     const showDocument = documentFiles && docFilesForShow
       ? async (path: string) => {
           const card = documentFiles!.show(await docFilesForShow!.resolve(path));

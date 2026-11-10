@@ -6,8 +6,11 @@
  * Handles streaming (SSE), tool calls, structured output with zod validation and
  * one repair retry, per-attempt timeouts, retries with backoff before any output
  * has reached the caller, provider error mapping and usage capture.
+ *
+ * F3: also embeddings, from a local Ollama only (`embed`, native /api/embed). An embedding
+ * call has no tools and returns only numbers.
  */
-import type { CloudModelRole, LocalModelConfig, ModelRole, ModelRoleConfig, SecretRef } from '@aios/shared';
+import type { CloudModelRole, EmbeddingsConfig, LocalModelConfig, ModelRole, ModelRoleConfig, SecretRef } from '@aios/shared';
 import { z } from 'zod';
 import type { Secret } from './secrets/keyring.js';
 
@@ -142,7 +145,7 @@ export class ModelError extends Error {
 type RoleConfig = ModelRoleConfig | LocalModelConfig;
 
 export interface ModelClientOptions {
-  models: Record<CloudModelRole, ModelRoleConfig> & { local?: LocalModelConfig | undefined };
+  models: Record<CloudModelRole, ModelRoleConfig> & { local?: LocalModelConfig | undefined; embeddings?: EmbeddingsConfig | undefined };
   resolveKey: (ref: SecretRef) => Promise<Secret>;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -176,6 +179,12 @@ const WireError = z.looseObject({
   code: z.union([z.number(), z.string()]).optional(),
   message: z.string().optional(),
   metadata: z.looseObject({ error_type: z.string().optional() }).optional(),
+});
+
+/** Ollama's /api/embed answer (docs.ollama.com/api/embed, 2026-11-10): one vector per input. */
+const WireEmbedResponse = z.looseObject({
+  model: z.string().optional(),
+  embeddings: z.array(z.array(z.number()).min(1).max(16_384)),
 });
 
 const WireResponse = z.looseObject({
@@ -297,6 +306,47 @@ export class ModelClient {
     const reparsed = parseStructured(second.content, schema);
     if (reparsed.ok) return { value: reparsed.value, result: second, repaired: true };
     throw new ModelError('malformed_output', `structured output failed validation twice: ${reparsed.error}`);
+  }
+
+  /** F3: the embedding model's name, for telling whether stored vectors came from it; null when not configured. */
+  embeddingModel(): string | null {
+    return this.opts.models.embeddings?.model ?? null;
+  }
+
+  /**
+   * F3: one vector per text from the local embedding model (Ollama's /api/embed, inputs
+   * truncated to its context). Pause stops it like any call; it costs nothing, so the cost cap
+   * doesn't. Retries network trouble like other calls. The vectors come back unit length.
+   */
+  async embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]> {
+    const cfg = this.opts.models.embeddings;
+    if (!cfg) throw new ModelError('not_configured', 'no [models.embeddings] in the config');
+    if (!texts.length) return [];
+    this.checkGate('local');
+    for (let attempt = 1; ; attempt++) {
+      const t = AbortSignal.timeout(cfg.timeoutMs);
+      try {
+        const res = await this.fetch(`${cfg.baseUrl.replace(/\/$/, '')}/api/embed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: cfg.model, input: texts, truncate: true }),
+          signal: signal ? AbortSignal.any([signal, t]) : t,
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw httpError(res.status, text, res.headers.get('retry-after'));
+        }
+        const parsed = WireEmbedResponse.safeParse(JSON.parse(await res.text()));
+        if (!parsed.success || parsed.data.embeddings.length !== texts.length) throw new ModelError('malformed_output', 'embeddings answer did not match the request');
+        const dims = parsed.data.embeddings[0]!.length;
+        if (parsed.data.embeddings.some((v) => v.length !== dims)) throw new ModelError('malformed_output', 'embeddings of different lengths');
+        return parsed.data.embeddings.map((v) => unit(Float32Array.from(v)));
+      } catch (err) {
+        const e = err instanceof SyntaxError ? new ModelError('malformed_output', 'embeddings answer was not JSON') : toModelError(err, signal);
+        if (!e.retryable || attempt >= this.maxAttempts) throw e;
+        await this.sleep(backoff(attempt, e.retryAfterMs));
+      }
+    }
   }
 
   /** True when calls for this role can be made at all (the local model is optional). */
@@ -653,6 +703,15 @@ function toModelError(err: unknown, outer?: AbortSignal): ModelError {
   const name = (err as Error | undefined)?.name;
   if (name === 'TimeoutError' || name === 'AbortError') return new ModelError('timeout', 'request timed out');
   return new ModelError('network', (err as Error | undefined)?.message ?? 'network error');
+}
+
+/** The vector scaled to length 1 (Ollama already does; this keeps cosine a plain dot product either way). */
+export function unit(v: Float32Array): Float32Array {
+  let n = 0;
+  for (const x of v) n += x * x;
+  n = Math.sqrt(n);
+  if (n > 0 && Math.abs(n - 1) > 1e-4) for (let i = 0; i < v.length; i++) v[i] = v[i]! / n;
+  return v;
 }
 
 /** Exponential backoff with jitter, honouring Retry-After up to 30s. */

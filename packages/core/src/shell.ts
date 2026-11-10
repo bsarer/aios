@@ -25,6 +25,7 @@ import { type Store, startOfDay } from './store.js';
 import type { Battery, Wifi } from './status/system.js';
 import type { SystemActions } from './system/actions.js';
 import type { ToolRegistry } from './tools/registry.js';
+import { WIDGET_TITLES, type WidgetBoard, widgetByName } from './widgets/widgets.js';
 
 export interface ShellOptions {
   store: Store;
@@ -65,7 +66,9 @@ export interface ShellOptions {
   /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
   cleanup?: { act: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => Promise<void>; run: () => Promise<'nothing' | 'posted'> };
   /** T1: to-do cards' buttons. Without it, todo_action messages are ignored. */
-  todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void };
+  todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void; listCard?: () => unknown };
+  /** W1: tiles along the bottom of the chat screen. Without it, there are none and /pin says they are off. */
+  widgets?: Pick<WidgetBoard, 'current' | 'refresh' | 'setPinned' | 'pinned'>;
   /** T2: the morning brief, checked whenever AI OS is in use, and /brief. Without it, /brief says it is off. */
   brief?: { runIfDue: () => Promise<unknown>; run: () => Promise<unknown> };
   /** V1: /play. Picks the video from the user's words; the play itself goes through the registry's video_play. */
@@ -119,7 +122,8 @@ export class Shell {
 
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
-    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme });
+    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme, ...(this.o.widgets ? { widgets: this.o.widgets.current() } : {}) });
+    void this.o.widgets?.refresh();
     // T2: a chat window opening counts as AI OS being in use.
     this.briefIfDue();
     return () => this.listeners.delete(l);
@@ -208,6 +212,16 @@ export class Shell {
     // T1: the user's own click on a to-do row; checked against its hash and the list first. Works while paused.
     if (msg.type === 'todo_action') return this.o.todos?.act(msg.id, msg.todoId, msg.action, msg.hash);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
+    // W1: the user's own click on a tile, or on its pin buttons. Nothing else reaches setPinned.
+    if (msg.type === 'widget_pin') {
+      if (!this.o.widgets) return;
+      this.o.widgets.setPinned(msg.widget, msg.pinned, 'click');
+      return;
+    }
+    if (msg.type === 'widget_open') {
+      this.o.audit.append({ kind: 'widgets', event: 'open', widget: msg.widget });
+      return this.command({ name: msg.widget });
+    }
     // The user's own click on a build they started, so it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
     const cmd = parseCommand(msg.text);
@@ -444,6 +458,26 @@ export class Shell {
         // Refusals (not a video, a bad link) come back as text starting with "Error:".
         if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
         return say('path' in picked.args ? `Playing ${picked.args.path.split('/').pop()} in mpv.` : 'Playing the link in mpv. It can take a few seconds to load.');
+      }
+      case 'todos': {
+        if (!this.o.todos?.listCard) return say('To-dos are off. Turn them on with enabled = true under [todos] in your config.');
+        this.o.todos.listCard();
+        return;
+      }
+      case 'pin':
+      case 'unpin': {
+        const w = this.o.widgets;
+        if (!w) return say('Widgets are off. Turn them on with enabled = true under [widgets] in your config.');
+        const pinned = w.pinned();
+        const all = Object.keys(WIDGET_TITLES) as (keyof typeof WIDGET_TITLES)[];
+        if (!cmd.text.trim()) {
+          const free = all.filter((k) => !pinned.includes(k));
+          const now = pinned.length ? `Pinned now: ${pinned.join(', ')}.` : 'Nothing is pinned.';
+          return say(cmd.name === 'pin' ? `${now} ${free.length ? `You can pin: ${free.join(', ')}. For example /pin ${free[0]}.` : 'Everything is pinned.'}` : `${now} For example /unpin ${pinned[0] ?? 'todos'}.`);
+        }
+        const widget = widgetByName(cmd.text);
+        if (!widget) return say(`I can pin ${all.join(', ')}. For example /${cmd.name} todos.`);
+        return say(w.setPinned(widget, cmd.name === 'pin', 'command'));
       }
       case 'knowledge': {
         const k = this.o.knowledge;

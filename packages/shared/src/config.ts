@@ -1,5 +1,6 @@
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
+import { WIDGET_KINDS, WidgetKind } from './protocol.js';
 import { MONITOR_NAME } from './window.js';
 
 /**
@@ -235,6 +236,20 @@ export const VideoConfig = z.strictObject({
 export type VideoConfig = z.infer<typeof VideoConfig>;
 
 /**
+ * W1: tiles along the bottom of the chat screen. `pinned` is where a fresh install starts;
+ * after the user pins or unpins one (/pin, /unpin or a click), their choice is kept instead.
+ */
+export const WidgetsConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  pinned: z
+    .array(WidgetKind)
+    .max(WIDGET_KINDS.length)
+    .refine((a) => new Set(a).size === a.length, 'each widget at most once')
+    .default(['checkup', 'brief', 'todos']),
+});
+export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
+
+/**
  * K1: the knowledge base about the user, `~/.config/aios/knowledge/about-me.md`, updated in the
  * background from new mail (triage results), calendar events, file descriptions and chat. It is
  * notes from outside text, never memory: the chat reads it only through knowledge_read, inside
@@ -327,6 +342,8 @@ export const AiosConfig = z.strictObject({
   brief: BriefConfig.prefault({}),
   /** V1: watching videos in mpv. */
   video: VideoConfig.prefault({}),
+  /** W1: tiles along the bottom of the chat screen. */
+  widgets: WidgetsConfig.prefault({}),
   /** K1: the hourly knowledge base about the user. */
   knowledge: KnowledgeConfig.prefault({}),
   /** S4: building apps with Claude Code. */

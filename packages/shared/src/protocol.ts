@@ -4,6 +4,11 @@
  */
 import { z } from 'zod';
 
+/** W1: the system features that can be pinned as tiles along the bottom of the chat screen. */
+export const WIDGET_KINDS = ['checkup', 'brief', 'todos'] as const;
+export const WidgetKind = z.enum(WIDGET_KINDS);
+export type WidgetKind = z.infer<typeof WidgetKind>;
+
 // ── Chat items (what the UI renders) ─────────────────────────────────────────
 
 /** One triaged email in a new-mail notification. from/subject/summary come from email: show as plain text only. */
@@ -307,7 +312,8 @@ export const ChatItem = z.discriminatedUnion('kind', [
     kind: z.literal('todo'),
     /** T1: items just added, changed or ticked off from the user's own words, or a reminder that is due. */
     id: z.string(),
-    event: z.enum(['added', 'updated', 'done', 'reminder']),
+    /** W1: 'list' is the open items, from a click on the to-do tile or /todos. */
+    event: z.enum(['added', 'updated', 'done', 'reminder', 'list']),
     /** Written by code, e.g. "Added to your list" or "Reminder". */
     title: z.string(),
     rows: z.array(TodoRow),
@@ -355,6 +361,30 @@ export const Status = z.strictObject({
 });
 export type Status = z.infer<typeof Status>;
 
+// ── Widgets (W1) ─────────────────────────────────────────────────────────────
+
+/**
+ * One tile along the bottom of the chat screen. Everything on it is written by code: numbers
+ * and counts, and on the to-do tile the user's own item text. No mail, invite or document text.
+ */
+export const WidgetTile = z.strictObject({
+  widget: WidgetKind,
+  title: z.string().max(40),
+  /** At most four short lines; plain text only. */
+  lines: z.array(z.string().max(120)).max(4),
+  /** 'attention' when something wants a look (urgent mail, overdue to-do, a drive almost full); 'off' when the feature is turned off. */
+  tone: z.enum(['normal', 'attention', 'off']),
+});
+export type WidgetTile = z.infer<typeof WidgetTile>;
+
+export const Widgets = z.strictObject({
+  /** In the order the user pinned them. */
+  pinned: z.array(WidgetKind),
+  /** Tiles for the pinned widgets, same order. */
+  tiles: z.array(WidgetTile),
+});
+export type Widgets = z.infer<typeof Widgets>;
+
 export const Theme = z.record(z.string(), z.string());
 export type Theme = z.infer<typeof Theme>;
 
@@ -399,6 +429,10 @@ export const ClientMessage = z.discriminatedUnion('type', [
     action: z.enum(['done', 'reopen', 'remove', 'snooze']),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
+  /** W1: a click on a pinned tile; opens its full card in the chat, like the matching command. */
+  z.strictObject({ type: z.literal('widget_open'), widget: WidgetKind }),
+  /** W1: the user's own click pinning or unpinning a tile. */
+  z.strictObject({ type: z.literal('widget_pin'), widget: WidgetKind, pinned: z.boolean() }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */
@@ -416,12 +450,13 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
   z.strictObject({ type: z.literal('status'), status: Status }),
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
+  z.strictObject({ type: z.literal('widgets'), widgets: Widgets }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
@@ -432,14 +467,16 @@ export interface ChatState {
   items: ChatItem[];
   status: Status | null;
   theme: Theme;
+  /** W1: null until the server says (or when widgets are off). */
+  widgets: Widgets | null;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {} };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':
@@ -453,5 +490,7 @@ export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
       return { ...state, status: ev.status };
     case 'theme':
       return { ...state, theme: ev.theme };
+    case 'widgets':
+      return { ...state, widgets: ev.widgets };
   }
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
+import { WidgetBar } from './components/WidgetBar';
 import { applyTheme } from './theme';
 import { useChat } from './useChat';
 
@@ -84,6 +85,13 @@ export function App() {
         </div>
       </main>
       <Composer working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} />
+      {/* W1: pinned system features along the bottom of the screen. */}
+      <WidgetBar
+        widgets={state.widgets}
+        disabled={conn !== 'open'}
+        onOpen={(widget) => send({ type: 'widget_open', widget })}
+        onPin={(widget, pinned) => send({ type: 'widget_pin', widget, pinned })}
+      />
     </div>
   );
 }

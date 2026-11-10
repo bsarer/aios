@@ -34,6 +34,7 @@ const DAY = 24 * HOUR;
 const MAX_MAIL_BACK_MS = 3 * DAY;
 const MIN_GAP_MS = 30 * 60_000;
 const MAX_TODOS = 10;
+const GLANCE_CALENDAR_MS = 10 * 60_000;
 
 export const BriefIntro = z.strictObject({ intro: z.string().min(1).max(600) });
 
@@ -135,6 +136,7 @@ function toRow(e: MailEvent): MailRow {
 export class MorningBrief {
   private running = false;
   private readonly now: () => number;
+  private glanceCal: { day: string; at: number; calendar: BriefItem['calendar']; events: BriefEvent[] } | null = null;
 
   constructor(private readonly o: MorningBriefOptions) {
     this.now = o.now ?? Date.now;
@@ -165,6 +167,33 @@ export class MorningBrief {
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * W1: counts and times for the brief tile, written by code: no subjects, titles or to-do text.
+   * The calendar is read at most every ten minutes for it.
+   */
+  async glance(): Promise<{ lines: string[]; attention: boolean }> {
+    const now = this.now();
+    const tz = this.o.timeZone;
+    const lastAt = Number(this.o.store.getSetting('brief.lastAt') ?? 0);
+    const since = Math.max(lastAt || now - DAY, now - MAX_MAIL_BACK_MS);
+    const urgent = this.o.mail.triagedSince(since).filter((e) => e.triage?.urgency === 'high').length;
+    const lines = [urgent ? `${plural(urgent, 'urgent email')}` : 'No urgent mail'];
+    const today = utcToLocal(now, tz).slice(0, 10);
+    if (!this.glanceCal || this.glanceCal.day !== today || now - this.glanceCal.at > GLANCE_CALENDAR_MS) {
+      this.glanceCal = { day: today, at: now, ...(await this.events()) };
+    }
+    const cal = this.glanceCal;
+    if (cal.calendar === 'ok') {
+      const hm = utcToLocal(now, tz).slice(11, 16);
+      const next = cal.events.map((e) => e.when.slice(0, 5)).find((t) => /^\d{2}:\d{2}$/.test(t) && t >= hm);
+      lines.push(cal.events.length ? `${plural(cal.events.length, 'event')} today${next ? `, next ${next}` : ''}` : 'No events today');
+    } else if (cal.calendar === 'error') lines.push("Calendar couldn't be read");
+    const { todos } = this.todos();
+    const overdue = todos.filter((t) => t.overdue).length;
+    lines.push(todos.length ? `${todos.length} due${overdue ? `, ${overdue} overdue` : ''}` : 'Nothing due today');
+    return { lines, attention: urgent > 0 || overdue > 0 };
   }
 
   private async events(): Promise<{ calendar: BriefItem['calendar']; events: BriefEvent[]; free: string[] }> {

@@ -84,7 +84,7 @@ export function App() {
           <div ref={bottom} />
         </div>
       </main>
-      <Composer working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} />
+      <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} />
       {/* W1: pinned system features along the bottom of the screen. */}
       <WidgetBar
         widgets={state.widgets}

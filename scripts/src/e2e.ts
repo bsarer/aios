@@ -993,12 +993,10 @@ async function main(): Promise<void> {
     check('the reminder card repeats the checked time', await waitFor(async () => (await todoCard.count()) === 1 && /Call Ana[^]*Reminder: Tomorrow, .*16:00/.test(await todoCard.innerText()), 10_000));
     const todosFile = join(tmp, 'config', 'aios', 'todos.md');
     check('the reminder is in todos.md', existsSync(todosFile) && readFileSync(todosFile, 'utf8').includes(`- [ ] Call Ana · remind ${calDay(1)} 16:00`));
-    // W1: the to-do tile at the bottom follows the list.
+    // W1: the to-do tile at the bottom, used further down.
     const todoTile = page.locator('[data-testid="widget"][data-widget="todos"]');
-    check('the to-do tile shows the new item', await waitFor(async () => (await todoTile.innerText()).includes('Call Ana')));
     await todoCard.getByTestId('todo-done').click();
     check('Done ticks it off in the file', await waitFor(async () => readFileSync(todosFile, 'utf8').includes('- [x] Call Ana')));
-    check('the to-do tile drops it', await waitFor(async () => (await todoTile.innerText()).includes('Nothing open')));
     check('the morning brief came at boot with today\'s events', (await page.locator('[data-kind="brief"]').count()) >= 1 && (await page.locator('[data-kind="brief"]').first().getByTestId('brief-intro').innerText()).includes('John'));
     await input.fill('/brief');
     await input.press('Enter');
@@ -1007,7 +1005,11 @@ async function main(): Promise<void> {
     // W1: pinned tiles along the bottom: checkup, the brief and to-dos by default; a click opens the full card.
     const tiles = page.getByTestId('widget');
     check('three widgets are pinned at the bottom', (await tiles.count()) === 3 && (await tiles.evaluateAll((els) => els.map((e) => e.getAttribute('data-widget')).join(','))) === 'checkup,brief,todos');
-    check('the brief tile shows counts and times', /urgent|No urgent mail/.test(await page.locator('[data-testid="widget"][data-widget="brief"]').innerText()));
+    check('tiles show only their names until opened', (await tiles.evaluateAll((els) => els.map((e) => (e as unknown as { innerText: string }).innerText.replace(/[^A-Za-z-]+/g, ' ').trim()).join(','))) === 'Checkup,Today,To-dos');
+    const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
+    const row = await box('[data-testid="widgets"]');
+    const composer = await box('[data-testid="composer"]');
+    check('the tiles line up with the chat column', Math.abs(row.x - composer.x) < 1 && Math.abs(row.x + row.width - (composer.x + composer.width)) < 1, `${row.x}+${row.width} vs ${composer.x}+${composer.width}`);
     const briefs = await page.locator('[data-kind="brief"]').count();
     await page.locator('[data-testid="widget"][data-widget="brief"]').getByTestId('widget-open').click();
     check('clicking the brief tile shows the brief', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) === briefs + 1, 10_000));
@@ -1015,6 +1017,7 @@ async function main(): Promise<void> {
     check('clicking the to-do tile shows the list', await waitFor(async () => (await page.locator('[data-kind="todo"][data-event="list"]').count()) === 1));
     await shot(page, 'w1-widgets');
     await todoTile.hover();
+    await shot(page, 'w1-widgets-hover');
     await todoTile.getByTestId('widget-unpin').click();
     check('× unpins a tile', await waitFor(async () => (await tiles.count()) === 2));
     await page.reload();
@@ -1022,6 +1025,11 @@ async function main(): Promise<void> {
     await page.getByTestId('widget-add').click();
     await page.locator('[data-testid="widget-pin"][data-widget="todos"]').click();
     check('+ pins it again', await waitFor(async () => (await page.getByTestId('widget').count()) === 3));
+    // An overdue item (written by hand, as the user may) turns the to-do and Today buttons amber after the next refresh.
+    writeFileSync(todosFile, `${readFileSync(todosFile, 'utf8')}- [ ] Renew passport · due ${calDay(-2)}\n`);
+    await page.reload();
+    check('an overdue to-do turns its button amber, with a dot', await waitFor(async () => (await todoTile.getAttribute('data-tone')) === 'attention' && (await todoTile.getByTestId('widget-dot').count()) === 1));
+    await shot(page, 'w1-widgets-attention');
     await input.fill('/unpin checkup');
     await input.press('Enter');
     check('/unpin takes a tile off', await waitFor(async () => (await page.locator('[data-testid="widget"][data-widget="checkup"]').count()) === 0));

@@ -1,7 +1,7 @@
 /**
  * Facts about one file for the index (F2): what it is (by its first bytes), pages, sheets,
  * picture size, word count, and a title and author where the file states them; plus a short
- * excerpt for the summary worker. Nothing here runs or opens a file in an app: PDFs go
+ * excerpt for the summary worker and (F3) the file's text, up to a limit, for whole-text search. Nothing here runs or opens a file in an app: PDFs go
  * through the pdf.js worker (no scripts), Word and Excel files through the D1 command-line
  * reads, and Office properties through a small ZIP reader with a size limit.
  *
@@ -20,18 +20,28 @@ export const EXCERPT_CHARS = 3000;
 const MAX_TEXT_READ = 256 * 1024;
 const MAX_PROP_CHARS = 300;
 const PDF_PAGES_FOR_FACTS = 5;
+/** F3: how much of a file is read for whole-text search. */
+const PDF_PAGES_FOR_TEXT = 100;
+const SHEETS_FOR_TEXT = 5;
+/** 2,000 cells per sheet, like sheet_read's limit. */
+const SHEET_RANGE_FOR_TEXT = 'A1:T100';
+export const DEFAULT_FULL_TEXT_CHARS = 100_000;
 
 export interface FileReading {
   kind: FileKind;
   facts: FileFacts;
   /** Text for the summary worker; null when there is none (pictures, other files, no text). */
   excerpt: string | null;
+  /** F3: the file's text for whole-text search, at most `fullTextChars`; null when none or turned off. */
+  text: string | null;
 }
 
 export interface FactReaderOptions {
   /** D1's engine, when Word and Excel files are on. */
   engine?: Pick<DocEngine, 'wordText' | 'sheetNames' | 'sheetRange'> | undefined;
   pdfText?: typeof extractPdfText;
+  /** F3: characters of text kept for whole-text search; 0 keeps none (F2's excerpt only). */
+  fullTextChars?: number | undefined;
 }
 
 const clip = (s: string | undefined, n = MAX_PROP_CHARS) => {
@@ -53,9 +63,19 @@ async function head(path: string, n: number): Promise<Buffer> {
 
 export class FactReader {
   private readonly pdfText: typeof extractPdfText;
+  private readonly fullText: number;
 
   constructor(private readonly o: FactReaderOptions = {}) {
     this.pdfText = o.pdfText ?? extractPdfText;
+    this.fullText = o.fullTextChars ?? DEFAULT_FULL_TEXT_CHARS;
+  }
+
+  /** Whitespace runs folded, cut to the limit; null when nothing is left. */
+  private body(text: string): string | null {
+    if (!this.fullText) return null;
+    // Control characters out too: search marks its matches with them.
+    const t = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, this.fullText);
+    return t || null;
   }
 
   async read(f: { path: string; name: string; bytes: number }, signal?: AbortSignal): Promise<FileReading> {
@@ -66,35 +86,55 @@ export class FactReader {
       case 'text': {
         const text = (await head(f.path, MAX_TEXT_READ)).toString('utf8');
         const heading = /\.md$/i.test(f.name) ? text.match(/^#\s+(.+)$/m)?.[1] : undefined;
-        return { kind, facts: { title: clip(heading), words: countWords(text) }, excerpt: text.slice(0, EXCERPT_CHARS) || null };
+        return { kind, facts: { title: clip(heading), words: countWords(text) }, excerpt: text.slice(0, EXCERPT_CHARS) || null, text: this.body(text) };
       }
       case 'pdf': {
-        if (tooBig) return { kind, facts: {}, excerpt: null };
+        if (tooBig) return { kind, facts: {}, excerpt: null, text: null };
         const bytes = await readFile(f.path);
         const info = pdfInfo(bytes);
-        const pdf = await this.pdfText(bytes, { ...(signal ? { signal } : {}), maxPages: PDF_PAGES_FOR_FACTS });
-        return { kind, facts: { ...info, pages: pdf.pages, words: pdf.readPages === pdf.pages ? countWords(pdf.text) : undefined }, excerpt: pdf.text.trim() ? pdf.text.slice(0, EXCERPT_CHARS) : null };
+        const pdf = await this.pdfText(bytes, {
+          ...(signal ? { signal } : {}),
+          maxPages: this.fullText ? PDF_PAGES_FOR_TEXT : PDF_PAGES_FOR_FACTS,
+          ...(this.fullText ? { maxChars: this.fullText } : {}),
+        });
+        return {
+          kind,
+          facts: { ...info, pages: pdf.pages, words: pdf.readPages === pdf.pages ? countWords(pdf.text) : undefined },
+          excerpt: pdf.text.trim() ? pdf.text.slice(0, EXCERPT_CHARS) : null,
+          text: this.body(pdf.text),
+        };
       }
       case 'word': {
-        if (tooBig) return { kind, facts: {}, excerpt: null };
+        if (tooBig) return { kind, facts: {}, excerpt: null, text: null };
         const props = officeProps(await readFile(f.path));
         const text = this.o.engine ? await this.o.engine.wordText(f.path, signal) : '';
-        return { kind, facts: { ...props, ...(text ? { words: countWords(text) } : {}) }, excerpt: text.trim() ? text.slice(0, EXCERPT_CHARS) : null };
+        return { kind, facts: { ...props, ...(text ? { words: countWords(text) } : {}) }, excerpt: text.trim() ? text.slice(0, EXCERPT_CHARS) : null, text: this.body(text) };
       }
       case 'sheet': {
-        if (tooBig) return { kind, facts: {}, excerpt: null };
+        if (tooBig) return { kind, facts: {}, excerpt: null, text: null };
         const props = officeProps(await readFile(f.path));
-        if (!this.o.engine) return { kind, facts: props, excerpt: null };
-        const sheets = (await this.o.engine.sheetNames(f.path, signal)).slice(0, 30).map((s) => s.slice(0, 100));
-        const grid = await this.o.engine.sheetRange(f.path, { range: 'A1:H30', ...(sheets[0] ? { sheet: sheets[0] } : {}), signal });
+        if (!this.o.engine) return { kind, facts: props, excerpt: null, text: null };
+        const engine = this.o.engine;
+        const sheets = (await engine.sheetNames(f.path, signal)).slice(0, 30).map((s) => s.slice(0, 100));
+        const grid = await engine.sheetRange(f.path, { range: 'A1:H30', ...(sheets[0] ? { sheet: sheets[0] } : {}), signal });
         const table = grid.rows.map((r) => r.join(' | ')).join('\n');
         const excerpt = `Sheets: ${sheets.join(', ')}\nFirst rows of ${sheets[0] ?? 'the first sheet'}:\n${table}`.slice(0, EXCERPT_CHARS);
-        return { kind, facts: { ...props, sheets }, excerpt };
+        let text: string | null = null;
+        if (this.fullText) {
+          // The cells of the first few sheets, one sheet at a time; a sheet that can't be read is left out.
+          const parts: string[] = [];
+          for (const sheet of sheets.length ? sheets.slice(0, SHEETS_FOR_TEXT) : [undefined]) {
+            const g = await engine.sheetRange(f.path, { range: SHEET_RANGE_FOR_TEXT, sheet, signal }).catch(() => null);
+            if (g) parts.push(`${sheet ?? ''}\n${g.rows.map((r) => r.filter(Boolean).join(' ')).join('\n')}`);
+          }
+          text = this.body(parts.join('\n'));
+        }
+        return { kind, facts: { ...props, sheets }, excerpt, text };
       }
       case 'image':
-        return { kind, facts: imageSize(await head(f.path, 64 * 1024)), excerpt: null };
+        return { kind, facts: imageSize(await head(f.path, 64 * 1024)), excerpt: null, text: null };
       default:
-        return { kind, facts: {}, excerpt: null };
+        return { kind, facts: {}, excerpt: null, text: null };
     }
   }
 }

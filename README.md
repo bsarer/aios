@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. D3 (the Edit button on documents) is in review. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. D3 (the Edit button on documents) is in review. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review. F3 (finding files by describing them: whole text, meaning, a results card) is in review.
 
 ## Mail
 
@@ -130,6 +130,16 @@ The chat looks after files in your folders (F1), by default `~/Documents`, `~/Do
   - **What's in it:** each file's type, size, dates, pages or sheets, and title and author where the file has them, plus a one-line description and keywords. The index finds new and changed files within seconds.
   - **Descriptions:** written by the triage model, about $0.001 a file, at most 200 a day (the rest wait for the next day). They stop at your daily cost cap and while paused.
   - **Tags:** "tag it taxes 2026" adds your own tags (on a card).
+- **Find files by describing them (F3):** "the contract that mentions a 90-day notice period", "my car insurance". Search now also looks through each file's text (up to 100,000 characters: all of a Word or text file, the first 100 pages of a PDF, the first cells of up to 5 sheets), and, with a local embedding model, by meaning, so "car insurance" finds a file that says "auto policy".
+  - **Results card:** each search shows the best 3 files with their folder, why each matched (where your words were, a few words from the text, or "close in meaning") and an **Open** button that shows the file in the chat.
+  - **Search by meaning** needs Ollama and an embedding model on this computer: `ollama pull embeddinggemma`, then in `config.toml`:
+    ```toml
+    [models.embeddings]
+    model = "embeddinggemma"   # any Ollama embedding model; baseUrl defaults to http://127.0.0.1:11434
+    ```
+    Files are embedded in the background after their text is read; `/reindex` shows how many are searchable by meaning. Changing the model embeds everything again. Without it, or while Ollama is off, search works by words.
+  - **Settings:** `[files]` `fullTextChars` (100000; 0 turns whole-text search off), `meaning` (true), `meaningMinScore` (0.3: raise it if unrelated files show up, lower it if close ones are missed; it depends on the model).
+  - The first start after updating reads every file again to fill in their text; descriptions you already have are kept.
   - **`/reindex`:** reads everything again and says how far the index is.
   - **Safety:** descriptions are written from files that can come from anyone, so they reach the chat as outside text, and the model that writes them has no tools.
 
@@ -254,6 +264,10 @@ evals             model bake-off: tasks, runner, report
 ## Dependencies added in L1
 
 None in the code. Ollama is a separate program (MIT licence, actively maintained), reached over its OpenAI-compatible API on 127.0.0.1 through the same model adapter; checked against docs.ollama.com on 2026-11-01. The Trash follows the freedesktop.org Trash specification with Node's own file functions.
+
+## Dependencies added in F3
+
+None. Whole-text search uses SQLite's FTS5; search by meaning calls Ollama's own `/api/embed` (a separate program, MIT licence, actively maintained) on 127.0.0.1 through the model adapter, checked against docs.ollama.com on 2026-11-10. Vectors are compared in plain TypeScript.
 
 ## Dependencies added in F2
 

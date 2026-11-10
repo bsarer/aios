@@ -4,7 +4,8 @@
  * with the index; it runs at start, a few seconds after the folders change (fs.watch), after
  * the chat's own file changes, every half hour, and on /reindex. Then one file at a time,
  * newest first, its facts are read and, while today's summary allowance and the daily cost
- * cap last, the no-tools worker describes it.
+ * cap last, the no-tools worker describes it. F3: each file's text goes into the full-text
+ * index, and the local embedding model (when set) gives each file one meaning vector.
  */
 import { type FSWatcher, watch } from 'node:fs';
 import { lstat, opendir } from 'node:fs/promises';
@@ -17,6 +18,7 @@ import type { CatalogStats, FileCatalog, IndexedFile, SeenFile } from './catalog
 import type { FactReader, FileReading } from './facts.js';
 import type { FileRoots, FileKind } from './roots.js';
 import { type SummaryModel, summarizeFile } from './summarizer.js';
+import { type Embedder, vectorText } from './meaning.js';
 
 const SCAN_DEPTH = 10;
 const RESCAN_MS = 30 * 60_000;
@@ -61,6 +63,8 @@ export interface FileIndexerOptions {
   timeZone: string;
   summariesPerDay: number;
   maxFiles: number;
+  /** F3: the local embedding model; without it, files get no meaning vectors. */
+  embedder?: Embedder | undefined;
   /** Watch the folders for changes (off in tests). */
   watch?: boolean;
   clock?: () => number;
@@ -71,6 +75,8 @@ export interface IndexStatus extends CatalogStats {
   summariesToday: number;
   summariesPerDay: number;
   truncated: boolean;
+  /** F3: whether search by meaning is on. */
+  meaning: boolean;
 }
 
 export class FileIndexer {
@@ -82,6 +88,7 @@ export class FileIndexer {
   private rescan = false;
   private working: Promise<void> | null = null;
   private modelBlockedUntil = 0;
+  private embedBlockedUntil = 0;
   private truncated = false;
   private lastScan = 0;
   private stopped = false;
@@ -91,6 +98,10 @@ export class FileIndexer {
   }
 
   async start(): Promise<void> {
+    if (this.o.embedder) {
+      const stale = this.o.catalog.useEmbeddingModel(this.o.embedder.model);
+      if (stale) this.o.audit.append({ kind: 'files', event: 'vectors_reset', files: stale });
+    }
     await this.scan();
     if (this.o.watch !== false) {
       for (const root of await this.o.roots.realRoots()) {
@@ -229,14 +240,54 @@ export class FileIndexer {
     return p;
   }
 
+  private mayEmbed(): boolean {
+    return !!this.o.embedder && this.clock() >= this.embedBlockedUntil;
+  }
+
   private async workLoop(): Promise<void> {
     while (!this.stopped) {
       const batch = [...this.o.catalog.needingFacts(BATCH), ...(this.mayDescribe() ? this.o.catalog.needingSummary(BATCH) : [])];
-      if (!batch.length) return;
+      if (!batch.length) {
+        // F3: meaning vectors once facts and today's descriptions are done.
+        if (this.mayEmbed() && (await this.embedBatch())) continue;
+        return;
+      }
       for (const f of batch) {
         if (this.stopped) return;
         await this.one(f);
       }
+    }
+  }
+
+  /** F3: one call's worth of files to vectors. False when there was nothing to do or it must wait. */
+  private async embedBatch(): Promise<boolean> {
+    const e = this.o.embedder!;
+    const files = this.o.catalog.needingVector(e.batchSize);
+    if (!files.length) return false;
+    const texts = files.map((f) => vectorText(f, this.o.roots.display(f.path), this.o.catalog.body(f.path, 1500)));
+    const t0 = Date.now();
+    try {
+      const vecs = await e.embed(texts);
+      files.forEach((f, n) => this.o.catalog.setVector(f, e.model, vecs[n]!));
+      this.o.audit.append({ kind: 'files', event: 'embedded', files: files.length, ms: Date.now() - t0 });
+      return true;
+    } catch (err) {
+      if (err instanceof ModelError && err.kind === 'malformed_output' && files.length === 1) {
+        this.o.catalog.setVector(files[0]!, e.model, null);
+        return true;
+      }
+      if (err instanceof ModelError && err.kind === 'malformed_output') {
+        // One file at a time, so one bad answer doesn't hold up the rest.
+        for (const f of files) {
+          const one = await e.embed([texts[files.indexOf(f)]!]).catch(() => null);
+          this.o.catalog.setVector(f, e.model, one?.[0] ?? null);
+        }
+        return true;
+      }
+      // Ollama off, paused or slow: try again later, nothing counted against the files.
+      this.embedBlockedUntil = this.clock() + (err instanceof ModelError && err.kind === 'paused' ? MODEL_BACKOFF_MS : 5 * 60_000);
+      this.o.audit.append({ kind: 'files', event: 'embed_failed', error: (err as Error).message.slice(0, 200) });
+      return false;
     }
   }
 
@@ -250,7 +301,7 @@ export class FileIndexer {
       this.o.audit.append({ kind: 'files', event: 'facts_failed', path: f.path, error: (err as Error).message.slice(0, 200) });
       return;
     }
-    this.o.catalog.setFacts(f, reading.kind, reading.facts, 'done');
+    this.o.catalog.setFacts(f, reading.kind, reading.facts, 'done', reading.text);
     const current = this.o.catalog.get(f.path);
     if (!current || current.summary) return;
     if (!reading.excerpt) {
@@ -281,11 +332,12 @@ export class FileIndexer {
   async reindex(): Promise<void> {
     this.o.catalog.resetForReindex();
     this.modelBlockedUntil = 0;
+    this.embedBlockedUntil = 0;
     await this.scan();
   }
 
   status(): IndexStatus {
-    return { ...this.o.catalog.stats(), scanning: !!this.scanning || !!this.working, summariesToday: this.summariesToday().n, summariesPerDay: this.o.summariesPerDay, truncated: this.truncated };
+    return { ...this.o.catalog.stats(), scanning: !!this.scanning || !!this.working, summariesToday: this.summariesToday().n, summariesPerDay: this.o.summariesPerDay, truncated: this.truncated, meaning: !!this.o.embedder };
   }
 }
 
@@ -295,6 +347,7 @@ export function indexStatusText(s: IndexStatus): string {
   return [
     `${s.files} file${s.files === 1 ? '' : 's'} in the index, ${read} read${s.factsPending ? `, ${s.factsPending} still to read` : ''}.`,
     `${s.summarized} described${s.summaryPending ? `, ${s.summaryPending} waiting` : ''}; ${s.summariesToday} of ${s.summariesPerDay} descriptions used today.`,
+    s.meaning ? `${s.embedded} searchable by meaning${s.vectorPending ? `, ${s.vectorPending} waiting` : ''}.` : '',
     s.truncated ? 'The folders hold more files than [files] maxIndexedFiles; the rest are left out.' : '',
   ]
     .filter(Boolean)

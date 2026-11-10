@@ -64,6 +64,18 @@ const MIGRATIONS = [
   `ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';`,
   // T1: which reminders have been posted (item id and its time), so each fires once for its time.
   `CREATE TABLE reminders_fired (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`,
+  // F3: each file's text in the full-text index (a new body column, so file_fts is rebuilt from
+  // file_index and every file's facts are read again to fill it), and one meaning vector per file
+  // from the local embedding model, with the model's name.
+  `DROP TABLE file_fts;
+   CREATE VIRTUAL TABLE file_fts USING fts5(path UNINDEXED, name, folder, title, keywords, tags, summary, details, body, tokenize = 'unicode61 remove_diacritics 2');
+   INSERT INTO file_fts (path, name, folder, title, keywords, tags, summary, details, body)
+     SELECT path, name, folder, COALESCE(json_extract(facts, '$.title'), ''), REPLACE(COALESCE(keywords, ''), char(10), ' '), REPLACE(tags, char(10), ' '), COALESCE(summary, ''), kind, ''
+     FROM file_index;
+   UPDATE file_index SET facts_state = 'pending';
+   ALTER TABLE file_index ADD COLUMN vector_state TEXT NOT NULL DEFAULT 'pending';
+   CREATE INDEX file_index_vector ON file_index(vector_state, mtime_ms);
+   CREATE TABLE file_vectors (path TEXT PRIMARY KEY, model TEXT NOT NULL, vec BLOB NOT NULL);`,
 ];
 
 export interface UsageRow {

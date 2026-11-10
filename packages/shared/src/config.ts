@@ -62,6 +62,24 @@ export const LocalModelConfig = ModelRoleConfig.extend({
 });
 export type LocalModelConfig = z.infer<typeof LocalModelConfig>;
 
+/**
+ * F3: an embedding model on this computer for finding files by meaning, through Ollama's native
+ * `POST /api/embed` (http://127.0.0.1:11434; returns L2-normalised vectors; checked against
+ * docs.ollama.com on 2026-11-10). It reads file text, so like [models.local] it must be on this
+ * machine: only loopback addresses are accepted. The model name is config, e.g. "embeddinggemma".
+ */
+export const EmbeddingsConfig = z.strictObject({
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    .default('http://127.0.0.1:11434')
+    .refine((u) => LOOPBACK_HOSTS.has(new URL(u).hostname), 'the embedding model must be on this computer (127.0.0.1, localhost or ::1)'),
+  model: z.string().min(1).max(200),
+  timeoutMs: z.int().positive().default(60_000),
+  /** Texts per call while indexing. */
+  batchSize: z.int().min(1).max(64).default(16),
+});
+export type EmbeddingsConfig = z.infer<typeof EmbeddingsConfig>;
+
 /** L1: jobs that can move from a cloud role to the local model, by listing them in assistant.localTasks. */
 export const LOCAL_TASKS = ['mailTriage', 'fileSummaries', 'nightlySummary'] as const;
 export type LocalTask = (typeof LOCAL_TASKS)[number];
@@ -200,6 +218,12 @@ export const FilesConfig = z.strictObject({
   summariesPerDay: z.int().min(0).max(10_000).default(200),
   /** F2: index at most this many files. */
   maxIndexedFiles: z.int().min(100).max(200_000).default(20_000),
+  /** F3: characters of each file's text kept for whole-text search; 0 turns it off. */
+  fullTextChars: z.int().min(0).max(1_000_000).default(100_000),
+  /** F3: search by meaning too, when [models.embeddings] is set. */
+  meaning: z.boolean().default(true),
+  /** F3: the least cosine similarity for a match by meaning (0 to 1; it depends on the embedding model). */
+  meaningMinScore: z.number().min(0).max(1).default(0.3),
 });
 export type FilesConfig = z.infer<typeof FilesConfig>;
 
@@ -285,6 +309,8 @@ export const AiosConfig = z.strictObject({
     nightly: ModelRoleConfig,
     /** L1: leave out to run without a local model; the system assistant then writes its own plain text. */
     local: LocalModelConfig.optional(),
+    /** F3: leave out to search files by words only. */
+    embeddings: EmbeddingsConfig.optional(),
   }),
   mail: MailConfig,
   /** C1: leave out to run without a calendar. */
@@ -333,7 +359,18 @@ export const AiosConfig = z.strictObject({
     timeoutSeconds: 12,
   }),
   /** F1: managing files in a few folders. */
-  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads', '~/Videos'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
+  files: FilesConfig.default({
+    enabled: true,
+    roots: ['~/Documents', '~/Downloads', '~/Videos'],
+    saveTo: '~/Downloads',
+    index: true,
+    summaries: true,
+    summariesPerDay: 200,
+    maxIndexedFiles: 20_000,
+    fullTextChars: 100_000,
+    meaning: true,
+    meaningMinScore: 0.3,
+  }),
   /** L1: the background system assistant on the local model. */
   assistant: AssistantConfig.prefault({}),
   /** T1: to-dos and reminders. */

@@ -3,6 +3,9 @@
  * (names, facts, the descriptions the summary worker wrote from the files, tags) is
  * sanitized and wrapped in <untrusted source="document">, like the files themselves.
  * file_tag is write tier and only puts a card in the chat; FileActions saves the tags on a click.
+ *
+ * F3: files_search also matches the whole text and, with the local embedding model, meaning;
+ * and it posts a read-only card with the best three files, why each matched, and Open.
  */
 import { startOfDay } from '../store.js';
 import { toolByName } from '../tools/definitions.js';
@@ -11,6 +14,8 @@ import { sizeText } from '../mail/attachments.js';
 import { nameText, sanitize, wrapUntrusted } from '../untrusted.js';
 import type { FileActions } from './actions.js';
 import type { FileCatalog, IndexedFile } from './catalog.js';
+import { type Embedder, type RankedFiles, rankFiles, whyMatched } from './meaning.js';
+import { cardNote, resultsCard, type FileResultsItem } from './results.js';
 import type { FileIndexer } from './indexer.js';
 import { FilePathError, type FileKind, type FileRoots, KIND_TEXT } from './roots.js';
 
@@ -19,10 +24,18 @@ const TAG_RE = /^[\p{L}\p{N}][\p{L}\p{N} &'._-]{0,39}$/u;
 
 export interface FileSearchToolsOptions {
   roots: Pick<FileRoots, 'resolve' | 'display'>;
-  catalog: Pick<FileCatalog, 'search' | 'get'>;
+  catalog: Pick<FileCatalog, 'search' | 'get' | 'nearest' | 'getMany'>;
   indexer: Pick<FileIndexer, 'status'>;
   actions: Pick<FileActions, 'propose'>;
   timeZone: string;
+  /** F3: search by meaning; without it, words only. */
+  embedder?: Embedder | undefined;
+  meaningMinScore?: number | undefined;
+  /** F3: posts the results card; without it, no card. */
+  post?: ((item: FileResultsItem) => void) | undefined;
+  /** F3: Word and Excel files open in the document viewer (D1 is on). */
+  documents?: boolean | undefined;
+  clock?: () => number;
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -32,7 +45,7 @@ export function dayStart(date: string, timeZone: string): number {
   return startOfDay(Date.parse(`${date}T12:00:00Z`), timeZone);
 }
 
-export function describeFile(f: IndexedFile, display: string): string {
+export function describeFile(f: IndexedFile, display: string, why?: { why: string; snippet?: string | undefined }): string {
   const facts = [
     KIND_TEXT[f.kind],
     f.facts?.pages ? `${f.facts.pages} page${f.facts.pages === 1 ? '' : 's'}` : '',
@@ -48,6 +61,8 @@ export function describeFile(f: IndexedFile, display: string): string {
     f.summary ? `  About: ${f.summary}` : '',
     f.keywords.length ? `  Keywords: ${f.keywords.join(', ')}` : '',
     f.tags.length ? `  Tags: ${f.tags.join(', ')}` : '',
+    why ? `  Matched: ${why.why}` : '',
+    why?.snippet ? `  From the text: ${why.snippet}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -70,27 +85,42 @@ export function fileSearchTools(o: FileSearchToolsOptions): RegisteredTool[] {
       def: toolByName('files_search')!,
       label: 'Searching your files…',
       untrustedOutput: true,
-      handler: (args) =>
+      handler: (args, ctx) =>
         asked(async () => {
-          const a = args as { query?: string; kinds?: FileKind[]; folder?: string; modifiedAfter?: string; modifiedBefore?: string; limit?: number };
+          const a = args as { query?: string; kinds?: FileKind[]; folder?: string; modifiedAfter?: string; modifiedBefore?: string; limit?: number; card?: boolean };
           const folder = a.folder ? await o.roots.resolve(a.folder, 'dir') : null;
-          const { files, loose } = o.catalog.search({
-            query: a.query,
-            kinds: a.kinds,
-            folder: folder?.path,
-            modifiedAfter: a.modifiedAfter ? dayStart(a.modifiedAfter, o.timeZone) : undefined,
-            modifiedBefore: a.modifiedBefore ? dayStart(a.modifiedBefore, o.timeZone) : undefined,
-            limit: a.limit ?? 15,
-          });
+          const ranked: RankedFiles = await rankFiles(
+            {
+              query: a.query,
+              kinds: a.kinds,
+              folder: folder?.path,
+              modifiedAfter: a.modifiedAfter ? dayStart(a.modifiedAfter, o.timeZone) : undefined,
+              modifiedBefore: a.modifiedBefore ? dayStart(a.modifiedBefore, o.timeZone) : undefined,
+              limit: a.limit ?? 15,
+            },
+            { catalog: o.catalog, embedder: o.embedder, minScore: o.meaningMinScore ?? 0.3, signal: ctx.signal },
+          );
+          const { files, loose } = ranked;
           const s = o.indexer.status();
           const building =
             s.factsPending > 0 || s.scanning
               ? ` The index is still being built (${s.files - s.factsPending} of ${s.files} files read so far), so some files may be missing; files_list finds files by name meanwhile.`
               : '';
-          const audit = { query: a.query ? a.query.length : 0, kinds: a.kinds ?? null, folder: folder?.path ?? null, found: files.length };
-          if (!files.length) return { content: `No indexed file matches.${building}`, audit };
-          const body = files.map((f) => describeFile(f, o.roots.display(f.path))).join('\n');
-          const head = `${files.length} file${files.length === 1 ? '' : 's'}${loose ? ' matching some of the words (none matched all of them)' : ''}, best first. Descriptions were written from the files, which can come from anyone, so they are inside the tags.${building}`;
+          const byMeaning = files.filter((f) => ranked.meaning.has(f.path)).length;
+          const down = ranked.meaningDown ? ' Search by meaning is unavailable right now (the local embedding model did not answer), so only words were matched.' : '';
+          const card = a.query && files.length && a.card !== false && o.post ? resultsCard(ranked, { documents: !!o.documents, now: (o.clock ?? Date.now)() }) : null;
+          const audit = {
+            query: a.query ? a.query.length : 0,
+            kinds: a.kinds ?? null,
+            folder: folder?.path ?? null,
+            found: files.length,
+            meaning: o.embedder && a.query ? (ranked.meaningDown ? 'down' : byMeaning) : 'off',
+            ...(card ? { cardId: card.id } : {}),
+          };
+          if (!files.length) return { content: `No indexed file matches.${down}${building}`, audit };
+          if (card) o.post!(card);
+          const body = files.map((f) => describeFile(f, o.roots.display(f.path), a.query ? whyMatched(f.path, ranked) : undefined)).join('\n');
+          const head = `${files.length} file${files.length === 1 ? '' : 's'}${loose && !byMeaning ? ' matching some of the words (none matched all of them)' : ''}, best first. Descriptions and text were written from the files, which can come from anyone, so they are inside the tags.${down}${building}${card ? cardNote(card) : ''}`;
           return { content: `${head}\n${wrapUntrusted('document', 'file-search', sanitize({ text: body }, { maxChars: 20_000 }))}`, audit };
         }),
     },

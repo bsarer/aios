@@ -309,6 +309,31 @@ export const ChatItem = z.discriminatedUnion('kind', [
     at: z.number(),
   }),
   z.strictObject({
+    kind: z.literal('file_results'),
+    /** F3: the best files of a search. Read only; each Open shows a file in the chat's viewer. */
+    id: z.string(),
+    files: z
+      .array(
+        z.strictObject({
+          /** `<card id>-<n>`: what Open fetches (/attachments or /documents), resolved again inside the folders. */
+          id: z.string(),
+          /** The file's name and folder. Files can come from anyone: plain text only. */
+          name: z.string(),
+          folder: z.string(),
+          fileKind: z.enum(['pdf', 'image', 'word', 'sheet', 'text', 'other']),
+          /** Written by code: where the words were, or that it is close in meaning. */
+          why: z.string(),
+          /** A few words of the file's text around the match: plain text only. */
+          snippet: z.string().optional(),
+          /** Which viewer Open uses; no Open button without it. */
+          open: z.enum(['attachment', 'document']).optional(),
+          path: z.string(),
+        }),
+      )
+      .max(3),
+    at: z.number(),
+  }),
+  z.strictObject({
     kind: z.literal('todo'),
     /** T1: items just added, changed or ticked off from the user's own words, or a reminder that is due. */
     id: z.string(),

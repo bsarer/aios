@@ -48,8 +48,11 @@ const attr = (v: string) => v.replace(/[^A-Za-z0-9._:@-]/g, '_');
  * 'calendar' (C1): event text, which anyone who sends the user an invite can write.
  * 'document' (D1): text, cells, sheet and file names from a Word or Excel file, which can come from anywhere.
  * 'system' (L1): window titles and process names, which web pages and downloaded programs choose.
+ * 'chat' (K1): chat turns handed to a background job; replies can quote email.
+ * 'knowledge' (K1): the knowledge base, notes a model wrote from all of the above. The chat
+ * counts both like email, the strictest.
  */
-export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system', id: string, sanitized: string): string {
+export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system' | 'chat' | 'knowledge', id: string, sanitized: string): string {
   return `<untrusted source="${source}" id="${attr(id)}">\n${sanitized}\n</untrusted>`;
 }
 

@@ -13,6 +13,10 @@ export type Command =
   | { name: 'checkup' }
   | { name: 'brief' }
   | { name: 'play'; text: string }
+  | { name: 'todos' }
+  | { name: 'pin'; text: string }
+  | { name: 'unpin'; text: string }
+  | { name: 'knowledge'; update: boolean }
   | { name: 'unknown'; raw: string };
 
 /** null when the text is a normal message. */
@@ -45,6 +49,15 @@ export function parseCommand(text: string): Command | null {
       return { name: 'brief' };
     case 'play':
       return { name: 'play', text: rest.join(' ') };
+    case 'todos':
+    case 'todo':
+      return { name: 'todos' };
+    case 'pin':
+      return { name: 'pin', text: rest.join(' ') };
+    case 'unpin':
+      return { name: 'unpin', text: rest.join(' ') };
+    case 'knowledge':
+      return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(rest.join(' ').trim()) };
     default:
       return { name: 'unknown', raw: t };
   }
@@ -63,6 +76,10 @@ export const HELP_TEXT = [
   '/play [name or link]  play your newest video, one whose name contains the words, or an https link, in mpv',
   '/checkup show disk, memory and processor now, and suggest files and windows to tidy up',
   '/brief   show the morning brief now: urgent mail, today\'s events and what is due',
+  '/todos   show your open to-dos',
+  '/pin <checkup | brief | todos>  pin it as a tile at the bottom of the screen; /unpin takes it off',
+  '/knowledge  show the knowledge base AI OS keeps about you from your mail, calendar, files and chat',
+  '/knowledge update  update it now (it updates by itself every hour)',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Esc stops a reply.',
 ].join('\n');

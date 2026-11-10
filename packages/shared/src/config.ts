@@ -1,5 +1,6 @@
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
+import { WIDGET_KINDS, WidgetKind } from './protocol.js';
 import { MONITOR_NAME } from './window.js';
 
 /**
@@ -258,6 +259,43 @@ export const VideoConfig = z.strictObject({
 });
 export type VideoConfig = z.infer<typeof VideoConfig>;
 
+/**
+ * W1: tiles along the bottom of the chat screen. `pinned` is where a fresh install starts;
+ * after the user pins or unpins one (/pin, /unpin or a click), their choice is kept instead.
+ */
+export const WidgetsConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  pinned: z
+    .array(WidgetKind)
+    .max(WIDGET_KINDS.length)
+    .refine((a) => new Set(a).size === a.length, 'each widget at most once')
+    .default(['checkup', 'brief', 'todos']),
+});
+export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
+
+/**
+ * K1: the knowledge base about the user, `~/.config/aios/knowledge/about-me.md`, updated in the
+ * background from new mail (triage results), calendar events, file descriptions and chat. It is
+ * notes from outside text, never memory: the chat reads it only through knowledge_read, inside
+ * <untrusted> tags, and nothing in it can call a tool, write memory or change config.
+ */
+export const KNOWLEDGE_SOURCES = ['mail', 'calendar', 'files', 'chat'] as const;
+export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
+
+export const KnowledgeConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** How often it looks for what is new. */
+  everyMinutes: z.int().min(15).max(24 * 60).default(60),
+  /** "local": the local model ([models.local]); without one, code writes only Upcoming and Recent activity. "cloud": the nightly role. */
+  model: z.enum(['local', 'cloud']).default('local'),
+  sources: z.array(z.enum(KNOWLEDGE_SOURCES)).max(KNOWLEDGE_SOURCES.length).default([...KNOWLEDGE_SOURCES]),
+  /** Calendar events this many days back and ahead. */
+  calendarDays: z.int().min(0).max(30).default(7),
+  /** One copy of the file a day is kept in knowledge/history for this many days. */
+  keepDays: z.int().min(1).max(90).default(14),
+});
+export type KnowledgeConfig = z.infer<typeof KnowledgeConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -341,6 +379,10 @@ export const AiosConfig = z.strictObject({
   brief: BriefConfig.prefault({}),
   /** V1: watching videos in mpv. */
   video: VideoConfig.prefault({}),
+  /** W1: tiles along the bottom of the chat screen. */
+  widgets: WidgetsConfig.prefault({}),
+  /** K1: the hourly knowledge base about the user. */
+  knowledge: KnowledgeConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

@@ -75,6 +75,10 @@ import { MorningBrief } from './brief/brief.js';
 import { TodoList } from './todos/list.js';
 import { Todos } from './todos/reminders.js';
 import { todoTools } from './todos/tools.js';
+import { WidgetBoard } from './widgets/widgets.js';
+import { KnowledgeCrawler, knowledgeView } from './knowledge/crawler.js';
+import { KnowledgeFile } from './knowledge/file.js';
+import { knowledgeReadTool } from './knowledge/tool.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -425,6 +429,8 @@ async function main(): Promise<void> {
       onTrashed: () => fileIndexer?.soon(),
     });
   }
+  // W1: tiles along the bottom of the chat screen; made below, once the features they show exist.
+  let widgets: WidgetBoard | undefined;
   // T1: the to-do list and its reminders. Adding, changing and ticking off come only from the user's own words.
   const todos = config.todos.enabled
     ? new Todos({
@@ -435,8 +441,14 @@ async function main(): Promise<void> {
         snoozeMinutes: config.todos.snoozeMinutes,
         quietHours: config.notifications.quietHours,
         isPaused,
-        post: (item) => shell?.agent.post(item),
-        patch: (item) => shell?.patchItem(item),
+        post: (item) => {
+          shell?.agent.post(item);
+          widgets?.soon();
+        },
+        patch: (item) => {
+          shell?.patchItem(item);
+          widgets?.soon();
+        },
         notify: (title, body) => desktopNotify(title, body),
       })
     : undefined;
@@ -458,6 +470,42 @@ async function main(): Promise<void> {
         post: (item) => shell?.agent.post(item),
       })
     : undefined;
+  if (config.widgets.enabled) {
+    widgets = new WidgetBoard({
+      defaults: config.widgets.pinned,
+      store,
+      audit,
+      sources: {
+        ...(monitor ? { checkup: () => monitor.glance() } : {}),
+        ...(brief ? { brief: () => brief.glance() } : {}),
+        ...(todos ? { todos: () => todos.glance() } : {}),
+      },
+      broadcast: (w) => shell?.broadcast({ type: 'widgets', widgets: w }),
+    });
+  }
+  // K1: the knowledge base, updated hourly in the background. Notes only: never memory, never a tool call.
+  const kc = config.knowledge;
+  const knowledgeFile = kc.enabled ? new KnowledgeFile(join(configDir(), 'knowledge'), config.user.name) : undefined;
+  const knowledge = knowledgeFile
+    ? new KnowledgeCrawler({
+        config: kc,
+        userName: config.user.name,
+        timeZone: config.user.timezone,
+        file: knowledgeFile,
+        store,
+        audit,
+        mail: mailState,
+        calendar: calendarApi,
+        files: fileCatalog,
+        displayPath: fileRoots ? (p: string) => fileRoots.display(p) : undefined,
+        // "local" without [models.local]: code writes Upcoming and Recent activity only.
+        model: kc.model === 'cloud' ? model : localModel,
+        role: kc.model === 'cloud' ? 'nightly' : 'local',
+        isPaused,
+        quietHours: config.notifications.quietHours,
+      })
+    : undefined;
+  if (knowledgeFile) tools.register(knowledgeReadTool({ file: knowledgeFile }));
   const themePath = omarchyThemePath();
   shell = new Shell({
     store,
@@ -484,6 +532,8 @@ async function main(): Promise<void> {
     ...(review ? { cleanup: review } : {}),
     ...(todos ? { todos } : {}),
     ...(brief ? { brief } : {}),
+    ...(widgets ? { widgets } : {}),
+    ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile), run: () => knowledge.run() } } : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
@@ -566,16 +616,22 @@ async function main(): Promise<void> {
   // L1: the monitor samples every half minute; the review checks every few minutes whether today's is due.
   monitor?.start();
   todos?.start();
+  widgets?.start();
   windowTracker?.start();
   const reviewTick = () => void review?.runIfDue().catch((err: unknown) => audit.append({ kind: 'assistant', event: 'review_error', error: (err as Error).message }));
   setTimeout(reviewTick, 2 * 60_000).unref();
   setInterval(reviewTick, 5 * 60_000).unref();
+  // K1: checks every five minutes whether the hourly update is due; the first one a few minutes after start.
+  const knowledgeTick = () => void knowledge?.runIfDue().catch((err: unknown) => audit.append({ kind: 'knowledge', event: 'error', error: (err as Error).message.slice(0, 200) }));
+  setTimeout(knowledgeTick, 3 * 60_000).unref();
+  setInterval(knowledgeTick, 5 * 60_000).unref();
   console.log(`aios-core listening on http://127.0.0.1:${config.ui.port}`);
 
   const shutdown = async () => {
     pipeline.stop();
     monitor?.stop();
     todos?.stop();
+    widgets?.stop();
     windowTracker?.stop();
     chatWindow.stop();
     await watcher.stop();

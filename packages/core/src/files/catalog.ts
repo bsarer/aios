@@ -423,6 +423,15 @@ export class FileCatalog {
     return (this.db.prepare("SELECT * FROM file_index WHERE bytes >= ? AND kind != 'folder' ORDER BY bytes DESC LIMIT ?").all(minBytes, limit) as Row[]).map((r) => this.file(r));
   }
 
+  /** K1: files with a description that were changed or read since `since`, newest first. */
+  describedSince(since: number, limit: number): IndexedFile[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM file_index WHERE summary_state = 'done' AND kind != 'folder' AND (mtime_ms >= ? OR read_at >= ?) ORDER BY mtime_ms DESC LIMIT ?")
+        .all(since, since, limit) as Row[]
+    ).map((r) => this.file(r));
+  }
+
   stats(): CatalogStats {
     const n = (sql: string) => (this.db.prepare(sql).get() as { n: number }).n;
     return {

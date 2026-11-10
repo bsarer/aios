@@ -5,9 +5,9 @@ const TITLES: Record<WidgetKind, string> = { checkup: 'Checkup', brief: 'Today',
 const ICONS: Record<WidgetKind, string> = { checkup: '🩺', brief: '☀', todos: '☑' };
 
 /**
- * W1: pinned system features as tiles along the bottom of the chat screen. A click opens the
- * full card in the chat; × unpins (right-click shows it too), + pins another. Everything on a tile
- * was written by code (the to-do tile shows the user's own items) and is shown as plain text.
+ * W1: pinned system features as compact buttons along the bottom of the chat screen, as wide as
+ * the chat column. Only the name shows (and an amber dot when something wants a look); a click
+ * opens the full card in the chat. × unpins (right-click shows it too), + pins another.
  */
 export function WidgetBar({
   widgets,
@@ -27,37 +27,27 @@ export function WidgetBar({
   const tileFor = (k: WidgetKind) => widgets.tiles.find((t) => t.widget === k);
 
   return (
-    <nav data-testid="widgets" aria-label="Pinned widgets" className="mx-auto mb-3 flex w-[min(960px,calc(100%-24px))] flex-wrap items-stretch justify-center gap-3">
+    <nav data-testid="widgets" aria-label="Pinned widgets" className="mx-auto mb-4 flex w-[min(820px,calc(100%-24px))] items-stretch gap-2">
       {widgets.pinned.map((k) => {
         const t = tileFor(k);
         const tone = t?.tone ?? 'normal';
-        const edge = tone === 'attention' ? 'var(--warning)' : tone === 'off' ? 'var(--border)' : 'var(--accent)';
         return (
           <div
             key={k}
             data-testid="widget"
             data-widget={k}
             data-tone={tone}
-            className="group glass relative min-w-[180px] max-w-[300px] flex-1 rounded-xl"
-            style={{ borderTop: `3px solid ${edge}`, opacity: tone === 'off' ? 0.6 : 1 }}
+            className="group glass relative flex-1 rounded-xl"
+            style={{ opacity: tone === 'off' ? 0.55 : 1 }}
             onContextMenu={(e) => {
               e.preventDefault();
               setMenuFor(menuFor === k ? null : k);
             }}
           >
-            <button type="button" data-testid="widget-open" disabled={disabled || tone === 'off'} onClick={() => onOpen(k)} className="block w-full px-3 py-2 text-left disabled:cursor-default" title={`Open ${TITLES[k]}`}>
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <span aria-hidden>{ICONS[k]}</span>
-                {t?.title ?? TITLES[k]}
-                {tone === 'attention' && <span aria-label="needs a look" className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--warning)' }} />}
-              </div>
-              <ul className="mt-0.5 text-[13px] leading-snug" style={{ color: 'var(--muted)' }}>
-                {(t?.lines ?? ['…']).map((line, i) => (
-                  <li key={i} data-testid="widget-line" className="truncate">
-                    {line}
-                  </li>
-                ))}
-              </ul>
+            <button type="button" data-testid="widget-open" disabled={disabled || tone === 'off'} onClick={() => onOpen(k)} className="flex w-full items-center justify-center gap-2 px-3 py-2 text-[15px] font-medium disabled:cursor-default" title={tone === 'off' ? (t?.lines[0] ?? '') : `Open ${TITLES[k]}`}>
+              <span aria-hidden>{ICONS[k]}</span>
+              {t?.title ?? TITLES[k]}
+              {tone === 'attention' && <span data-testid="widget-dot" aria-label="needs a look" className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--warning)' }} />}
             </button>
             <button
               type="button"
@@ -69,7 +59,7 @@ export function WidgetBar({
                 setMenuFor(null);
                 onPin(k, false);
               }}
-              className={`absolute right-1.5 top-1 rounded px-1.5 text-sm leading-5 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-70 ${menuFor === k ? 'opacity-100' : ''}`}
+              className={`absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 text-sm leading-5 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-70 ${menuFor === k ? 'opacity-100' : ''}`}
               style={{ color: 'var(--muted)' }}
             >
               ×
@@ -86,7 +76,7 @@ export function WidgetBar({
             title="Pin a widget"
             disabled={disabled}
             onClick={() => setAdding(!adding)}
-            className="glass h-full min-h-[44px] rounded-xl px-3 text-lg disabled:opacity-40"
+            className="glass h-full rounded-xl px-3.5 text-lg disabled:opacity-40"
             style={{ color: 'var(--muted)' }}
           >
             +

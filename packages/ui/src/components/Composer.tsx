@@ -52,7 +52,7 @@ export function Composer({ working, disabled, onSend, onStop }: Props) {
   };
 
   return (
-    <div className="glass mx-auto mb-4 w-[min(820px,calc(100%-24px))] rounded-2xl px-3 py-2">
+    <div data-testid="composer" className="glass mx-auto mb-2 w-[min(820px,calc(100%-24px))] rounded-2xl px-3 py-2">
       <div className="flex items-end gap-2">
         <Disabled label="Attach" icon="📎" />
         <textarea

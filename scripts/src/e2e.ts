@@ -967,6 +967,12 @@ async function main(): Promise<void> {
     await input.fill('find the file about the office lease');
     await input.press('Enter');
     check('files_search finds the report by what it says', await waitFor(async () => (await lastAssistant().innerText()).includes('report.docx'), 15_000));
+    // F3: the search also posts a card with the best files, why each matched, and Open.
+    const results = page.locator('[data-kind="file_results"]').last();
+    check('the results card shows the report with a reason and Open', await waitFor(async () => (await results.count()) === 1 && (await results.getByTestId('file-result-name').first().innerText()).includes('report.docx'), 15_000));
+    check('each row says why it matched', (await results.getByTestId('file-result-why').first().innerText()).length > 0);
+    check('the report opens from the card', (await results.getByTestId('file-result-open').count()) >= 1);
+    await shot(page, '16b-file-results');
     await input.fill('/reindex');
     await input.press('Enter');
     check('/reindex says how far the index is', await waitFor(async () => (await page.locator('body').innerText()).includes('Reading your files again in the background'), 10_000));

@@ -40,7 +40,7 @@ import { DocFiles } from './docs/files.js';
 import { createDocumentOpener } from './docs/open.js';
 import { docTools } from './docs/tools.js';
 import { createVideoPlayer } from './video/play.js';
-import { videoTools } from './video/tools.js';
+import { pickVideo, videoTools } from './video/tools.js';
 import { DocumentFiles } from './docs/viewer.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
@@ -462,6 +462,7 @@ async function main(): Promise<void> {
     ...(review ? { cleanup: review } : {}),
     ...(todos ? { todos } : {}),
     ...(brief ? { brief } : {}),
+    ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),

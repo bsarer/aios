@@ -68,6 +68,8 @@ export interface ShellOptions {
   todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void };
   /** T2: the morning brief, checked whenever AI OS is in use, and /brief. Without it, /brief says it is off. */
   brief?: { runIfDue: () => Promise<unknown>; run: () => Promise<unknown> };
+  /** V1: /play. Picks the video from the user's words; the play itself goes through the registry's video_play. */
+  video?: { pick: (text: string) => Promise<{ args: { path: string } | { url: string } } | { error: string }> };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
@@ -427,6 +429,19 @@ export class Shell {
         if (this.paused) return say('I am paused, so the brief waits. Type /resume to continue.');
         await this.o.brief.run();
         return;
+      }
+      case 'play': {
+        if (!this.o.video || !this.o.tools.has('video_play')) return say('Videos are off. Turn them on with enabled = true under [video] in your config.');
+        const picked = await this.o.video.pick(cmd.text);
+        if ('error' in picked) return say(picked.error);
+        // The user's own typed command, so nothing untrusted is in view: audited and rate limited like any device change.
+        const r = await this.o.tools.execute(
+          { id: `play-${Date.now()}`, name: 'video_play', arguments: JSON.stringify(picked.args) },
+          { signal: AbortSignal.timeout(30_000), untrustedInContext: false, userText: `/play ${cmd.text}` },
+        );
+        // Refusals (not a video, a bad link) come back as text starting with "Error:".
+        if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+        return say('path' in picked.args ? `Playing ${picked.args.path.split('/').pop()} in mpv.` : 'Playing the link in mpv. It can take a few seconds to load.');
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

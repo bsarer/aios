@@ -160,7 +160,8 @@ describe('whole-text search', () => {
       CREATE VIRTUAL TABLE file_fts USING fts5(path UNINDEXED, name, folder, title, keywords, tags, summary, details, tokenize = 'unicode61 remove_diacritics 2');
       INSERT INTO file_index (path, name, folder, kind, bytes, mtime_ms, birthtime_ms, facts, facts_state, summary, keywords, summary_state, tags, seen_at)
         VALUES ('/x/lease.pdf', 'lease.pdf', '~/Documents', 'pdf', 10, 1, 1, '{"title":"Flat lease"}', 'done', 'A lease.', 'rental', 'done', 'home', 1);`);
-    s1.db.pragma(`user_version = ${version - 1}`);
+    // Before F3's migration; K2's (knowledge_items, after it) runs again harmlessly.
+    s1.db.pragma(`user_version = ${version - 2}`);
     s1.db.close();
     const s2 = new Store(path);
     const c = new FileCatalog(s2);

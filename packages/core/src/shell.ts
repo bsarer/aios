@@ -484,10 +484,10 @@ export class Shell {
         if (!k) return say('The knowledge base is off. Turn it on with enabled = true under [knowledge] in your config.');
         if (!cmd.update) return say(k.view());
         if (this.paused) return say('I am paused, so the knowledge base waits. Type /resume to continue.');
-        say('Updating your knowledge base. This can take a minute with the local model.');
+        say('Updating your knowledge base. This can take a few minutes.');
         const r = await k.run();
         if (!r) return say('An update is already running; type /knowledge in a minute to see it.');
-        if (r.error) say(`The model couldn't write the notes this time (${r.error}), so only Upcoming and Recent activity changed. I'll try again at the next hourly update.`);
+        if (r.error) say(`I couldn't reach the model this time (${r.error}), so I'll carry on at the next update. What was read so far is in the file.`);
         return say(k.view());
       }
       case 'unknown':

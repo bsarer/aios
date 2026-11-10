@@ -76,7 +76,7 @@ import { TodoList } from './todos/list.js';
 import { Todos } from './todos/reminders.js';
 import { todoTools } from './todos/tools.js';
 import { WidgetBoard } from './widgets/widgets.js';
-import { KnowledgeCrawler, knowledgeView } from './knowledge/crawler.js';
+import { KnowledgeCrawler, knowledgeView, progressText } from './knowledge/crawler.js';
 import { KnowledgeFile } from './knowledge/file.js';
 import { knowledgeReadTool } from './knowledge/tool.js';
 
@@ -486,21 +486,22 @@ async function main(): Promise<void> {
   // K1: the knowledge base, updated hourly in the background. Notes only: never memory, never a tool call.
   const kc = config.knowledge;
   const knowledgeFile = kc.enabled ? new KnowledgeFile(join(configDir(), 'knowledge'), config.user.name) : undefined;
+  // K2: the first pass on backfillModel (cloud by default), hourly updates on model (local by default).
+  const knowledgeModel = (which: 'local' | 'cloud') => (which === 'cloud' ? { model, role: 'nightly' as const } : localModel ? { model: localModel, role: 'local' as const } : null);
   const knowledge = knowledgeFile
     ? new KnowledgeCrawler({
         config: kc,
         userName: config.user.name,
+        userAddresses: [config.mail.address],
         timeZone: config.user.timezone,
         file: knowledgeFile,
         store,
         audit,
-        mail: mailState,
+        mail: mailClient,
         calendar: calendarApi,
         files: fileCatalog,
         displayPath: fileRoots ? (p: string) => fileRoots.display(p) : undefined,
-        // "local" without [models.local]: code writes Upcoming and Recent activity only.
-        model: kc.model === 'cloud' ? model : localModel,
-        role: kc.model === 'cloud' ? 'nightly' : 'local',
+        models: { backfill: knowledgeModel(kc.backfillModel), hourly: knowledgeModel(kc.model) },
         isPaused,
         quietHours: config.notifications.quietHours,
       })
@@ -533,7 +534,7 @@ async function main(): Promise<void> {
     ...(todos ? { todos } : {}),
     ...(brief ? { brief } : {}),
     ...(widgets ? { widgets } : {}),
-    ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile), run: () => knowledge.run() } } : {}),
+    ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile, progressText(knowledge.progress(), kc.backfillModel === 'cloud')), run: () => knowledge.run() } } : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),

@@ -5,6 +5,8 @@ interface Props {
   disabled: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** W1: less space below when the widget row follows. */
+  tight?: boolean;
 }
 
 const Disabled = ({ label, icon }: { label: string; icon: string }) => (
@@ -13,7 +15,7 @@ const Disabled = ({ label, icon }: { label: string; icon: string }) => (
   </button>
 );
 
-export function Composer({ working, disabled, onSend, onStop }: Props) {
+export function Composer({ working, disabled, onSend, onStop, tight = false }: Props) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -52,7 +54,7 @@ export function Composer({ working, disabled, onSend, onStop }: Props) {
   };
 
   return (
-    <div data-testid="composer" className="glass mx-auto mb-2 w-[min(820px,calc(100%-24px))] rounded-2xl px-3 py-2">
+    <div data-testid="composer" className={`glass mx-auto ${tight ? 'mb-2' : 'mb-4'} w-[min(820px,calc(100%-24px))] rounded-2xl px-3 py-2`}>
       <div className="flex items-end gap-2">
         <Disabled label="Attach" icon="📎" />
         <textarea

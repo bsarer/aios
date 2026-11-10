@@ -1019,6 +1019,11 @@ async function main(): Promise<void> {
     await page.getByTestId('widget-add').click();
     await page.locator('[data-testid="widget-pin"][data-widget="todos"]').click();
     check('+ pins it again', await waitFor(async () => (await page.getByTestId('widget').count()) === 3));
+    // An overdue item (written by hand, as the user may) turns the to-do and Today buttons amber after the next refresh.
+    writeFileSync(todosFile, `${readFileSync(todosFile, 'utf8')}- [ ] Renew passport · due ${calDay(-2)}\n`);
+    await page.reload();
+    check('an overdue to-do turns its button amber, with a dot', await waitFor(async () => (await todoTile.getAttribute('data-tone')) === 'attention' && (await todoTile.getByTestId('widget-dot').count()) === 1));
+    await shot(page, 'w1-widgets-attention');
     await input.fill('/unpin checkup');
     await input.press('Enter');
     check('/unpin takes a tile off', await waitFor(async () => (await page.locator('[data-testid="widget"][data-widget="checkup"]').count()) === 0));

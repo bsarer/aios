@@ -2,7 +2,8 @@ import { WIDGET_KINDS, type WidgetKind, type Widgets } from '@aios/shared/protoc
 import { useState } from 'react';
 
 const TITLES: Record<WidgetKind, string> = { checkup: 'Checkup', brief: 'Today', todos: 'To-dos' };
-const ICONS: Record<WidgetKind, string> = { checkup: '🩺', brief: '☀', todos: '☑' };
+const ICONS: Record<WidgetKind, string> = { checkup: '◉', brief: '☀', todos: '☑' };
+const hue = (tone: 'normal' | 'attention' | 'off') => (tone === 'attention' ? 'var(--warning)' : 'var(--accent)');
 
 /**
  * W1: pinned system features as compact buttons along the bottom of the chat screen, as wide as
@@ -38,16 +39,23 @@ export function WidgetBar({
             data-widget={k}
             data-tone={tone}
             className="group glass relative flex-1 rounded-xl"
-            style={{ opacity: tone === 'off' ? 0.55 : 1 }}
+            style={{
+              opacity: tone === 'off' ? 0.55 : 1,
+              // Colour from the Omarchy theme: the accent, or amber when something wants a look.
+              background: tone === 'off' ? undefined : `color-mix(in srgb, ${hue(tone)} 14%, var(--panel))`,
+              borderColor: tone === 'off' ? undefined : `color-mix(in srgb, ${hue(tone)} 40%, transparent)`,
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               setMenuFor(menuFor === k ? null : k);
             }}
           >
             <button type="button" data-testid="widget-open" disabled={disabled || tone === 'off'} onClick={() => onOpen(k)} className="flex w-full items-center justify-center gap-2 px-3 py-2 text-[15px] font-medium disabled:cursor-default" title={tone === 'off' ? (t?.lines[0] ?? '') : `Open ${TITLES[k]}`}>
-              <span aria-hidden>{ICONS[k]}</span>
+              <span aria-hidden style={{ color: tone === 'off' ? undefined : hue(tone) }}>
+                {ICONS[k]}
+              </span>
               {t?.title ?? TITLES[k]}
-              {tone === 'attention' && <span data-testid="widget-dot" aria-label="needs a look" className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--warning)' }} />}
+              {tone === 'attention' && <span data-testid="widget-dot" aria-label="needs a look" className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--warning)', boxShadow: '0 0 6px var(--warning)' }} />}
             </button>
             <button
               type="button"

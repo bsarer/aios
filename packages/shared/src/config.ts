@@ -80,6 +80,27 @@ export const EmbeddingsConfig = z.strictObject({
 });
 export type EmbeddingsConfig = z.infer<typeof EmbeddingsConfig>;
 
+/**
+ * V2: voice to text in the chat, from a whisper.cpp server on this computer (`whisper-server`,
+ * `POST /inference` with a multipart `file`, `response_format=json` answers `{"text": ...}`;
+ * default address 127.0.0.1:8080; checked against github.com/ggml-org/whisper.cpp
+ * examples/server on 2026-11-10). It hears the user's voice, so like [models.local] it must be on
+ * this machine: only loopback addresses are accepted. The server loads its model itself (`-m`),
+ * so no model name is needed here.
+ */
+export const SpeechConfig = z.strictObject({
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    .default('http://127.0.0.1:8080')
+    .refine((u) => LOOPBACK_HOSTS.has(new URL(u).hostname), 'the speech model must be on this computer (127.0.0.1, localhost or ::1)'),
+  /** Whisper's language code, e.g. "en" or "tr", or "auto" to detect it each time. */
+  language: z.string().regex(/^(auto|[a-z]{2,3})$/, 'must be a language code such as "en", or "auto"').default('en'),
+  /** The longest recording, in seconds; the chat stops listening at this point. */
+  maxSeconds: z.int().min(5).max(120).default(60),
+  timeoutMs: z.int().positive().default(60_000),
+});
+export type SpeechConfig = z.infer<typeof SpeechConfig>;
+
 /** L1: jobs that can move from a cloud role to the local model, by listing them in assistant.localTasks. */
 export const LOCAL_TASKS = ['mailTriage', 'fileSummaries', 'nightlySummary'] as const;
 export type LocalTask = (typeof LOCAL_TASKS)[number];
@@ -311,6 +332,8 @@ export const AiosConfig = z.strictObject({
     local: LocalModelConfig.optional(),
     /** F3: leave out to search files by words only. */
     embeddings: EmbeddingsConfig.optional(),
+    /** V2: leave out to keep the chat's microphone button off. */
+    speech: SpeechConfig.optional(),
   }),
   mail: MailConfig,
   /** C1: leave out to run without a calendar. */

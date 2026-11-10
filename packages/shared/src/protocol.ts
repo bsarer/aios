@@ -383,6 +383,8 @@ export const Status = z.strictObject({
   model: z.string(),
   /** S7: where apps open now (another screen, or the next workspace), for the hint under the status strip. */
   appsAt: z.enum(['screen', 'workspace']).optional(),
+  /** V2: the microphone button's state; left out when [models.speech] is not set. */
+  voice: z.strictObject({ maxSeconds: z.int().positive() }).optional(),
 });
 export type Status = z.infer<typeof Status>;
 

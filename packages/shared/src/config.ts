@@ -1,5 +1,6 @@
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
+import { WIDGET_KINDS, WidgetKind } from './protocol.js';
 import { MONITOR_NAME } from './window.js';
 
 /**
@@ -234,6 +235,20 @@ export const VideoConfig = z.strictObject({
 });
 export type VideoConfig = z.infer<typeof VideoConfig>;
 
+/**
+ * W1: tiles along the bottom of the chat screen. `pinned` is where a fresh install starts;
+ * after the user pins or unpins one (/pin, /unpin or a click), their choice is kept instead.
+ */
+export const WidgetsConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  pinned: z
+    .array(WidgetKind)
+    .max(WIDGET_KINDS.length)
+    .refine((a) => new Set(a).size === a.length, 'each widget at most once')
+    .default(['checkup', 'brief', 'todos']),
+});
+export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -304,6 +319,8 @@ export const AiosConfig = z.strictObject({
   brief: BriefConfig.prefault({}),
   /** V1: watching videos in mpv. */
   video: VideoConfig.prefault({}),
+  /** W1: tiles along the bottom of the chat screen. */
+  widgets: WidgetsConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

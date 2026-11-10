@@ -107,6 +107,30 @@ export class ResourceMonitor {
     return lines;
   }
 
+  /** W1: short numbers for the checkup tile, written by code; `attention` when one is past its threshold. */
+  async glance(): Promise<{ lines: string[]; attention: boolean }> {
+    const c = this.o.config;
+    const lines: string[] = [];
+    let attention = false;
+    const mem = await this.o.reader.memory();
+    if (mem && mem.totalBytes > 0) {
+      const freePct = (mem.availableBytes / mem.totalBytes) * 100;
+      if (freePct < c.memoryFreePercent) attention = true;
+      lines.push(`Memory ${Math.round(100 - freePct)}% used`);
+    }
+    const avg = this.cpuAverage(c.cpuMinutes * 60_000, true);
+    if (avg !== null) {
+      if (avg >= c.cpuPercent) attention = true;
+      lines.push(`CPU ${Math.round(avg)}%`);
+    }
+    for (const d of await this.o.reader.disks(this.folders())) {
+      if (d.totalBytes <= 0) continue;
+      if ((d.freeBytes / d.totalBytes) * 100 < c.diskFreePercent || d.freeBytes / 1024 ** 3 < c.diskFreeGb) attention = true;
+      lines.push(`${d.label === '/' ? 'System' : d.label === '~' ? 'Home' : d.label} ${bytesText(d.freeBytes)} free`);
+    }
+    return { lines: lines.slice(0, 4), attention };
+  }
+
   private folders(): { label: string; path: string }[] {
     return this.o.config.disks.map((d) => ({ label: d, path: d === '~' ? this.home : d.startsWith('~/') ? join(this.home, d.slice(2)) : d }));
   }

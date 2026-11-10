@@ -319,3 +319,23 @@ smtp = { host = "127.0.0.1", port = 3025, tls = false }
     expect(c.brief).toEqual({ enabled: true, after: '06:00', maxMails: 5, maxEvents: 10 });
   });
 });
+
+describe('to-do tile and list card (W1)', () => {
+  it('shows the next items soonest first, flags overdue ones, and lists the open items on a card', () => {
+    const r = rig();
+    expect(r.todos.glance()).toEqual({ lines: ['Nothing open'], attention: false });
+    r.todos.list.add([{ text: 'Milk' }, { text: 'Call Ana', remindAt: '2026-11-07T16:00' }, { text: 'Pay rent', due: '2026-11-08' }, { text: 'x'.repeat(80) }]);
+    const g = r.todos.glance();
+    expect(g.lines).toEqual(['Call Ana', 'Pay rent', 'Milk', '+1 more']);
+    expect(g.attention).toBe(false);
+    r.setNow('2026-11-09T10:00');
+    expect(r.todos.glance().attention).toBe(true);
+    const card = r.todos.listCard();
+    expect(card.event).toBe('list');
+    expect(card.title).toBe('Your list');
+    expect(card.rows.map((x) => x.text)).toEqual(['Call Ana', 'Pay rent', 'Milk', 'x'.repeat(80)]);
+    // Ticking off from the list card goes through the same hash-checked click.
+    r.todos.act(card.id, card.rows[2]!.todoId, 'done', card.rows[2]!.hash);
+    expect(r.todos.list.open().map((t) => t.text)).not.toContain('Milk');
+  });
+});

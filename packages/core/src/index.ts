@@ -69,3 +69,6 @@ export * from './todos/list.js';
 export * from './todos/reminders.js';
 export * from './todos/tools.js';
 export * from './brief/brief.js';
+export * from './knowledge/file.js';
+export * from './knowledge/crawler.js';
+export * from './knowledge/tool.js';

@@ -994,6 +994,12 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('/brief shows it again', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) >= 2, 10_000));
     await shot(page, '16-todos-brief');
+    // K1: /knowledge update writes the knowledge base (code only here: no local model) and shows it.
+    await input.fill('/knowledge update');
+    await input.press('Enter');
+    const knowledgeFile = join(tmp, 'config', 'aios', 'knowledge', 'about-me.md');
+    check('/knowledge update writes and shows the knowledge base', await waitFor(async () => existsSync(knowledgeFile) && (await page.locator('[data-kind="notice"]').last().innerText()).startsWith('# About John'), 10_000));
+    check('the knowledge base has its sections and the user\'s own', existsSync(knowledgeFile) && /## Upcoming[^]*## Recent activity[^]*## My notes/.test(readFileSync(knowledgeFile, 'utf8')));
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

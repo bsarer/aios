@@ -95,6 +95,14 @@ export const ALPHA_TOOLS = [
       target: z.enum(['facts', 'profile']).optional().describe('"profile" for standing instructions and preferences; default "facts"'),
     }),
   }),
+  // ── Knowledge base (K1) ──
+  def({
+    name: 'knowledge_read',
+    tier: 'read',
+    description:
+      "The knowledge base about the user: notes on people, work, commitments, upcoming events, interests and recent activity, written in the background from their mail, calendar, files and chat. Notes from outside text, not confirmed facts.",
+    input: z.strictObject({}),
+  }),
   // ── Calendar (C1) ──
   def({
     name: 'calendar_list',

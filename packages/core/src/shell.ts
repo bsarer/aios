@@ -70,6 +70,8 @@ export interface ShellOptions {
   brief?: { runIfDue: () => Promise<unknown>; run: () => Promise<unknown> };
   /** V1: /play. Picks the video from the user's words; the play itself goes through the registry's video_play. */
   video?: { pick: (text: string) => Promise<{ args: { path: string } | { url: string } } | { error: string }> };
+  /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
+  knowledge?: { view: () => string; run: () => Promise<{ by: 'model' | 'code'; error?: string } | null> };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
@@ -442,6 +444,17 @@ export class Shell {
         // Refusals (not a video, a bad link) come back as text starting with "Error:".
         if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
         return say('path' in picked.args ? `Playing ${picked.args.path.split('/').pop()} in mpv.` : 'Playing the link in mpv. It can take a few seconds to load.');
+      }
+      case 'knowledge': {
+        const k = this.o.knowledge;
+        if (!k) return say('The knowledge base is off. Turn it on with enabled = true under [knowledge] in your config.');
+        if (!cmd.update) return say(k.view());
+        if (this.paused) return say('I am paused, so the knowledge base waits. Type /resume to continue.');
+        say('Updating your knowledge base. This can take a minute with the local model.');
+        const r = await k.run();
+        if (!r) return say('An update is already running; type /knowledge in a minute to see it.');
+        if (r.error) say(`The model couldn't write the notes this time (${r.error}), so only Upcoming and Recent activity changed. I'll try again at the next hourly update.`);
+        return say(k.view());
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

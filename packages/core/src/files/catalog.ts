@@ -423,6 +423,20 @@ export class FileCatalog {
     return (this.db.prepare("SELECT * FROM file_index WHERE bytes >= ? AND kind != 'folder' ORDER BY bytes DESC LIMIT ?").all(minBytes, limit) as Row[]).map((r) => this.file(r));
   }
 
+  /**
+   * K2: documents whose facts (and text, when they have any) have been read, changed or read
+   * since `since`, newest first: PDFs, Word, Excel and text files.
+   */
+  readableSince(since: number, limit: number): IndexedFile[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM file_index WHERE facts_state = 'done' AND kind IN ('pdf', 'word', 'sheet', 'text') AND (mtime_ms >= ? OR read_at >= ?) ORDER BY mtime_ms DESC LIMIT ?",
+        )
+        .all(since, since, limit) as Row[]
+    ).map((r) => this.file(r));
+  }
+
   /** K1: files with a description that were changed or read since `since`, newest first. */
   describedSince(since: number, limit: number): IndexedFile[] {
     return (

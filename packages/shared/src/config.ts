@@ -307,9 +307,18 @@ export const KnowledgeConfig = z.strictObject({
   enabled: z.boolean().default(true),
   /** How often it looks for what is new. */
   everyMinutes: z.int().min(15).max(24 * 60).default(60),
-  /** "local": the local model ([models.local]); without one, code writes only Upcoming and Recent activity. "cloud": the nightly role. */
+  /** The hourly updates: "local", the local model ([models.local]); without one, code writes only Upcoming and Recent activity. "cloud": the nightly role. */
   model: z.enum(['local', 'cloud']).default('local'),
   sources: z.array(z.enum(KNOWLEDGE_SOURCES)).max(KNOWLEDGE_SOURCES.length).default([...KNOWLEDGE_SOURCES]),
+  /** K2: the first pass reads mail (INBOX and Sent) from this many days back, and every indexed file. 0: no first pass. */
+  backfillDays: z.int().min(0).max(730).default(90),
+  /** K2: the first pass runs on the cloud nightly role ("cloud", the default) or the local model ("local"). */
+  backfillModel: z.enum(['local', 'cloud']).default('cloud'),
+  /** K2: at most this many emails and files in the first pass, newest first. */
+  backfillMaxMails: z.int().min(0).max(5000).default(600),
+  backfillMaxFiles: z.int().min(0).max(5000).default(300),
+  /** K2: emails and files read per run (the first pass runs every five minutes until it is done). */
+  perRun: z.int().min(1).max(500).default(40),
   /** Calendar events this many days back and ahead. */
   calendarDays: z.int().min(0).max(30).default(7),
   /** One copy of the file a day is kept in knowledge/history for this many days. */

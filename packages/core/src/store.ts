@@ -76,6 +76,11 @@ const MIGRATIONS = [
    ALTER TABLE file_index ADD COLUMN vector_state TEXT NOT NULL DEFAULT 'pending';
    CREATE INDEX file_index_vector ON file_index(vector_state, mtime_ms);
    CREATE TABLE file_vectors (path TEXT PRIMARY KEY, model TEXT NOT NULL, vec BLOB NOT NULL);`,
+  // K2: each email, file, chat stretch and calendar day the knowledge base has read, so each is
+  // read once. Notes wait here (as cleaned plain text) between being read and being merged.
+  `CREATE TABLE IF NOT EXISTS knowledge_items (key TEXT PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL, at INTEGER NOT NULL, phase TEXT NOT NULL,
+                                state TEXT NOT NULL, notes TEXT, attempts INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+   CREATE INDEX IF NOT EXISTS knowledge_items_state ON knowledge_items(state, kind, at);`,
 ];
 
 export interface UsageRow {

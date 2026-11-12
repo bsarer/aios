@@ -33,6 +33,10 @@ export const NOTE_CHARS = 240;
 export interface Note {
   text: string;
   source: KnowledgeSource;
+  /** K2: the day of the email, file or event the note came from (YYYY-MM-DD); none for lines the user typed. */
+  on?: string | undefined;
+  /** K2: a line the user typed (no source after it): never dropped or rewritten by AI OS. */
+  mine?: boolean | undefined;
 }
 
 export interface Knowledge {
@@ -59,7 +63,7 @@ export function cleanNote(s: string): string {
     .slice(0, NOTE_CHARS);
 }
 
-const SOURCE_TAIL = new RegExp(`\\s*\\((${KNOWLEDGE_SOURCES.join('|')})\\)\\s*$`);
+const SOURCE_TAIL = new RegExp(`\\s*\\((${KNOWLEDGE_SOURCES.join('|')})(?:,\\s*(\\d{4}-\\d{2}-\\d{2}))?\\)\\s*$`);
 
 export function parseKnowledge(md: string): Knowledge {
   const k = emptyKnowledge();
@@ -85,7 +89,7 @@ export function parseKnowledge(md: string): Knowledge {
     const m = SOURCE_TAIL.exec(b[1]!);
     // A line the user typed without a source counts as chat: their own words.
     const text = cleanNote(m ? b[1]!.slice(0, m.index) : b[1]!);
-    if (text) k.sections[current].push({ text, source: (m?.[1] as KnowledgeSource | undefined) ?? 'chat' });
+    if (text) k.sections[current].push({ text, source: (m?.[1] as KnowledgeSource | undefined) ?? 'chat', ...(m?.[2] ? { on: m[2] } : {}), ...(m ? {} : { mine: true }) });
   }
   k.myNotes = mine.join('\n').trim();
   for (const s of ORDER) k.sections[s] = k.sections[s].slice(0, SECTION_LIMITS[s]);
@@ -102,7 +106,7 @@ export function renderKnowledge(k: Knowledge, userName: string): string {
   for (const s of ORDER) {
     out.push(`## ${SECTION_TITLES[s]}`, '');
     const notes = k.sections[s];
-    out.push(...(notes.length ? notes.map((n) => `- ${n.text} (${n.source})`) : ['- (nothing yet)']), '');
+    out.push(...(notes.length ? notes.map((n) => (n.mine ? `- ${n.text}` : `- ${n.text} (${n.source}${n.on ? `, ${n.on}` : ''})`)) : ['- (nothing yet)']), '');
   }
   out.push(`## ${MY_NOTES}`, '', k.myNotes, '');
   return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;

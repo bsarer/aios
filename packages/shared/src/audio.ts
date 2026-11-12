@@ -76,3 +76,79 @@ export const SpeechAnswer = z.union([
   z.strictObject({ ok: z.literal(false), message: z.string().max(500) }),
 ]);
 export type SpeechAnswer = z.infer<typeof SpeechAnswer>;
+
+/**
+ * V2 live words: splits the microphone into pieces at pauses, so each piece can be turned into
+ * text while the user keeps talking. Speech is told from silence by loudness against a running
+ * noise floor; a piece ends after `pauseMs` of quiet following at least `minSpeechMs` of speech,
+ * or at `maxSeconds`. Quiet before any speech is dropped except a short lead-in, so silence alone
+ * never reaches the speech model (Whisper invents words for silence).
+ */
+export class SpeechSegmenter {
+  private buf: Float32Array[] = [];
+  private len = 0;
+  private speech = 0;
+  private quiet = 0;
+  private floor = 0.005;
+  private readonly pause: number;
+  private readonly minSpeech: number;
+  private readonly max: number;
+  private readonly pad: number;
+
+  constructor(o: { sampleRate?: number; pauseMs?: number; minSpeechMs?: number; maxSeconds?: number; padMs?: number } = {}) {
+    const rate = o.sampleRate ?? SPEECH_SAMPLE_RATE;
+    this.pause = Math.round(((o.pauseMs ?? 600) * rate) / 1000);
+    this.minSpeech = Math.round(((o.minSpeechMs ?? 200) * rate) / 1000);
+    this.max = Math.round((o.maxSeconds ?? 25) * rate);
+    this.pad = Math.round(((o.padMs ?? 300) * rate) / 1000);
+  }
+
+  /** Adds a block of samples; returns a finished piece when this block ends one. */
+  push(chunk: Float32Array): Float32Array | null {
+    let sum = 0;
+    for (const s of chunk) sum += s * s;
+    const rms = Math.sqrt(sum / Math.max(1, chunk.length));
+    if (rms > Math.max(0.01, this.floor * 3)) {
+      this.speech += chunk.length;
+      this.quiet = 0;
+    } else {
+      this.quiet += chunk.length;
+      this.floor = 0.9 * this.floor + 0.1 * rms;
+    }
+    this.buf.push(chunk);
+    this.len += chunk.length;
+    if (this.speech === 0) {
+      // Nothing said yet: keep only a short lead-in.
+      while (this.buf.length > 1 && this.len - this.buf[0]!.length >= this.pad) this.len -= this.buf.shift()!.length;
+      this.quiet = 0;
+      return null;
+    }
+    if ((this.speech >= this.minSpeech && this.quiet >= this.pause) || this.len >= this.max) return this.flush();
+    return null;
+  }
+
+  /** The open piece so far, when it holds speech. */
+  current(): Float32Array | null {
+    return this.speech >= this.minSpeech ? concat(this.buf, this.len) : null;
+  }
+
+  /** Ends the open piece: returns it if it holds speech, and starts over. */
+  flush(): Float32Array | null {
+    const out = this.current();
+    this.buf = [];
+    this.len = 0;
+    this.speech = 0;
+    this.quiet = 0;
+    return out;
+  }
+}
+
+function concat(parts: Float32Array[], len: number): Float32Array {
+  const out = new Float32Array(len);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}

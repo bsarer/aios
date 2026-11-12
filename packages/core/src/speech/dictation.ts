@@ -43,12 +43,13 @@ export class Dictation {
       this.o.audit.append({ kind: 'speech', event: 'rejected', reason: 'too_long', seconds });
       return { ok: false, message: `That recording was longer than ${this.o.maxSeconds} seconds.` };
     }
-    if (wav.seconds < SHORTEST_SECONDS) return { ok: false, message: "I didn't catch anything. Hold on a moment longer and try again." };
+    // The chat sends pieces as the user talks; one too short to hold words simply has none.
+    if (wav.seconds < SHORTEST_SECONDS) return { ok: true, text: '' };
     const started = Date.now();
     try {
       const text = await this.o.model.transcribe(bytes, signal);
       this.o.audit.append({ kind: 'speech', event: 'transcribed', seconds, chars: text.length, latencyMs: Date.now() - started });
-      return text ? { ok: true, text } : { ok: false, message: "I didn't hear any words. Try again a little closer to the microphone." };
+      return { ok: true, text };
     } catch (err) {
       const kind = err instanceof ModelError ? err.kind : 'network';
       this.o.audit.append({ kind: 'speech', event: 'error', seconds, errorKind: kind });

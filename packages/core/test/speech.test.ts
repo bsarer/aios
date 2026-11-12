@@ -55,8 +55,8 @@ const tmpAudit = () => {
 const lines = (path: string) => readFileSync(path, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
 
 describe('[models.speech] config', () => {
-  it('defaults to whisper-server on 127.0.0.1:8080, English, 60 seconds', () => {
-    expect(speech).toEqual({ baseUrl: 'http://127.0.0.1:8080', language: 'en', maxSeconds: 60, timeoutMs: 60_000 });
+  it('defaults to whisper-server on 127.0.0.1:8178 (8080 is often taken), English, 60 seconds', () => {
+    expect(speech).toEqual({ baseUrl: 'http://127.0.0.1:8178', language: 'en', maxSeconds: 60, timeoutMs: 60_000 });
   });
 
   it('only accepts an address on this computer, since it hears your voice', () => {
@@ -87,7 +87,7 @@ describe('ModelClient.transcribe', () => {
     const wav = seconds(1);
     expect(await client(w.fetch).transcribe(wav)).toBe('Remind me to call Sara at five.');
     expect(w.calls).toHaveLength(1);
-    expect(w.calls[0]!.url).toBe('http://127.0.0.1:8080/inference');
+    expect(w.calls[0]!.url).toBe('http://127.0.0.1:8178/inference');
     const f = w.calls[0]!.form;
     expect(f.get('response_format')).toBe('json');
     expect(f.get('temperature')).toBe('0.0');
@@ -145,12 +145,12 @@ describe('Dictation', () => {
     expect(called).toBe(0);
   });
 
-  it('rejects recordings longer than maxSeconds, and says so for ones too short to hold words', async () => {
+  it('rejects recordings longer than maxSeconds, and answers no words for ones too short to hold any', async () => {
     const { audit } = tmpAudit();
     let called = 0;
     const d = new Dictation({ model: { transcribe: async () => (called++, 'x') }, audit, maxSeconds: 5 });
     expect(await d.transcribe(seconds(7))).toEqual({ ok: false, message: 'That recording was longer than 5 seconds.' });
-    expect(await d.transcribe(seconds(0.1))).toMatchObject({ ok: false });
+    expect(await d.transcribe(seconds(0.1))).toEqual({ ok: true, text: '' });
     expect(called).toBe(0);
   });
 
@@ -164,7 +164,7 @@ describe('Dictation', () => {
     expect(await new Dictation({ model: failing('network'), audit, maxSeconds: 60 }).transcribe(seconds(1))).toEqual({ ok: false, message: expect.stringContaining('whisper-server') });
     expect(await new Dictation({ model: failing('paused'), audit, maxSeconds: 60 }).transcribe(seconds(1))).toEqual({ ok: false, message: expect.stringContaining('/resume') });
     expect(lines(path).map((l) => l.errorKind)).toEqual(['network', 'paused']);
-    expect(await new Dictation({ model: words(''), audit, maxSeconds: 60 }).transcribe(seconds(1))).toMatchObject({ ok: false });
+    expect(await new Dictation({ model: words(''), audit, maxSeconds: 60 }).transcribe(seconds(1))).toEqual({ ok: true, text: '' });
   });
 });
 

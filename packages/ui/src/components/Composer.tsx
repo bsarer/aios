@@ -30,6 +30,16 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
     },
   });
   const voiceBusy = voice.state !== 'idle';
+  // Esc puts the box back as it was before listening started.
+  const beforeVoice = useRef('');
+  const toggleVoice = () => {
+    if (voice.state === 'idle') beforeVoice.current = text;
+    voice.toggle();
+  };
+  const cancelVoice = () => {
+    voice.cancel();
+    setText(beforeVoice.current);
+  };
 
   // Kiosk: the input should always have focus.
   useEffect(() => {
@@ -44,18 +54,18 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && voiceBusy) {
         e.preventDefault();
-        voice.cancel();
+        cancelVoice();
       } else if (e.key === 'Escape' && working) {
         e.preventDefault();
         onStop();
       } else if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'm' || e.key === 'M') && voiceMaxSeconds !== null && !disabled) {
         e.preventDefault();
-        voice.toggle();
+        toggleVoice();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [working, onStop, voiceBusy, voice, voiceMaxSeconds, disabled]);
+  }, [working, onStop, voiceBusy, voice, voiceMaxSeconds, disabled, text]);
 
   useEffect(() => {
     const el = ref.current;
@@ -81,6 +91,7 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          readOnly={voiceBusy}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -98,7 +109,7 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
             type="button"
             data-testid="mic"
             data-state={voice.state}
-            onClick={voice.toggle}
+            onClick={toggleVoice}
             disabled={disabled || voice.state === 'starting' || voice.state === 'working'}
             title={voice.state === 'listening' ? 'Stop and turn it into text (Ctrl+M)' : 'Speak instead of typing (Ctrl+M)'}
             aria-label={voice.state === 'listening' ? 'Stop listening' : 'Voice'}
@@ -119,6 +130,12 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
           </button>
         )}
       </div>
+      {/* V2: the words of the piece still being spoken, until it ends and joins the box. */}
+      {voice.interim && (
+        <div data-testid="voice-interim" aria-live="polite" className="px-1 pt-1 text-[15px] italic" style={{ color: 'var(--muted)' }}>
+          {voice.interim.replace(/[.…\s]+$/, '')}…
+        </div>
+      )}
       {voice.error ? (
         <div data-testid="voice-error" role="status" className="px-1 pt-1 text-xs" style={{ color: 'var(--danger)' }}>
           {voice.error}

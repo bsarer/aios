@@ -29,7 +29,7 @@ import { makeDocFixture } from '../../fixtures/documents.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
-import { type WavInfo, readWav } from '@aios/shared';
+import { type WavInfo, encodeWav, readWav } from '@aios/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
@@ -602,8 +602,10 @@ async function main(): Promise<void> {
   process.on('exit', () => {
     if (core?.pid && core.exitCode === null) process.kill(-core.pid, 'SIGTERM');
   });
-  // V2: Chromium's fake microphone (a tone), allowed for the chat page only.
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium', args: ['--use-fake-device-for-media-stream'] });
+  // V2: Chromium's fake microphone, allowed for the chat page only, playing 3 s of tone then 1 s of quiet, looped.
+  const fakeMic = join(tmp, 'fake-mic.wav');
+  writeFileSync(fakeMic, encodeWav(Float32Array.from({ length: 4 * 48_000 }, (_, i) => (i < 3 * 48_000 ? 0.3 * Math.sin((2 * Math.PI * 220 * i) / 48_000) : 0)), 48_000));
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium', args: ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${fakeMic}`] });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.context().grantPermissions(['microphone'], { origin: `http://127.0.0.1:${port}` });
@@ -1061,33 +1063,40 @@ async function main(): Promise<void> {
     const knowledgeFile = join(tmp, 'config', 'aios', 'knowledge', 'about-me.md');
     check('/knowledge update writes and shows the knowledge base', await waitFor(async () => existsSync(knowledgeFile) && (await page.locator('[data-kind="notice"]').last().innerText()).includes('# About John'), 10_000));
     check('the knowledge base has its sections and the user\'s own', existsSync(knowledgeFile) && /## Upcoming[^]*## Recent activity[^]*## My notes/.test(readFileSync(knowledgeFile, 'utf8')));
-    // V2: the microphone puts what was said in the text box, after what was typed, and sends nothing.
+    // V2: the microphone shows the words while the user talks, after what was typed, and sends nothing.
+    // The fake microphone plays fake-mic.wav: 3 seconds of tone (talking), 1 second of quiet (a pause), looped.
     const mic = page.getByTestId('mic');
-    check('the microphone button is on with [models.speech]', await waitFor(async () => (await mic.count()) === 1 && (await mic.isEnabled())));
     const userMessages = await page.locator('[data-kind="user"]').count();
+    const sentence = 'Remind me to buy milk tomorrow.';
+    check('the microphone button is on with [models.speech]', await waitFor(async () => (await mic.count()) === 1 && (await mic.isEnabled())));
     await input.fill('Note:');
     await mic.click();
     check('the microphone listens', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
     check('it says it is listening', (await page.getByTestId('voice-status').innerText()).includes('Listening'));
+    check('words show in grey while still talking', await waitFor(async () => (await page.getByTestId('voice-interim').count()) === 1 && (await page.getByTestId('voice-interim').innerText()).includes(sentence.replace(/\.$/, '')), 8000));
     await shot(page, 'v2-listening');
-    await sleep(1200);
+    check('a finished piece joins the text box at a pause, while still listening', await waitFor(async () => (await input.inputValue()).startsWith(`Note: ${sentence}`) && (await mic.getAttribute('data-state')) === 'listening', 8000), await input.inputValue());
     await mic.click();
-    check('the words land in the text box, after the typed text', await waitFor(async () => (await input.inputValue()) === 'Note: Remind me to buy milk tomorrow.'));
-    check('the recording reached the speech model as 16 kHz mono 16-bit WAV, about a second long', heard.length === 1 && heard[0]?.sampleRate === 16_000 && heard[0].channels === 1 && heard[0].bitsPerSample === 16 && heard[0].seconds > 0.5 && heard[0].seconds < 3, JSON.stringify(heard));
+    check('stopping finishes the last piece', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle' && (await page.getByTestId('voice-interim').count()) === 0));
+    check('only the spoken words were added, after the typed text', new RegExp(`^Note: (${sentence.replace(/\./g, '\\.')} ?)+$`).test(await input.inputValue()), await input.inputValue());
+    check('every piece reached the speech model as 16 kHz mono 16-bit WAV of speech, never silence alone', heard.length >= 2 && heard.every((h) => h?.sampleRate === 16_000 && h.channels === 1 && h.bitsPerSample === 16 && h.seconds > 0.4 && h.seconds < 8), JSON.stringify(heard));
     await sleep(500);
     check('nothing was sent by voice', (await page.locator('[data-kind="user"]').count()) === userMessages && (await agentState.innerText()).includes('idle'));
     await shot(page, 'v2-words');
+    const kept = await input.inputValue();
     await mic.click();
-    check('Ctrl+M or the button listens again', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    check('the button listens again', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    await sleep(4500);
     await page.keyboard.press('Escape');
-    check('Esc cancels listening and keeps the text box as it was', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle') && (await input.inputValue()) === 'Note: Remind me to buy milk tomorrow.');
-    await sleep(300);
-    check('a cancelled recording is never sent to the speech model', heard.length === 1);
+    check('Esc cancels and puts the text box back as it was', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle') && (await input.inputValue()) === kept, await input.inputValue());
+    const afterCancel = heard.length;
+    await sleep(2000);
+    check('nothing more goes to the speech model after Esc', heard.length === afterCancel && (await input.inputValue()) === kept);
     await page.keyboard.press('Control+m');
     check('Ctrl+M starts listening', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
-    await sleep(800);
+    await sleep(2000);
     await page.keyboard.press('Control+m');
-    check('Ctrl+M stops and adds the words', await waitFor(async () => (await input.inputValue()).endsWith('tomorrow. Remind me to buy milk tomorrow.')));
+    check('Ctrl+M stops and adds the words', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle' && (await input.inputValue()).length > kept.length));
     await input.fill('');
 
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.

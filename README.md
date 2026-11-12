@@ -165,7 +165,7 @@ Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links
 
 ## Voice
 
-Click the 🎙 button next to the message box, or press **Ctrl+M**, and talk (V2). The button turns red while it listens. Click it or press Ctrl+M again when you're done, and what you said appears in the message box, after anything you'd already typed. Read it, fix it if needed, and press Enter: voice never sends anything by itself. **Esc** cancels and throws the recording away. A recording stops by itself after 60 seconds.
+Click the 🎙 button next to the message box, or press **Ctrl+M**, and talk (V2). The button turns red while it listens. Your words appear as you talk: the sentence you're saying shows in grey under the box, and each time you pause it joins the message box, after anything you'd already typed. Click 🎙 or press Ctrl+M again when you're done. Read it, fix it if needed, and press Enter: voice never sends anything by itself. **Esc** cancels and puts the box back as it was. A recording stops by itself after 60 seconds. The words trail your voice by a second or two, more on a slow computer.
 
 The speech is turned into text by [whisper.cpp](https://github.com/ggml-org/whisper.cpp) running on this computer, so your voice never leaves it and it costs nothing. The audio is kept in memory only until the words come back; it is never saved, and the audit log records only that a recording happened and how long it was. `/pause` turns the microphone off too.
 
@@ -183,7 +183,7 @@ Set it up:
    [Unit]
    Description=whisper.cpp server for AI OS voice
    [Service]
-   ExecStart=%h/.local/src/whisper.cpp/build/bin/whisper-server -m %h/.local/src/whisper.cpp/models/ggml-base.en.bin --host 127.0.0.1 --port 8080
+   ExecStart=%h/.local/src/whisper.cpp/build/bin/whisper-server -m %h/.local/src/whisper.cpp/models/ggml-base.en.bin --host 127.0.0.1 --port 8178
    Restart=on-failure
    [Install]
    WantedBy=default.target
@@ -192,7 +192,7 @@ Set it up:
 3. Add to `~/.config/aios/config.toml` and restart AI OS (`pnpm kiosk:restart`):
    ```toml
    [models.speech]
-   # baseUrl = "http://127.0.0.1:8080"   (the default; only this computer's addresses are accepted)
+   # baseUrl = "http://127.0.0.1:8178"   (the default, matching the service above; only this computer's addresses are accepted)
    # language = "en"                      (or "tr", or "auto" to detect it each time; use a model without ".en" for other languages)
    # maxSeconds = 60
    ```

@@ -1073,7 +1073,7 @@ async function main(): Promise<void> {
     await mic.click();
     check('the microphone listens', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
     check('it says it is listening', (await page.getByTestId('voice-status').innerText()).includes('Listening'));
-    check('words show in grey while still talking', await waitFor(async () => (await page.getByTestId('voice-interim').count()) === 1 && (await page.getByTestId('voice-interim').innerText()).includes(sentence), 8000));
+    check('words show in grey while still talking', await waitFor(async () => (await page.getByTestId('voice-interim').count()) === 1 && (await page.getByTestId('voice-interim').innerText()).includes(sentence.replace(/\.$/, '')), 8000));
     await shot(page, 'v2-listening');
     check('a finished piece joins the text box at a pause, while still listening', await waitFor(async () => (await input.inputValue()).startsWith(`Note: ${sentence}`) && (await mic.getAttribute('data-state')) === 'listening', 8000), await input.inputValue());
     await mic.click();

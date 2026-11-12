@@ -62,6 +62,7 @@ import { ModelClient, ModelError } from './model.js';
 import { dataDir } from './paths.js';
 import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
+import { Dictation } from './speech/dictation.js';
 import { Shell } from './shell.js';
 import { readBattery, readWifi } from './status/system.js';
 import { SystemActions } from './system/actions.js';
@@ -507,6 +508,8 @@ async function main(): Promise<void> {
       })
     : undefined;
   if (knowledgeFile) tools.register(knowledgeReadTool({ file: knowledgeFile }));
+  // V2: the chat's microphone button, when [models.speech] is set.
+  const dictation = config.models.speech ? new Dictation({ model, audit, maxSeconds: config.models.speech.maxSeconds }) : undefined;
   const themePath = omarchyThemePath();
   shell = new Shell({
     store,
@@ -530,6 +533,7 @@ async function main(): Promise<void> {
     attachments: attachmentFiles,
     ...(documentFiles ? { documents: documentFiles } : {}),
     chatWindow,
+    ...(dictation ? { voice: { maxSeconds: dictation.maxSeconds } } : {}),
     ...(review ? { cleanup: review } : {}),
     ...(todos ? { todos } : {}),
     ...(brief ? { brief } : {}),
@@ -581,6 +585,7 @@ async function main(): Promise<void> {
     attachments: attachmentFiles,
     ...(documentFiles ? { documents: documentFiles } : {}),
     ...(appLink ? { appLink } : {}),
+    ...(dictation ? { speech: dictation } : {}),
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();

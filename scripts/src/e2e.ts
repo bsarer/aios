@@ -8,7 +8,8 @@
  * live status values, memory cards and, with the GreenMail stack up, new-mail
  * notifications, the reply flow and opening attachments; C1: the calendar against a pretend
  * Google Calendar (fixtures/calendar.ts); D1: Word and Excel files through pretend WordCraft and
- * GridCraft tools (fixtures/documents.ts). Never touches real accounts or keys.
+ * GridCraft tools (fixtures/documents.ts); V2: the microphone button, with Chromium's fake microphone
+ * and a pretend whisper.cpp server. Never touches real accounts or keys.
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
@@ -28,6 +29,7 @@ import { makeDocFixture } from '../../fixtures/documents.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
+import { type WavInfo, readWav } from '@aios/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
@@ -405,7 +407,21 @@ async function main(): Promise<void> {
   if (shots) mkdirSync(shots, { recursive: true });
   // S4: a built app trying the network would hit /probe; its policy must stop it first.
   let probeHits = 0;
+  // V2: the pretend whisper.cpp server keeps the format of each recording it was sent.
+  const heard: (WavInfo | null)[] = [];
   const mock = createServer((req, res) => {
+    if (req.url === '/inference' && req.method === 'POST') {
+      void (async () => {
+        const parts: Buffer[] = [];
+        for await (const c of req) parts.push(c as Buffer);
+        const body = Buffer.concat(parts);
+        const at = body.indexOf('RIFF');
+        heard.push(at < 0 ? null : readWav(new Uint8Array(body.subarray(at))));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ text: ' Remind me to buy milk tomorrow.\n' }));
+      })();
+      return;
+    }
     if (req.url?.startsWith('/probe')) {
       probeHits++;
       res.writeHead(200, { 'access-control-allow-origin': '*', 'content-type': 'text/plain' });
@@ -544,6 +560,7 @@ async function main(): Promise<void> {
       `[assistant.monitor]\nenabled = false\n[assistant.review]\nenabled = false\nminFileMb = 1\n` +
       // T2: the brief is due from midnight here, so it comes at boot whatever time the test runs.
       `[brief]\nafter = "00:00"\n` +
+      `[models.speech]\nbaseUrl = "http://127.0.0.1:${mockPort}"\nmaxSeconds = 10\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -585,9 +602,11 @@ async function main(): Promise<void> {
   process.on('exit', () => {
     if (core?.pid && core.exitCode === null) process.kill(-core.pid, 'SIGTERM');
   });
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
+  // V2: Chromium's fake microphone (a tone), allowed for the chat page only.
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium', args: ['--use-fake-device-for-media-stream'] });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.context().grantPermissions(['microphone'], { origin: `http://127.0.0.1:${port}` });
     // Newer Chromium returns a Promise from scrollIntoView(); mimic it so effects that leak the return value fail here.
     await page.addInitScript(`{
       const orig = Element.prototype.scrollIntoView;
@@ -1042,6 +1061,35 @@ async function main(): Promise<void> {
     const knowledgeFile = join(tmp, 'config', 'aios', 'knowledge', 'about-me.md');
     check('/knowledge update writes and shows the knowledge base', await waitFor(async () => existsSync(knowledgeFile) && (await page.locator('[data-kind="notice"]').last().innerText()).includes('# About John'), 10_000));
     check('the knowledge base has its sections and the user\'s own', existsSync(knowledgeFile) && /## Upcoming[^]*## Recent activity[^]*## My notes/.test(readFileSync(knowledgeFile, 'utf8')));
+    // V2: the microphone puts what was said in the text box, after what was typed, and sends nothing.
+    const mic = page.getByTestId('mic');
+    check('the microphone button is on with [models.speech]', await waitFor(async () => (await mic.count()) === 1 && (await mic.isEnabled())));
+    const userMessages = await page.locator('[data-kind="user"]').count();
+    await input.fill('Note:');
+    await mic.click();
+    check('the microphone listens', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    check('it says it is listening', (await page.getByTestId('voice-status').innerText()).includes('Listening'));
+    await shot(page, 'v2-listening');
+    await sleep(1200);
+    await mic.click();
+    check('the words land in the text box, after the typed text', await waitFor(async () => (await input.inputValue()) === 'Note: Remind me to buy milk tomorrow.'));
+    check('the recording reached the speech model as 16 kHz mono 16-bit WAV, about a second long', heard.length === 1 && heard[0]?.sampleRate === 16_000 && heard[0].channels === 1 && heard[0].bitsPerSample === 16 && heard[0].seconds > 0.5 && heard[0].seconds < 3, JSON.stringify(heard));
+    await sleep(500);
+    check('nothing was sent by voice', (await page.locator('[data-kind="user"]').count()) === userMessages && (await agentState.innerText()).includes('idle'));
+    await shot(page, 'v2-words');
+    await mic.click();
+    check('Ctrl+M or the button listens again', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    await page.keyboard.press('Escape');
+    check('Esc cancels listening and keeps the text box as it was', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle') && (await input.inputValue()) === 'Note: Remind me to buy milk tomorrow.');
+    await sleep(300);
+    check('a cancelled recording is never sent to the speech model', heard.length === 1);
+    await page.keyboard.press('Control+m');
+    check('Ctrl+M starts listening', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    await sleep(800);
+    await page.keyboard.press('Control+m');
+    check('Ctrl+M stops and adds the words', await waitFor(async () => (await input.inputValue()).endsWith('tomorrow. Remind me to buy milk tomorrow.')));
+    await input.fill('');
+
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

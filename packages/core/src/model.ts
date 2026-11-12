@@ -9,8 +9,11 @@
  *
  * F3: also embeddings, from a local Ollama only (`embed`, native /api/embed). An embedding
  * call has no tools and returns only numbers.
+ *
+ * V2: also speech to text, from a local whisper.cpp server only (`transcribe`). It has no tools
+ * and returns only the words it heard, which go into the chat's text box for the user to send.
  */
-import type { CloudModelRole, EmbeddingsConfig, LocalModelConfig, ModelRole, ModelRoleConfig, SecretRef } from '@aios/shared';
+import type { CloudModelRole, EmbeddingsConfig, LocalModelConfig, ModelRole, ModelRoleConfig, SecretRef, SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 import type { Secret } from './secrets/keyring.js';
 
@@ -145,7 +148,7 @@ export class ModelError extends Error {
 type RoleConfig = ModelRoleConfig | LocalModelConfig;
 
 export interface ModelClientOptions {
-  models: Record<CloudModelRole, ModelRoleConfig> & { local?: LocalModelConfig | undefined; embeddings?: EmbeddingsConfig | undefined };
+  models: Record<CloudModelRole, ModelRoleConfig> & { local?: LocalModelConfig | undefined; embeddings?: EmbeddingsConfig | undefined; speech?: SpeechConfig | undefined };
   resolveKey: (ref: SecretRef) => Promise<Secret>;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -180,6 +183,12 @@ const WireError = z.looseObject({
   message: z.string().optional(),
   metadata: z.looseObject({ error_type: z.string().optional() }).optional(),
 });
+
+/** whisper.cpp server's /inference answer with response_format=json (examples/server/server.cpp, 2026-11-10). */
+const WireTranscript = z.looseObject({ text: z.string().max(50_000) });
+
+/** Whisper's markers for what isn't speech, e.g. [BLANK_AUDIO], [Music], (wind blowing). */
+const NON_SPEECH = /\[[^\]]{1,40}\]|\((?:[a-z]+ ?){1,4}\)/gi;
 
 /** Ollama's /api/embed answer (docs.ollama.com/api/embed, 2026-11-10): one vector per input. */
 const WireEmbedResponse = z.looseObject({
@@ -343,6 +352,38 @@ export class ModelClient {
         return parsed.data.embeddings.map((v) => unit(Float32Array.from(v)));
       } catch (err) {
         const e = err instanceof SyntaxError ? new ModelError('malformed_output', 'embeddings answer was not JSON') : toModelError(err, signal);
+        if (!e.retryable || attempt >= this.maxAttempts) throw e;
+        await this.sleep(backoff(attempt, e.retryAfterMs));
+      }
+    }
+  }
+
+  /**
+   * V2: the words in a WAV recording, from the local whisper.cpp server. Pause stops it like the
+   * other local calls. Returns '' when nothing was said.
+   */
+  async transcribe(wav: Uint8Array, signal?: AbortSignal): Promise<string> {
+    const cfg = this.opts.models.speech;
+    if (!cfg) throw new ModelError('not_configured', 'no [models.speech] in the config');
+    this.checkGate('local');
+    for (let attempt = 1; ; attempt++) {
+      const t = AbortSignal.timeout(cfg.timeoutMs);
+      try {
+        const form = new FormData();
+        form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav');
+        form.append('response_format', 'json');
+        form.append('temperature', '0.0');
+        form.append('language', cfg.language);
+        const res = await this.fetch(`${cfg.baseUrl.replace(/\/$/, '')}/inference`, { method: 'POST', body: form, signal: signal ? AbortSignal.any([signal, t]) : t });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw httpError(res.status, text, res.headers.get('retry-after'));
+        }
+        const parsed = WireTranscript.safeParse(JSON.parse(await res.text()));
+        if (!parsed.success) throw new ModelError('malformed_output', 'speech answer had no text');
+        return parsed.data.text.replace(NON_SPEECH, ' ').replace(/\s+/g, ' ').trim();
+      } catch (err) {
+        const e = err instanceof SyntaxError ? new ModelError('malformed_output', 'speech answer was not JSON') : toModelError(err, signal);
         if (!e.retryable || attempt >= this.maxAttempts) throw e;
         await this.sleep(backoff(attempt, e.retryAfterMs));
       }

@@ -12,6 +12,7 @@ import type { DocumentFiles } from './docs/viewer.js';
 import type { AppLink } from './apps/link.js';
 import type { AttachmentFiles } from './mail/attachments.js';
 import type { Shell } from './shell.js';
+import { type Dictation, speechBodyLimit } from './speech/dictation.js';
 
 export interface ServerOptions {
   port: number;
@@ -25,6 +26,8 @@ export interface ServerOptions {
   documents?: Pick<DocumentFiles, 'file'>;
   /** Built apps' Change buttons (S5). Without it, /app-link answers 404. */
   appLink?: Pick<AppLink, 'change' | 'status'>;
+  /** V2: the chat's microphone button. Without it, /speech answers 404. */
+  speech?: Pick<Dictation, 'transcribe' | 'maxSeconds'>;
 }
 
 /**
@@ -124,6 +127,24 @@ export async function createServer(shell: Shell, o: ServerOptions): Promise<Fast
     if ('error' in f) return reply.code(422).type('text/plain').send(f.error);
     if (f.kind === 'pdf') return reply.code(200).type('application/pdf').send(f.bytes);
     return reply.code(200).type('application/json; charset=utf-8').send(JSON.stringify(f.view));
+  });
+
+  // V2: a recording from the chat's microphone button, as audio/wav. Only the chat page itself may
+  // post one (its Origin, and same-origin fetch metadata). The answer is the words, for the text box.
+  app.addContentTypeParser('audio/wav', { parseAs: 'buffer', bodyLimit: speechBodyLimit(o.speech?.maxSeconds ?? 0) }, (_req, body, done) => done(null, body));
+  app.post<{ Body: Buffer }>('/speech', async (req, reply) => {
+    reply.headers({ 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' }).type('application/json; charset=utf-8');
+    const site = req.headers['sec-fetch-site'];
+    if (!origins.has(req.headers.origin ?? '') || (site !== undefined && site !== 'same-origin')) return reply.code(403).send(JSON.stringify({ ok: false, message: 'forbidden' }));
+    if (!o.speech) return reply.code(404).send(JSON.stringify({ ok: false, message: 'Voice is off. Add [models.speech] to the config to turn it on.' }));
+    if (!Buffer.isBuffer(req.body)) return reply.code(415).send(JSON.stringify({ ok: false, message: 'expected audio/wav' }));
+    // The response closing before it was written means the chat cancelled (Esc) or went away.
+    const ac = new AbortController();
+    reply.raw.once('close', () => {
+      if (!reply.raw.writableFinished) ac.abort();
+    });
+    const result = await o.speech.transcribe(new Uint8Array(req.body.buffer, req.body.byteOffset, req.body.byteLength), ac.signal);
+    return reply.code(200).send(JSON.stringify(result));
   });
 
   // S5: a built app's Change button. Only file:// pages (origin "null") are answered, and each

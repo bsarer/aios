@@ -163,6 +163,45 @@ Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[br
 
 Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
 
+## Voice
+
+Click the 🎙 button next to the message box, or press **Ctrl+M**, and talk (V2). The button turns red while it listens. Click it or press Ctrl+M again when you're done, and what you said appears in the message box, after anything you'd already typed. Read it, fix it if needed, and press Enter: voice never sends anything by itself. **Esc** cancels and throws the recording away. A recording stops by itself after 60 seconds.
+
+The speech is turned into text by [whisper.cpp](https://github.com/ggml-org/whisper.cpp) running on this computer, so your voice never leaves it and it costs nothing. The audio is kept in memory only until the words come back; it is never saved, and the audit log records only that a recording happened and how long it was. `/pause` turns the microphone off too.
+
+Set it up:
+
+1. Build whisper.cpp's server (needs `cmake` and a C++ compiler: `sudo pacman -S --needed cmake base-devel`):
+   ```sh
+   git clone https://github.com/ggml-org/whisper.cpp ~/.local/src/whisper.cpp
+   cd ~/.local/src/whisper.cpp
+   cmake -B build && cmake --build build -j --config Release
+   sh ./models/download-ggml-model.sh base.en      # about 150 MB; "small.en" is slower but more accurate, "base" for other languages
+   ```
+2. Run it on this computer only, and keep it running with a user service, `~/.config/systemd/user/whisper-server.service`:
+   ```ini
+   [Unit]
+   Description=whisper.cpp server for AI OS voice
+   [Service]
+   ExecStart=%h/.local/src/whisper.cpp/build/bin/whisper-server -m %h/.local/src/whisper.cpp/models/ggml-base.en.bin --host 127.0.0.1 --port 8080
+   Restart=on-failure
+   [Install]
+   WantedBy=default.target
+   ```
+   then `systemctl --user daemon-reload && systemctl --user enable --now whisper-server`. No `--convert` or ffmpeg is needed: the chat sends 16 kHz WAV.
+3. Add to `~/.config/aios/config.toml` and restart AI OS (`pnpm kiosk:restart`):
+   ```toml
+   [models.speech]
+   # baseUrl = "http://127.0.0.1:8080"   (the default; only this computer's addresses are accepted)
+   # language = "en"                      (or "tr", or "auto" to detect it each time; use a model without ".en" for other languages)
+   # maxSeconds = 60
+   ```
+4. The first time you click 🎙, Chromium asks whether AI OS may use the microphone. Choose **Allow**; it remembers, for AI OS's own window only. If you chose Block, open the window's menu (⋮), then **Site settings**, and allow the microphone there.
+
+Without `[models.speech]` the button stays greyed out. If the server isn't running, the chat says so under the message box. If you hear nothing back, check the microphone isn't muted ("unmute the microphone").
+
+Omarchy's own dictation (Voxtype, Super+Ctrl+X) also works in the message box; the 🎙 button is AI OS's own, works without it, and never types into another window.
+
 ## System assistant (local model)
 
 A small model running on this computer through [Ollama](https://ollama.com) keeps an eye on the machine in the background (L1). Nothing it sees leaves the computer, and it costs nothing, so the daily cost cap doesn't apply to it (`/pause` still does).
@@ -260,6 +299,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in V2
+
+None in the code. whisper.cpp's `whisper-server` is a separate program (MIT licence, actively maintained by ggml-org), reached over its own `/inference` endpoint on 127.0.0.1 through the model adapter; checked against the repository's examples/server on 2026-11-10. The browser records with the Web Audio API and writes the WAV itself.
 
 ## Dependencies added in L1
 

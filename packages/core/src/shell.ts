@@ -61,6 +61,8 @@ export interface ShellOptions {
   documents?: Pick<DocumentFiles, 'edit'>;
   /** S7: where apps open now, for the status strip's hint. Without it, the hint is left out. */
   chatWindow?: { readonly appsAt: 'screen' | 'workspace' | null };
+  /** V2: the microphone button is on, with this longest recording. Without it, the button stays off. */
+  voice?: { maxSeconds: number };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
   openBuiltApp?: (actionId: string) => Promise<void>;
   /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
@@ -149,6 +151,7 @@ export class Shell {
       costCapUsd: this.o.costCapUsd,
       model: this.o.modelName,
       ...(this.o.chatWindow?.appsAt ? { appsAt: this.o.chatWindow.appsAt } : {}),
+      ...(this.o.voice ? { voice: { maxSeconds: this.o.voice.maxSeconds } } : {}),
     };
   }
 

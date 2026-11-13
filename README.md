@@ -4,7 +4,7 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS), L1 (the local system assistant on Ollama), M1 (sending files by email) and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) are merged. P1 (install.sh, `pnpm doctor`, backup and restore) is in review. Changes are listed in [CHANGELOG.md](CHANGELOG.md); to help, see [CONTRIBUTING.md](CONTRIBUTING.md).
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. D3 (the Edit button on documents) is in review. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review. F3 (finding files by describing them: whole text, meaning, a results card) is in review. P1 (install.sh, `pnpm doctor`, backup and restore) is in review. Changes are listed in [CHANGELOG.md](CHANGELOG.md); to help, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Install, upgrade and restore
 
@@ -127,6 +127,7 @@ The chat reads, summarizes and shows `.docx` and `.xlsx` files from your documen
 - **Ask about a document:** "summarize ~/Documents/report.docx", "what are the action items in the contract?", "top 3 products in sales.xlsx", "what's the total of column D?". Word text comes from `wordcraft-cli text`; cells come from `gridcraft-cli cat`, and totals, averages and counts from GridCraft's own formulas (`sheet_eval`), not from the model's arithmetic.
 - **See it:** "show me the report" posts a card; **Open** shows a Word file's pages (WordCraft turns it into a PDF) or a workbook's sheets as a table, full screen in the chat. "Open budget.xlsx in GridCraft" opens the app itself, which opens away from the chat like any other app.
 - **Change it (D2):** "move the lease date in report.docx to 30 November", "make the title bold", "add a Price column to sales.xlsx and sort by revenue", "make a new budget spreadsheet with these rows". The chat shows a card listing each change with the text before and after; nothing is saved until you click **Save as new file**, and the result goes next to the original as `report-edited.docx` (then `-edited-2`…). The original is never touched unless you say so in your own words ("…and overwrite the original"); then the card is red, says **Overwrite**, and the original is copied to `~/.local/share/aios/doc-backups` first. If the file changed after the card appeared, or the new name got taken, nothing is written and the card says why. Changes come from a fixed list (replace, delete, format, restyle and add text; set cells and formulas, format, insert or delete rows and columns, sort, chart, table, fill down) that code turns into the apps' own commands; nothing else can run. A workbook GridCraft might not save back perfectly (`gridcraft-cli check`) gets a warning on the card.
+- **Edit it yourself (D3):** every document card, and the viewer Open shows, has an **Edit** button. It opens the file in WordCraft or GridCraft on another screen or workspace, so the chat keeps its own. Save there as usual; the next **Open** in the chat shows the saved version. The click goes straight to AI OS, not through the model, and the file is checked again first, so a file that was moved out of your folders isn't opened. PDFs have no Edit button.
 - **Only your folders:** files must be real `.docx`/`.xlsx` files inside `[docs] roots` (default `~/Documents`): links that lead out, hidden files, other types and a renamed file that isn't really a document are refused.
 - **Documents are outside text:** files can come from anywhere, so their text, cells, sheet names and even file names reach the model like an email does, sanitized, wrapped in `<untrusted>` tags and hidden again from your next message on. Formulas may only use calculation functions, never ones that reach the network or other files. A change card that appears while a document is in view says so; with an email or calendar event in view, the chat can't propose changes at all.
 
@@ -134,7 +135,7 @@ The chat reads, summarizes and shows `.docx` and `.xlsx` files from your documen
 
 ## Files
 
-The chat looks after files in your folders (F1), by default `~/Documents` and `~/Downloads`.
+The chat looks after files in your folders (F1), by default `~/Documents`, `~/Downloads` and `~/Videos` (V1 added `~/Videos`).
 
 - **Look around:** "what's in Downloads", "find the lease PDF", "how big is report.pdf", "show me photo.png", "what does notes.txt say". PDFs, pictures and text files open in the chat's viewer; Word and Excel files use the document card.
 - **Change things:** "rename it to lease-2026.pdf", "copy the invoice to Documents/Taxes", "make a folder Taxes in Documents", "write a note called packing with passport and charger", "make a new budget spreadsheet in Documents/Home". Each shows a card; nothing changes until you click it. Nothing is ever replaced or deleted: a taken name, or a file that changed after the card appeared, stops the change and the card says why.
@@ -145,10 +146,77 @@ The chat looks after files in your folders (F1), by default `~/Documents` and `~
   - **What's in it:** each file's type, size, dates, pages or sheets, and title and author where the file has them, plus a one-line description and keywords. The index finds new and changed files within seconds.
   - **Descriptions:** written by the triage model, about $0.001 a file, at most 200 a day (the rest wait for the next day). They stop at your daily cost cap and while paused.
   - **Tags:** "tag it taxes 2026" adds your own tags (on a card).
+- **Find files by describing them (F3):** "the contract that mentions a 90-day notice period", "my car insurance". Search now also looks through each file's text (up to 100,000 characters: all of a Word or text file, the first 100 pages of a PDF, the first cells of up to 5 sheets), and, with a local embedding model, by meaning, so "car insurance" finds a file that says "auto policy".
+  - **Results card:** each search shows the best 3 files with their folder, why each matched (where your words were, a few words from the text, or "close in meaning") and an **Open** button that shows the file in the chat.
+  - **Search by meaning** needs Ollama and an embedding model on this computer: `ollama pull embeddinggemma`, then in `config.toml`:
+    ```toml
+    [models.embeddings]
+    model = "embeddinggemma"   # any Ollama embedding model; baseUrl defaults to http://127.0.0.1:11434
+    ```
+    Files are embedded in the background after their text is read; `/reindex` shows how many are searchable by meaning. Changing the model embeds everything again. Without it, or while Ollama is off, search works by words.
+  - **Settings:** `[files]` `fullTextChars` (100000; 0 turns whole-text search off), `meaning` (true), `meaningMinScore` (0.3: raise it if unrelated files show up, lower it if close ones are missed; it depends on the model).
+  - The first start after updating reads every file again to fill in their text; descriptions you already have are kept.
   - **`/reindex`:** reads everything again and says how far the index is.
   - **Safety:** descriptions are written from files that can come from anyone, so they reach the chat as outside text, and the model that writes them has no tools.
 
 Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`), `saveTo` (default `~/Downloads`), `index` (default true), `summaries` (default true; false keeps facts and tags only, with no model calls), `summariesPerDay` (default 200), `maxIndexedFiles` (default 20000).
+
+## To-dos, reminders and the morning brief
+
+- **To-dos (T1):** "add milk to my list", "remind me at 4 to call Ana", "what's on my list?", "done with the Ana call", "move the Ana reminder to 5". The list is a plain Markdown file you can edit yourself: `~/.config/aios/todos.md`.
+  - **A card repeats back what was saved**, with the time worked out by code ("Reminder: Today, Sat 7 Nov, 16:00"), so a wrong guess is easy to spot and fix with one message. Each item has **Done** (and **Not done**) and **Remove**; only the Remove button takes something off the list.
+  - **Reminders** come as a card in the chat and a desktop notification at their time. During quiet hours or while paused they wait and come afterwards. A reminder's **Later** button reminds you again in an hour.
+  - **Safety:** only your own messages can add, move or tick off items. While an email, invite or document is being read, the chat can't touch the list at all.
+- **Morning brief (T2):** the first time you use AI OS each day after 06:00 (outside quiet hours), one card lists urgent mail since the last brief, today's events and free time, and what is due today or overdue. `/brief` shows it any time. With the local model (below) it writes two friendly lines on top, without a cloud call; without it, the lines are written by code. It only shows things; nothing on it changes anything.
+
+Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
+
+## Videos
+
+"Play holiday.mp4 from Downloads" or "watch this: https://www.youtube.com/watch?v=…" plays the video in mpv, on another screen or the next workspace, like any app. Files must be videos in your allowed folders (`[files] roots`, which now include `~/Videos` by default; if your config lists its own `roots`, add `"~/Videos"` there); links must be `https://` links to a site by name (no IP addresses, local names or ports). YouTube and most sites need `yt-dlp` installed next to mpv. A link that comes from an email, invite or document never starts by itself: a card asks you first.
+
+`/play` plays your newest video without asking the model; `/play recording` plays the newest one with "recording" in its name, and `/play https://…` a link.
+
+Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
+
+## Voice
+
+Click the 🎙 button next to the message box, or press **Ctrl+M**, and talk (V2). The button turns red while it listens. Your words appear as you talk: the sentence you're saying shows in grey under the box, and each time you pause it joins the message box, after anything you'd already typed. Click 🎙 or press Ctrl+M again when you're done. Read it, fix it if needed, and press Enter: voice never sends anything by itself. **Esc** cancels and puts the box back as it was. A recording stops by itself after 60 seconds. The words trail your voice by a second or two, more on a slow computer.
+
+The speech is turned into text by [whisper.cpp](https://github.com/ggml-org/whisper.cpp) running on this computer, so your voice never leaves it and it costs nothing. The audio is kept in memory only until the words come back; it is never saved, and the audit log records only that a recording happened and how long it was. `/pause` turns the microphone off too.
+
+Set it up:
+
+1. Build whisper.cpp's server (needs `cmake` and a C++ compiler: `sudo pacman -S --needed cmake base-devel`):
+   ```sh
+   git clone https://github.com/ggml-org/whisper.cpp ~/.local/src/whisper.cpp
+   cd ~/.local/src/whisper.cpp
+   cmake -B build && cmake --build build -j --config Release
+   sh ./models/download-ggml-model.sh base.en      # about 150 MB; "small.en" is slower but more accurate, "base" for other languages
+   ```
+2. Run it on this computer only, and keep it running with a user service, `~/.config/systemd/user/whisper-server.service`:
+   ```ini
+   [Unit]
+   Description=whisper.cpp server for AI OS voice
+   [Service]
+   ExecStart=%h/.local/src/whisper.cpp/build/bin/whisper-server -m %h/.local/src/whisper.cpp/models/ggml-base.en.bin --host 127.0.0.1 --port 8178
+   Restart=on-failure
+   [Install]
+   WantedBy=default.target
+   ```
+   then `systemctl --user daemon-reload && systemctl --user enable --now whisper-server`. No `--convert` or ffmpeg is needed: the chat sends 16 kHz WAV.
+3. Add to `~/.config/aios/config.toml` and restart AI OS (`pnpm kiosk:restart`):
+   ```toml
+   [models.speech]
+   # baseUrl = "http://127.0.0.1:8178"   (the default, matching the service above; only this computer's addresses are accepted)
+   # language = "en"                      (or "tr", or "auto" to detect it each time; use a model without ".en" for other languages)
+   # maxSeconds = 60
+   ```
+4. The first time you click 🎙, Chromium asks whether AI OS may use the microphone. Choose **Allow**; it remembers, for AI OS's own window only. If you chose Block, open the window's menu (⋮), then **Site settings**, and allow the microphone there.
+
+Without `[models.speech]` the button stays greyed out. If the server isn't running, the chat says so under the message box. If you hear nothing back, check the microphone isn't muted ("unmute the microphone").
+
+Omarchy's own dictation (Voxtype, Super+Ctrl+X) also works in the message box; the 🎙 button is AI OS's own, works without it, and never types into another window.
 
 ## System assistant (local model)
 
@@ -248,9 +316,17 @@ fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2
 evals             model bake-off: tasks, runner, report
 ```
 
+## Dependencies added in V2
+
+None in the code. whisper.cpp's `whisper-server` is a separate program (MIT licence, actively maintained by ggml-org), reached over its own `/inference` endpoint on 127.0.0.1 through the model adapter; checked against the repository's examples/server on 2026-11-10. The browser records with the Web Audio API and writes the WAV itself.
+
 ## Dependencies added in L1
 
 None in the code. Ollama is a separate program (MIT licence, actively maintained), reached over its OpenAI-compatible API on 127.0.0.1 through the same model adapter; checked against docs.ollama.com on 2026-11-01. The Trash follows the freedesktop.org Trash specification with Node's own file functions.
+
+## Dependencies added in F3
+
+None. Whole-text search uses SQLite's FTS5; search by meaning calls Ollama's own `/api/embed` (a separate program, MIT licence, actively maintained) on 127.0.0.1 through the model adapter, checked against docs.ollama.com on 2026-11-10. Vectors are compared in plain TypeScript.
 
 ## Dependencies added in F2
 

@@ -1,5 +1,6 @@
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
+import { WIDGET_KINDS, WidgetKind } from './protocol.js';
 import { MONITOR_NAME } from './window.js';
 
 /**
@@ -60,6 +61,46 @@ export const LocalModelConfig = ModelRoleConfig.extend({
   structuredOutput: z.enum(['json_schema', 'json_object']).default('json_object'),
 });
 export type LocalModelConfig = z.infer<typeof LocalModelConfig>;
+
+/**
+ * F3: an embedding model on this computer for finding files by meaning, through Ollama's native
+ * `POST /api/embed` (http://127.0.0.1:11434; returns L2-normalised vectors; checked against
+ * docs.ollama.com on 2026-11-10). It reads file text, so like [models.local] it must be on this
+ * machine: only loopback addresses are accepted. The model name is config, e.g. "embeddinggemma".
+ */
+export const EmbeddingsConfig = z.strictObject({
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    .default('http://127.0.0.1:11434')
+    .refine((u) => LOOPBACK_HOSTS.has(new URL(u).hostname), 'the embedding model must be on this computer (127.0.0.1, localhost or ::1)'),
+  model: z.string().min(1).max(200),
+  timeoutMs: z.int().positive().default(60_000),
+  /** Texts per call while indexing. */
+  batchSize: z.int().min(1).max(64).default(16),
+});
+export type EmbeddingsConfig = z.infer<typeof EmbeddingsConfig>;
+
+/**
+ * V2: voice to text in the chat, from a whisper.cpp server on this computer (`whisper-server`,
+ * `POST /inference` with a multipart `file`, `response_format=json` answers `{"text": ...}`;
+ * its own default address is 127.0.0.1:8080; checked against github.com/ggml-org/whisper.cpp
+ * examples/server on 2026-11-10). It hears the user's voice, so like [models.local] it must be on
+ * this machine: only loopback addresses are accepted. The server loads its model itself (`-m`),
+ * so no model name is needed here.
+ */
+export const SpeechConfig = z.strictObject({
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    // Not whisper-server's own 8080, which other programs often hold (it did on the real machine).
+    .default('http://127.0.0.1:8178')
+    .refine((u) => LOOPBACK_HOSTS.has(new URL(u).hostname), 'the speech model must be on this computer (127.0.0.1, localhost or ::1)'),
+  /** Whisper's language code, e.g. "en" or "tr", or "auto" to detect it each time. */
+  language: z.string().regex(/^(auto|[a-z]{2,3})$/, 'must be a language code such as "en", or "auto"').default('en'),
+  /** The longest recording, in seconds; the chat stops listening at this point. */
+  maxSeconds: z.int().min(5).max(120).default(60),
+  timeoutMs: z.int().positive().default(60_000),
+});
+export type SpeechConfig = z.infer<typeof SpeechConfig>;
 
 /** L1: jobs that can move from a cloud role to the local model, by listing them in assistant.localTasks. */
 export const LOCAL_TASKS = ['mailTriage', 'fileSummaries', 'nightlySummary'] as const;
@@ -188,7 +229,7 @@ export type DocsConfig = z.infer<typeof DocsConfig>;
  */
 export const FilesConfig = z.strictObject({
   enabled: z.boolean().default(true),
-  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads']),
+  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads', '~/Videos']),
   /** Where an attachment's Save button saves unless another folder is picked on the card. */
   saveTo: z.string().min(1).max(500).default('~/Downloads'),
   /** F2: keep an index of the files (facts, summaries, tags) for files_search. */
@@ -199,8 +240,92 @@ export const FilesConfig = z.strictObject({
   summariesPerDay: z.int().min(0).max(10_000).default(200),
   /** F2: index at most this many files. */
   maxIndexedFiles: z.int().min(100).max(200_000).default(20_000),
+  /** F3: characters of each file's text kept for whole-text search; 0 turns it off. */
+  fullTextChars: z.int().min(0).max(1_000_000).default(100_000),
+  /** F3: search by meaning too, when [models.embeddings] is set. */
+  meaning: z.boolean().default(true),
+  /** F3: the least cosine similarity for a match by meaning (0 to 1; it depends on the embedding model). */
+  meaningMinScore: z.number().min(0).max(1).default(0.3),
 });
 export type FilesConfig = z.infer<typeof FilesConfig>;
+
+/** T1: the to-do list (`todos.md` in the config folder) and its reminders. */
+export const TodosConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** How much later a reminder's Snooze button reminds again. */
+  snoozeMinutes: z.int().min(5).max(24 * 60).default(60),
+});
+export type TodosConfig = z.infer<typeof TodosConfig>;
+
+/** T2: one card each morning with urgent mail, today's events and what is due. */
+export const BriefConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** The brief comes the first time AI OS is in use after this local time each day (or with /brief). */
+  after: HHMM.default('06:00'),
+  /** At most this many urgent emails and events on the card. */
+  maxMails: z.int().min(0).max(20).default(5),
+  maxEvents: z.int().min(0).max(30).default(10),
+});
+export type BriefConfig = z.infer<typeof BriefConfig>;
+
+/**
+ * V1: watching videos in mpv from the chat. `player` is started with options aios-core
+ * chooses, then `--`, then one absolute file path or one https link.
+ */
+export const VideoConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** mpv's command. An absolute path when the service doesn't see it on PATH. */
+  player: z.string().min(1).max(500).default('mpv'),
+  /** Play https links (YouTube and other sites mpv opens through yt-dlp). Off: only video files in `[files] roots`. */
+  links: z.boolean().default(true),
+});
+export type VideoConfig = z.infer<typeof VideoConfig>;
+
+/**
+ * W1: tiles along the bottom of the chat screen. `pinned` is where a fresh install starts;
+ * after the user pins or unpins one (/pin, /unpin or a click), their choice is kept instead.
+ */
+export const WidgetsConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  pinned: z
+    .array(WidgetKind)
+    .max(WIDGET_KINDS.length)
+    .refine((a) => new Set(a).size === a.length, 'each widget at most once')
+    .default(['checkup', 'brief', 'todos']),
+});
+export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
+
+/**
+ * K1: the knowledge base about the user, `~/.config/aios/knowledge/about-me.md`, updated in the
+ * background from new mail (triage results), calendar events, file descriptions and chat. It is
+ * notes from outside text, never memory: the chat reads it only through knowledge_read, inside
+ * <untrusted> tags, and nothing in it can call a tool, write memory or change config.
+ */
+export const KNOWLEDGE_SOURCES = ['mail', 'calendar', 'files', 'chat'] as const;
+export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
+
+export const KnowledgeConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** How often it looks for what is new. */
+  everyMinutes: z.int().min(15).max(24 * 60).default(60),
+  /** The hourly updates: "local", the local model ([models.local]); without one, code writes only Upcoming and Recent activity. "cloud": the nightly role. */
+  model: z.enum(['local', 'cloud']).default('local'),
+  sources: z.array(z.enum(KNOWLEDGE_SOURCES)).max(KNOWLEDGE_SOURCES.length).default([...KNOWLEDGE_SOURCES]),
+  /** K2: the first pass reads mail (INBOX and Sent) from this many days back, and every indexed file. 0: no first pass. */
+  backfillDays: z.int().min(0).max(730).default(90),
+  /** K2: the first pass runs on the cloud nightly role ("cloud", the default) or the local model ("local"). */
+  backfillModel: z.enum(['local', 'cloud']).default('cloud'),
+  /** K2: at most this many emails and files in the first pass, newest first. */
+  backfillMaxMails: z.int().min(0).max(5000).default(600),
+  backfillMaxFiles: z.int().min(0).max(5000).default(300),
+  /** K2: emails and files read per run (the first pass runs every five minutes until it is done). */
+  perRun: z.int().min(1).max(500).default(40),
+  /** Calendar events this many days back and ahead. */
+  calendarDays: z.int().min(0).max(30).default(7),
+  /** One copy of the file a day is kept in knowledge/history for this many days. */
+  keepDays: z.int().min(1).max(90).default(14),
+});
+export type KnowledgeConfig = z.infer<typeof KnowledgeConfig>;
 
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
@@ -215,6 +340,10 @@ export const AiosConfig = z.strictObject({
     nightly: ModelRoleConfig,
     /** L1: leave out to run without a local model; the system assistant then writes its own plain text. */
     local: LocalModelConfig.optional(),
+    /** F3: leave out to search files by words only. */
+    embeddings: EmbeddingsConfig.optional(),
+    /** V2: leave out to keep the chat's microphone button off. */
+    speech: SpeechConfig.optional(),
   }),
   mail: MailConfig,
   /** C1: leave out to run without a calendar. */
@@ -263,9 +392,30 @@ export const AiosConfig = z.strictObject({
     timeoutSeconds: 12,
   }),
   /** F1: managing files in a few folders. */
-  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
+  files: FilesConfig.default({
+    enabled: true,
+    roots: ['~/Documents', '~/Downloads', '~/Videos'],
+    saveTo: '~/Downloads',
+    index: true,
+    summaries: true,
+    summariesPerDay: 200,
+    maxIndexedFiles: 20_000,
+    fullTextChars: 100_000,
+    meaning: true,
+    meaningMinScore: 0.3,
+  }),
   /** L1: the background system assistant on the local model. */
   assistant: AssistantConfig.prefault({}),
+  /** T1: to-dos and reminders. */
+  todos: TodosConfig.prefault({}),
+  /** T2: the morning brief. */
+  brief: BriefConfig.prefault({}),
+  /** V1: watching videos in mpv. */
+  video: VideoConfig.prefault({}),
+  /** W1: tiles along the bottom of the chat screen. */
+  widgets: WidgetsConfig.prefault({}),
+  /** K1: the hourly knowledge base about the user. */
+  knowledge: KnowledgeConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

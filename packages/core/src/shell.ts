@@ -15,6 +15,7 @@ import type { CalendarActions } from './calendar/actions.js';
 import type { DocActions } from './docs/actions.js';
 import type { FileActions } from './files/actions.js';
 import type { AttachmentFiles } from './mail/attachments.js';
+import type { DocumentFiles } from './docs/viewer.js';
 import type { ApprovalBroker } from './mail/approvals.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
@@ -24,6 +25,7 @@ import { type Store, startOfDay } from './store.js';
 import type { Battery, Wifi } from './status/system.js';
 import type { SystemActions } from './system/actions.js';
 import type { ToolRegistry } from './tools/registry.js';
+import { WIDGET_TITLES, type WidgetBoard, widgetByName } from './widgets/widgets.js';
 
 export interface ShellOptions {
   store: Store;
@@ -55,12 +57,26 @@ export interface ShellOptions {
   fileIndex?: Pick<FileIndexer, 'reindex' | 'status'>;
   /** Save buttons on attachment cards (F1). Without it, attachment_save is ignored. */
   attachments?: Pick<AttachmentFiles, 'save'>;
+  /** D3: Edit on a document card. Without it, document_edit is ignored. */
+  documents?: Pick<DocumentFiles, 'edit'>;
   /** S7: where apps open now, for the status strip's hint. Without it, the hint is left out. */
   chatWindow?: { readonly appsAt: 'screen' | 'workspace' | null };
+  /** V2: the microphone button is on, with this longest recording. Without it, the button stays off. */
+  voice?: { maxSeconds: number };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
   openBuiltApp?: (actionId: string) => Promise<void>;
   /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
   cleanup?: { act: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => Promise<void>; run: () => Promise<'nothing' | 'posted'> };
+  /** T1: to-do cards' buttons. Without it, todo_action messages are ignored. */
+  todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void; listCard?: () => unknown };
+  /** W1: tiles along the bottom of the chat screen. Without it, there are none and /pin says they are off. */
+  widgets?: Pick<WidgetBoard, 'current' | 'refresh' | 'setPinned' | 'pinned'>;
+  /** T2: the morning brief, checked whenever AI OS is in use, and /brief. Without it, /brief says it is off. */
+  brief?: { runIfDue: () => Promise<unknown>; run: () => Promise<unknown> };
+  /** V1: /play. Picks the video from the user's words; the play itself goes through the registry's video_play. */
+  video?: { pick: (text: string) => Promise<{ args: { path: string } | { url: string } } | { error: string }> };
+  /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
+  knowledge?: { view: () => string; run: () => Promise<{ by: 'model' | 'code'; error?: string } | null> };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
   /** P1: the install checks for /doctor, written by code. Without it, /doctor says to run `pnpm doctor`. */
@@ -110,8 +126,16 @@ export class Shell {
 
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
-    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme });
+    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme, ...(this.o.widgets ? { widgets: this.o.widgets.current() } : {}) });
+    void this.o.widgets?.refresh();
+    // T2: a chat window opening counts as AI OS being in use.
+    this.briefIfDue();
     return () => this.listeners.delete(l);
+  }
+
+  /** T2: posts today's brief if it is due; never in the way of anything else. */
+  briefIfDue(): void {
+    void this.o.brief?.runIfDue().catch((err: unknown) => this.o.audit.append({ kind: 'brief', event: 'error', error: (err as Error).message.slice(0, 200) }));
   }
 
   broadcast(ev: ServerEvent): void {
@@ -129,6 +153,7 @@ export class Shell {
       costCapUsd: this.o.costCapUsd,
       model: this.o.modelName,
       ...(this.o.chatWindow?.appsAt ? { appsAt: this.o.chatWindow.appsAt } : {}),
+      ...(this.o.voice ? { voice: { maxSeconds: this.o.voice.maxSeconds } } : {}),
     };
   }
 
@@ -185,9 +210,23 @@ export class Shell {
     if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
     // The user's own click on Save, so like Send on a draft it works while paused.
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
+    // D3: the user's own click on Edit; the card's file is checked again before its app opens. Works while paused.
+    if (msg.type === 'document_edit') return this.o.documents?.edit(msg.id);
     // L1: the user's own click on a morning review row; the review checks its hash and the file or window first.
     if (msg.type === 'cleanup_action') return this.o.cleanup?.act(msg.id, msg.list, msg.n, msg.action, msg.hash);
+    // T1: the user's own click on a to-do row; checked against its hash and the list first. Works while paused.
+    if (msg.type === 'todo_action') return this.o.todos?.act(msg.id, msg.todoId, msg.action, msg.hash);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
+    // W1: the user's own click on a tile, or on its pin buttons. Nothing else reaches setPinned.
+    if (msg.type === 'widget_pin') {
+      if (!this.o.widgets) return;
+      this.o.widgets.setPinned(msg.widget, msg.pinned, 'click');
+      return;
+    }
+    if (msg.type === 'widget_open') {
+      this.o.audit.append({ kind: 'widgets', event: 'open', widget: msg.widget });
+      return this.command({ name: msg.widget });
+    }
     // The user's own click on a build they started, so it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
     const cmd = parseCommand(msg.text);
@@ -200,6 +239,7 @@ export class Shell {
       this.agent.notice('info', 'Still working on the last request. Press Esc to stop it.');
       return;
     }
+    this.briefIfDue();
     const ac = new AbortController();
     this.running = ac;
     this.pushStatus();
@@ -409,6 +449,56 @@ export class Shell {
         // Code checks only: no model call, so it works while paused too.
         if (!this.o.doctor) return say('Run `pnpm doctor` in the AI OS folder to check the install.');
         return say((await this.o.doctor()).join('\n'));
+      }
+      case 'brief': {
+        if (!this.o.brief) return say('The morning brief is off. Turn it on with enabled = true under [brief] in your config.');
+        if (this.paused) return say('I am paused, so the brief waits. Type /resume to continue.');
+        await this.o.brief.run();
+        return;
+      }
+      case 'play': {
+        if (!this.o.video || !this.o.tools.has('video_play')) return say('Videos are off. Turn them on with enabled = true under [video] in your config.');
+        const picked = await this.o.video.pick(cmd.text);
+        if ('error' in picked) return say(picked.error);
+        // The user's own typed command, so nothing untrusted is in view: audited and rate limited like any device change.
+        const r = await this.o.tools.execute(
+          { id: `play-${Date.now()}`, name: 'video_play', arguments: JSON.stringify(picked.args) },
+          { signal: AbortSignal.timeout(30_000), untrustedInContext: false, userText: `/play ${cmd.text}` },
+        );
+        // Refusals (not a video, a bad link) come back as text starting with "Error:".
+        if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+        return say('path' in picked.args ? `Playing ${picked.args.path.split('/').pop()} in mpv.` : 'Playing the link in mpv. It can take a few seconds to load.');
+      }
+      case 'todos': {
+        if (!this.o.todos?.listCard) return say('To-dos are off. Turn them on with enabled = true under [todos] in your config.');
+        this.o.todos.listCard();
+        return;
+      }
+      case 'pin':
+      case 'unpin': {
+        const w = this.o.widgets;
+        if (!w) return say('Widgets are off. Turn them on with enabled = true under [widgets] in your config.');
+        const pinned = w.pinned();
+        const all = Object.keys(WIDGET_TITLES) as (keyof typeof WIDGET_TITLES)[];
+        if (!cmd.text.trim()) {
+          const free = all.filter((k) => !pinned.includes(k));
+          const now = pinned.length ? `Pinned now: ${pinned.join(', ')}.` : 'Nothing is pinned.';
+          return say(cmd.name === 'pin' ? `${now} ${free.length ? `You can pin: ${free.join(', ')}. For example /pin ${free[0]}.` : 'Everything is pinned.'}` : `${now} For example /unpin ${pinned[0] ?? 'todos'}.`);
+        }
+        const widget = widgetByName(cmd.text);
+        if (!widget) return say(`I can pin ${all.join(', ')}. For example /${cmd.name} todos.`);
+        return say(w.setPinned(widget, cmd.name === 'pin', 'command'));
+      }
+      case 'knowledge': {
+        const k = this.o.knowledge;
+        if (!k) return say('The knowledge base is off. Turn it on with enabled = true under [knowledge] in your config.');
+        if (!cmd.update) return say(k.view());
+        if (this.paused) return say('I am paused, so the knowledge base waits. Type /resume to continue.');
+        say('Updating your knowledge base. This can take a few minutes.');
+        const r = await k.run();
+        if (!r) return say('An update is already running; type /knowledge in a minute to see it.');
+        if (r.error) say(`I couldn't reach the model this time (${r.error}), so I'll carry on at the next update. What was read so far is in the file.`);
+        return say(k.view());
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

@@ -33,7 +33,7 @@ import {
   type ModelResult,
 } from '@aios/core';
 import type { ChatItem } from '@aios/shared';
-import { parseConfig } from '@aios/shared';
+import { ClientMessage, parseConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import { makeDocFixture } from '../../fixtures/documents.js';
 
@@ -46,25 +46,29 @@ function rig(o: { untrusted?: boolean; openFails?: boolean } = {}) {
   const files = new DocFiles({ roots: ['~/Documents'], home: fx.home });
   const engine = new DocEngine({ wordCli: fx.wordCli, sheetCli: fx.sheetCli, timeoutMs: 10_000 });
   const posted: ChatItem[] = [];
-  const viewer = new DocumentFiles({ store, files, engine, audit, post: (i) => (store.saveItem(i), posted.push(i)) });
   const opened: string[] = [];
   const steps: string[] = [];
-  const docs = docTools({
+  const notices: string[] = [];
+  const open = async (kind: 'word' | 'sheet', path: string) => {
+    if (o.openFails) throw new Error('gridcraft is not installed');
+    opened.push(`${kind} ${path}`);
+  };
+  const window = {
+    appStarting: async (n: string) => {
+      steps.push(`open ${n} elsewhere`);
+      return { screen: 'DP-2' };
+    },
+    appFailed: async (n: string) => void steps.push(`back from ${n}`),
+  };
+  const viewer = new DocumentFiles({
+    store,
     files,
     engine,
-    viewer,
-    open: async (kind, path) => {
-      if (o.openFails) throw new Error('gridcraft is not installed');
-      opened.push(`${kind} ${path}`);
-    },
-    window: {
-      appStarting: async (n) => {
-        steps.push(`open ${n} elsewhere`);
-        return { screen: 'DP-2' };
-      },
-      appFailed: async (n) => void steps.push(`back from ${n}`),
-    },
+    audit,
+    post: (i) => (store.saveItem(i), posted.push(i)),
+    edit: { open, window, notice: (level, text) => void notices.push(`${level}: ${text}`) },
   });
+  const docs = docTools({ files, engine, viewer, open, window });
   const run: Run = async () => ({ stdout: '', code: 0 });
   const actions = new SystemActions({ store, controls: new SystemControls(run), audit, show: (i, isNew) => void (isNew && posted.push(i)), notice: () => undefined, isPaused: () => false });
   const tools = new ToolRegistry(audit);
@@ -72,7 +76,7 @@ function rig(o: { untrusted?: boolean; openFails?: boolean } = {}) {
   const call = (name: string, args: unknown, untrustedInContext = o.untrusted ?? false) =>
     tools.execute({ id: name, name, arguments: JSON.stringify(args) }, { signal: new AbortController().signal, untrustedInContext, userText: 'look' });
   const log = () => readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
-  return { fx, files, engine, viewer, tools, call, posted, opened, steps, log, store, audit, actions };
+  return { fx, files, engine, viewer, tools, call, posted, opened, steps, notices, log, store, audit, actions };
 }
 
 describe('which documents can be opened', () => {
@@ -344,6 +348,76 @@ describe('opening documents in their app', () => {
     store.saveItem(card);
     await actions.confirm(card.id, card.hash);
     expect(opened).toHaveLength(1);
+  });
+});
+
+describe('the Edit button (D3)', () => {
+  it('opens the file behind the card in its app, away from the chat', async () => {
+    const { call, posted, viewer, opened, steps, notices, fx, log } = rig();
+    await call('doc_show', { path: 'report.docx' });
+    await viewer.edit(posted[0]!.id);
+    expect(steps).toEqual(['open WordCraft elsewhere']);
+    expect(opened).toEqual([`word ${join(fx.documents, 'report.docx')}`]);
+    expect(notices).toEqual(['info: Opened report.docx in WordCraft on screen DP-2. Save it there; Open here shows the saved version.']);
+    expect(log().at(-1)).toMatchObject({ tool: 'doc_open_app', tier: 'device', via: 'click', decision: 'approved', app: 'WordCraft', path: join(fx.documents, 'report.docx') });
+    expect(fx.calls()).toEqual([]);
+  });
+
+  it('opens a workbook in GridCraft', async () => {
+    const { call, posted, viewer, opened, fx } = rig();
+    await call('doc_show', { path: 'Finance/sales.xlsx' });
+    await viewer.edit(posted[0]!.id);
+    expect(opened).toEqual([`sheet ${join(fx.documents, 'Finance/sales.xlsx')}`]);
+  });
+
+  it('checks the file again, and opens nothing for a moved file or a card that is not a document', async () => {
+    const { call, posted, viewer, opened, notices, fx, log, store } = rig();
+    await call('doc_show', { path: 'report.docx' });
+    renameSync(join(fx.documents, 'report.docx'), join(fx.home, 'Private', 'report.docx'));
+    await viewer.edit(posted[0]!.id);
+    expect(notices).toEqual([expect.stringMatching(/^warning: I can't open report\.docx for editing now: there is no file/)]);
+    store.saveItem({ kind: 'notice', id: 'n1', level: 'info', text: 'hi', at: 1 });
+    await viewer.edit('n1');
+    await viewer.edit('doc-00000000-0000-0000-0000-000000000000');
+    expect(opened).toEqual([]);
+    expect(log().slice(-3).map((e) => [e.via, e.decision, e.reason])).toEqual([
+      ['click', 'denied', expect.stringMatching(/^there is no file/)],
+      ['click', 'denied', 'not a document card'],
+      ['click', 'denied', 'not a document card'],
+    ]);
+  });
+
+  it('brings the chat back and says so when the app does not start', async () => {
+    const { call, posted, viewer, steps, notices } = rig({ openFails: true });
+    await call('doc_show', { path: 'Finance/sales.xlsx' });
+    await viewer.edit(posted[0]!.id);
+    expect(steps).toEqual(['open GridCraft elsewhere', 'back from GridCraft']);
+    expect(notices).toEqual(["warning: GridCraft didn't start: gridcraft is not installed"]);
+  });
+
+  it('the click names only the card: a path or app in it is refused', () => {
+    expect(ClientMessage.safeParse({ type: 'document_edit', id: 'doc-1' }).success).toBe(true);
+    expect(ClientMessage.safeParse({ type: 'document_edit', id: 'doc-1', path: '/etc/passwd' }).success).toBe(false);
+    expect(ClientMessage.safeParse({ type: 'document_edit', id: 'doc-1', app: 'sh' }).success).toBe(false);
+  });
+
+  it('the shell hands the click to the documents, also while paused and with no model call', async () => {
+    const { store, audit } = rig();
+    const edits: string[] = [];
+    let modelCalls = 0;
+    const model = {
+      async *stream(_req: ModelRequest): AsyncGenerator<Delta, ModelResult> {
+        modelCalls++;
+        const r: ModelResult = { content: 'ok', toolCalls: [], finishReason: 'stop', usage: null, model: 'm', provider: null, generationId: null, latencyMs: 1, ttftMs: 1, attempts: 1 };
+        yield { type: 'done', result: r };
+        return r;
+      },
+    };
+    const shell = new Shell({ store, model, tools: new ToolRegistry(audit), audit, userName: 'John', timeZone: 'UTC', modelName: 'm', costCapUsd: 2, readBattery: async () => null, readWifi: async () => null, documents: { edit: async (id) => void edits.push(id) } });
+    await shell.handle({ type: 'send', text: '/pause' });
+    await shell.handle({ type: 'document_edit', id: 'doc-1' });
+    expect(edits).toEqual(['doc-1']);
+    expect(modelCalls).toBe(0);
   });
 });
 

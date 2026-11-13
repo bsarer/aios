@@ -29,9 +29,10 @@ const letters = (n: number) => {
  * Full-screen viewer for a Word or Excel file (D1). A Word file arrives as a PDF that
  * WordCraft made and is drawn on canvases like a PDF attachment (pdf.ts). A workbook
  * arrives as cells and is drawn as a plain table: every cell is text, nothing in it runs.
- * Esc closes it.
+ * Esc closes it. Edit (D3) closes it and opens the file in WordCraft or GridCraft; the next
+ * Open shows what was saved there, because the file is read again on every open.
  */
-export function DocumentViewer({ item, onClose }: { item: DocumentItem; onClose: () => void }) {
+export function DocumentViewer({ item, onClose, onEdit }: { item: DocumentItem; onClose: () => void; onEdit: () => void }) {
   const [view, setView] = useState<View>({ state: 'loading' });
   const [sheet, setSheet] = useState(0);
   const pages = useRef<HTMLDivElement>(null);
@@ -86,6 +87,9 @@ export function DocumentViewer({ item, onClose }: { item: DocumentItem; onClose:
     <div data-testid="document-viewer" data-state={view.state} role="dialog" aria-label={item.name} className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bg)' }}>
       <div className="glass flex items-center gap-3 px-4 py-2">
         <div className="flex-1 truncate font-medium">{item.name}</div>
+        <button type="button" data-testid="document-viewer-edit" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={onEdit}>
+          Edit in {item.fileKind === 'word' ? 'WordCraft' : 'GridCraft'}
+        </button>
         <button type="button" data-testid="document-close" className="glass rounded-lg px-3 py-1" onClick={onClose}>
           Close
         </button>

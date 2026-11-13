@@ -15,7 +15,7 @@ import type { ChatWindow } from '../apps/window.js';
 import { colLetters, formulaProblem, parseRange } from './cells.js';
 import type { DocEngine } from './engine.js';
 import { type DocFile, type DocFiles, DocPathError, KIND_WORD } from './files.js';
-import type { OpenDocument } from './open.js';
+import { APP_NAME, type OpenDocument } from './open.js';
 import type { DocumentFiles } from './viewer.js';
 
 /** Characters of a Word document handed to the model per call. */
@@ -27,7 +27,6 @@ const MAX_LISTED = 60;
 /** The CLI's text is capped before sanitizing, so a huge document can't use up memory twice. */
 const MAX_DOC_CHARS = 2_000_000;
 
-const APP_NAME = { word: 'WordCraft', sheet: 'GridCraft' } as const;
 
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);

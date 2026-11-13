@@ -114,6 +114,33 @@ const asked = async (fn: () => Promise<string>): Promise<string> => {
   }
 };
 
+/**
+ * Free gaps on one local day between `dayStart` and `dayEnd` ("24:00" for midnight), as
+ * "09:00–10:30", from events that block time and that the user hasn't declined. Times only:
+ * no event text, so the result carries nothing from outside (C1; also the morning brief, T2).
+ */
+export function freeGaps(events: CalEvent[], o: { day: string; dayStart: string; dayEnd: string; timeZone: string; minMs: number }): string[] {
+  const tz = o.timeZone;
+  // All-day events block whole dates.
+  const busy = events
+    .filter((e) => e.busy && e.myResponse !== 'declined')
+    .map((e) => (e.allDay ? { s: instantOf(utcToLocal(e.startMs, 'UTC').slice(0, 10), tz), e: instantOf(utcToLocal(e.endMs, 'UTC').slice(0, 10), tz) } : { s: e.startMs, e: e.endMs }))
+    .sort((x, y) => x.s - y.s);
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const ws = instantOf(`${o.day}T${o.dayStart}`, tz);
+  const we = o.dayEnd === '24:00' ? instantOf(nextDay(o.day), tz) : instantOf(`${o.day}T${o.dayEnd}`, tz);
+  const gaps: string[] = [];
+  let cursor = ws;
+  for (const b of busy) {
+    if (b.e <= cursor || b.s >= we) continue;
+    if (b.s - cursor >= o.minMs) gaps.push(`${time.format(cursor)}–${time.format(b.s)}`);
+    cursor = Math.max(cursor, b.e);
+    if (cursor >= we) break;
+  }
+  if (we - cursor >= o.minMs) gaps.push(`${time.format(cursor)}–${o.dayEnd === '24:00' ? '24:00' : time.format(we)}`);
+  return gaps;
+}
+
 export function calendarTools(o: CalendarToolOptions): RegisteredTool[] {
   const tz = o.timeZone;
   // The registry refuses write-tier calls before a handler runs; only `propose` (a card) is reachable.
@@ -190,27 +217,11 @@ export function calendarTools(o: CalendarToolOptions): RegisteredTool[] {
           const timeMin = instantOf(a.date, tz);
           const timeMax = instantOf(nextDay(last), tz);
           const events = await o.api.list({ timeMin: new Date(timeMin), timeMax: new Date(timeMax), limit: 250, timeZone: tz }, ctx.signal);
-          // Busy: events that block time and that the user hasn't declined. All-day ones block whole dates.
-          const busy = events
-            .filter((e) => e.busy && e.myResponse !== 'declined')
-            .map((e) => (e.allDay ? { s: instantOf(utcToLocal(e.startMs, 'UTC').slice(0, 10), tz), e: instantOf(utcToLocal(e.endMs, 'UTC').slice(0, 10), tz) } : { s: e.startMs, e: e.endMs }))
-            .sort((x, y) => x.s - y.s);
-          const time = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-          const dayName = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
           const lines: string[] = [];
+          const dayName = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
           let day = a.date;
           for (let i = 0; i < days; i++, day = nextDay(day)) {
-            const ws = instantOf(`${day}T${dayStart}`, tz);
-            const we = dayEnd === '24:00' ? instantOf(nextDay(day), tz) : instantOf(`${day}T${dayEnd}`, tz);
-            const gaps: string[] = [];
-            let cursor = ws;
-            for (const b of busy) {
-              if (b.e <= cursor || b.s >= we) continue;
-              if (b.s - cursor >= minMs) gaps.push(`${time.format(cursor)}–${time.format(b.s)}`);
-              cursor = Math.max(cursor, b.e);
-              if (cursor >= we) break;
-            }
-            if (we - cursor >= minMs) gaps.push(`${time.format(cursor)}–${dayEnd === '24:00' ? '24:00' : time.format(we)}`);
+            const gaps = freeGaps(events, { day, dayStart, dayEnd, timeZone: tz, minMs });
             lines.push(`${dayName.format(Date.parse(`${day}T00:00:00Z`))} (${dayStart}–${dayEnd}): ${gaps.length ? `free ${gaps.join(', ')}` : 'no free time'}`);
           }
           return `Free time (${tz}), from the busy events in the calendar${a.minutes ? `, gaps of at least ${a.minutes} minutes` : ''}:\n${lines.join('\n')}`;

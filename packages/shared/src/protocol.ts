@@ -4,6 +4,11 @@
  */
 import { z } from 'zod';
 
+/** W1: the system features that can be pinned as tiles along the bottom of the chat screen. */
+export const WIDGET_KINDS = ['checkup', 'brief', 'todos'] as const;
+export const WidgetKind = z.enum(WIDGET_KINDS);
+export type WidgetKind = z.infer<typeof WidgetKind>;
+
 // ── Chat items (what the UI renders) ─────────────────────────────────────────
 
 /** One triaged email in a new-mail notification. from/subject/summary come from email: show as plain text only. */
@@ -50,6 +55,31 @@ export const CleanupApp = z.strictObject({
   result: z.string().optional(),
 });
 export type CleanupApp = z.infer<typeof CleanupApp>;
+
+/** T1: one item on a to-do card. The text is the user's own words; still shown as plain text only. */
+export const TodoRow = z.strictObject({
+  todoId: z.string(),
+  text: z.string(),
+  /** Written by code from the checked time, e.g. "Today, Sat 7 Nov, 16:00". */
+  when: z.string().optional(),
+  /** Written by code, e.g. "Mon 10 Nov". */
+  due: z.string().optional(),
+  /** sha256 of the item as the card shows it; a click echoes it back. */
+  hash: z.string(),
+  state: z.enum(['open', 'done', 'removed']),
+  /** Written by code after a click. */
+  result: z.string().optional(),
+});
+export type TodoRow = z.infer<typeof TodoRow>;
+
+/** T2: one event on the morning brief. Titles come from whoever sent the invite: plain text only. */
+export const BriefEvent = z.strictObject({
+  /** Written by code, e.g. "09:30–10:00" or "all day". */
+  when: z.string(),
+  title: z.string(),
+  location: z.string().optional(),
+});
+export type BriefEvent = z.infer<typeof BriefEvent>;
 
 export const ChatItem = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('user'), id: z.string(), text: z.string(), at: z.number() }),
@@ -278,6 +308,66 @@ export const ChatItem = z.discriminatedUnion('kind', [
     result: z.string().optional(),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('file_results'),
+    /** F3: the best files of a search. Read only; each Open shows a file in the chat's viewer. */
+    id: z.string(),
+    files: z
+      .array(
+        z.strictObject({
+          /** `<card id>-<n>`: what Open fetches (/attachments or /documents), resolved again inside the folders. */
+          id: z.string(),
+          /** The file's name and folder. Files can come from anyone: plain text only. */
+          name: z.string(),
+          folder: z.string(),
+          fileKind: z.enum(['pdf', 'image', 'word', 'sheet', 'text', 'other']),
+          /** Written by code: where the words were, or that it is close in meaning. */
+          why: z.string(),
+          /** A few words of the file's text around the match: plain text only. */
+          snippet: z.string().optional(),
+          /** Which viewer Open uses; no Open button without it. */
+          open: z.enum(['attachment', 'document']).optional(),
+          path: z.string(),
+        }),
+      )
+      .max(3),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('todo'),
+    /** T1: items just added, changed or ticked off from the user's own words, or a reminder that is due. */
+    id: z.string(),
+    /** W1: 'list' is the open items, from a click on the to-do tile or /todos. */
+    event: z.enum(['added', 'updated', 'done', 'reminder', 'list']),
+    /** Written by code, e.g. "Added to your list" or "Reminder". */
+    title: z.string(),
+    rows: z.array(TodoRow),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('brief'),
+    /** T2: the morning brief. Read only: gathered and ordered by code. */
+    id: z.string(),
+    /** Written by code, e.g. "Saturday 7 November". */
+    title: z.string(),
+    /** Two short lines from the local model, or written by code: plain text only. */
+    intro: z.string(),
+    by: z.enum(['local', 'code']),
+    /** Urgent mail from triage. from/subject/summary come from email: plain text only. */
+    mails: z.array(MailRow),
+    /** Other new mail since the last brief, counted by code. */
+    moreMail: z.int().min(0),
+    /** 'off' without a calendar, 'error' when it couldn't be read. */
+    calendar: z.enum(['ok', 'off', 'error']),
+    events: z.array(BriefEvent),
+    /** Free gaps in the working day, written by code, e.g. "13:00–15:30". */
+    free: z.array(z.string()),
+    /** To-dos and reminders due today, and overdue ones. */
+    todos: z.array(z.strictObject({ text: z.string(), when: z.string().optional(), overdue: z.boolean() })),
+    /** Open items without a date, counted by code. */
+    moreTodos: z.int().min(0),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -293,8 +383,34 @@ export const Status = z.strictObject({
   model: z.string(),
   /** S7: where apps open now (another screen, or the next workspace), for the hint under the status strip. */
   appsAt: z.enum(['screen', 'workspace']).optional(),
+  /** V2: the microphone button's state; left out when [models.speech] is not set. */
+  voice: z.strictObject({ maxSeconds: z.int().positive() }).optional(),
 });
 export type Status = z.infer<typeof Status>;
+
+// ── Widgets (W1) ─────────────────────────────────────────────────────────────
+
+/**
+ * One tile along the bottom of the chat screen. Everything on it is written by code: numbers
+ * and counts, and on the to-do tile the user's own item text. No mail, invite or document text.
+ */
+export const WidgetTile = z.strictObject({
+  widget: WidgetKind,
+  title: z.string().max(40),
+  /** At most four short lines; plain text only. */
+  lines: z.array(z.string().max(120)).max(4),
+  /** 'attention' when something wants a look (urgent mail, overdue to-do, a drive almost full); 'off' when the feature is turned off. */
+  tone: z.enum(['normal', 'attention', 'off']),
+});
+export type WidgetTile = z.infer<typeof WidgetTile>;
+
+export const Widgets = z.strictObject({
+  /** In the order the user pinned them. */
+  pinned: z.array(WidgetKind),
+  /** Tiles for the pinned widgets, same order. */
+  tiles: z.array(WidgetTile),
+});
+export type Widgets = z.infer<typeof Widgets>;
 
 export const Theme = z.record(z.string(), z.string());
 export type Theme = z.infer<typeof Theme>;
@@ -320,6 +436,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('file_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('file_change_discard'), id: z.string().max(100) }),
   /** F1: Save on an attachment card, into one of the folders the card offers (by index). */
+  /** D3: Edit on a document card or in its viewer; names the card, never a path or app. */
+  z.strictObject({ type: z.literal('document_edit'), id: z.string().max(100) }),
   z.strictObject({ type: z.literal('attachment_save'), id: z.string().max(100), folder: z.int().min(0).max(20) }),
   /** L1: a button on one row of the morning review, echoing that row's hash. */
   z.strictObject({
@@ -330,6 +448,18 @@ export const ClientMessage = z.discriminatedUnion('type', [
     action: z.enum(['trash', 'close', 'keep']),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
+  /** T1: a button on one row of a to-do card, echoing that row's hash. */
+  z.strictObject({
+    type: z.literal('todo_action'),
+    id: z.string().max(100),
+    todoId: z.string().max(20),
+    action: z.enum(['done', 'reopen', 'remove', 'snooze']),
+    hash: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
+  /** W1: a click on a pinned tile; opens its full card in the chat, like the matching command. */
+  z.strictObject({ type: z.literal('widget_open'), widget: WidgetKind }),
+  /** W1: the user's own click pinning or unpinning a tile. */
+  z.strictObject({ type: z.literal('widget_pin'), widget: WidgetKind, pinned: z.boolean() }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */
@@ -347,12 +477,13 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
   z.strictObject({ type: z.literal('status'), status: Status }),
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
+  z.strictObject({ type: z.literal('widgets'), widgets: Widgets }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
@@ -363,14 +494,16 @@ export interface ChatState {
   items: ChatItem[];
   status: Status | null;
   theme: Theme;
+  /** W1: null until the server says (or when widgets are off). */
+  widgets: Widgets | null;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {} };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':
@@ -384,5 +517,7 @@ export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
       return { ...state, status: ev.status };
     case 'theme':
       return { ...state, theme: ev.theme };
+    case 'widgets':
+      return { ...state, widgets: ev.widgets };
   }
 }

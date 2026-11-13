@@ -95,6 +95,14 @@ export const ALPHA_TOOLS = [
       target: z.enum(['facts', 'profile']).optional().describe('"profile" for standing instructions and preferences; default "facts"'),
     }),
   }),
+  // ── Knowledge base (K1) ──
+  def({
+    name: 'knowledge_read',
+    tier: 'read',
+    description:
+      "The knowledge base about the user: notes on people, work, commitments, upcoming events, interests and recent activity, written in the background from their mail, calendar, files and chat. Notes from outside text, not confirmed facts.",
+    input: z.strictObject({}),
+  }),
   // ── Calendar (C1) ──
   def({
     name: 'calendar_list',
@@ -270,12 +278,25 @@ export const ALPHA_TOOLS = [
       'Open a Word file in WordCraft or an Excel file in GridCraft, in its own window. It opens away from the chat, like any app.',
     input: z.strictObject({ path: z.string().min(1).max(1000) }),
   }),
+  // ── Videos (V1) ──
+  def({
+    name: 'video_play',
+    tier: 'device',
+    description:
+      'Play one video in mpv, in its own window away from the chat. Give `path` for a video file in the allowed folders (find it with files_list or files_search), or `url` for an https link the user gave (YouTube and most video sites).',
+    input: z
+      .strictObject({
+        path: z.string().min(1).max(1000).optional().describe('e.g. "~/Downloads/holiday.mp4"'),
+        url: z.string().min(1).max(2000).optional().describe('e.g. "https://www.youtube.com/watch?v=…"'),
+      })
+      .refine((a) => (a.path === undefined) !== (a.url === undefined), 'give either path or url, not both'),
+  }),
   // ── Files (F1) ──
   def({
     name: 'files_list',
     tier: 'read',
     description:
-      "Files and folders in the user's allowed folders (by default ~/Documents and ~/Downloads): name, type, size and date, folders first, newest first. With `folder`, that folder's contents; with `query`, every file whose path contains it, anywhere below. Gives the paths the other file tools take.",
+      "Files and folders in the user's allowed folders (by default ~/Documents, ~/Downloads and ~/Videos): name, type, size and date, folders first, newest first. With `folder`, that folder's contents; with `query`, every file whose path contains it, anywhere below. Gives the paths the other file tools take.",
     input: z.strictObject({
       folder: z.string().min(1).max(1000).optional().describe('e.g. "~/Downloads" or "Documents/Legal"; all allowed folders when left out'),
       query: z.string().min(1).max(200).optional().describe('Part of a name, e.g. "invoice" or ".pdf"'),
@@ -336,7 +357,7 @@ export const ALPHA_TOOLS = [
     name: 'files_search',
     tier: 'read',
     description:
-      "Search the index of the user's files by what they are about, not just their name: each file has facts (type, size, dates, pages, sheets, title, author), a short description and keywords written when it was indexed, and the user's own tags. Use it for questions like \"the lease I signed last spring\", \"invoices from Hetzner\" or \"spreadsheets about the budget\". Words match as word starts, best first; with no query, the newest files matching the filters. Then use the paths with file_read, doc_read, file_show and so on.",
+      "Search the index of the user's files by what they are about or what is in them, not just their name: each file has facts (type, size, dates, pages, sheets, title, author), a short description and keywords written when it was indexed, its text, and the user's own tags; when the local embedding model is on, files close in meaning match too (\"car insurance\" finds an auto policy). Use it for questions like \"the lease I signed last spring\", \"the contract that mentions a 90-day notice period\", \"invoices from Hetzner\" or \"spreadsheets about the budget\". Put the user's describing words in query. Best first; with no query, the newest files matching the filters. With a query, a card with the best 3 and Open buttons is shown to the user; pass card: false when you are looking for a file for your own next step (to attach or play it, say). Then use the paths with file_read, doc_read, file_show and so on.",
     input: z.strictObject({
       query: z.string().min(1).max(300).optional().describe('Words to look for, e.g. "lease apartment 2026"'),
       kinds: z.array(z.enum(['pdf', 'image', 'word', 'sheet', 'text', 'other'])).max(6).optional(),
@@ -344,6 +365,7 @@ export const ALPHA_TOOLS = [
       modifiedAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, in the user\'s timezone'),
       modifiedBefore: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, not included'),
       limit: z.int().min(1).max(50).optional(),
+      card: z.boolean().optional().describe('Show the best 3 on a card with Open buttons (default true when there is a query)'),
     }),
   }),
   def({
@@ -526,6 +548,49 @@ export const ALPHA_TOOLS = [
     tier: 'device',
     description: 'Switch to another installed Omarchy theme, by its name from theme_list.',
     input: z.strictObject({ name: z.string().min(1).max(64) }),
+  }),
+  // ── To-dos and reminders (T1) ──
+  def({
+    name: 'todos_list',
+    tier: 'read',
+    description: "The user's to-do list with each item's id, reminder time and due date (their local time). Open items only unless `done` is true.",
+    input: z.strictObject({ done: z.boolean().optional().describe('Also list items already ticked off') }),
+  }),
+  def({
+    name: 'todo_add',
+    tier: 'device',
+    description:
+      'Add items to the user\'s to-do list, each optionally with a reminder time (a notification then) or a due date. Only for what the user asked in their own message. Times are the user\'s local time, worked out from the current time: "remind me at 4" today is "2026-11-07T16:00".',
+    input: z.strictObject({
+      items: z
+        .array(
+          z.strictObject({
+            text: z.string().min(1).max(200).describe('What to do, in the user\'s words, e.g. "Call Ana" or "Milk"'),
+            remindAt: z.string().optional().describe('Local time "2026-11-07T16:00" to remind the user'),
+            due: z.string().optional().describe('Local date "2026-11-10" it is due, without a reminder'),
+          }),
+        )
+        .min(1)
+        .max(20),
+    }),
+  }),
+  def({
+    name: 'todo_update',
+    tier: 'device',
+    description: 'Change one item on the to-do list: its text, its reminder time (or take the reminder off) or its due date. Get the id from todos_list.',
+    input: z.strictObject({
+      id: z.string().max(20),
+      text: z.string().min(1).max(200).optional(),
+      remindAt: z.string().optional().describe('New local time "2026-11-07T17:00"'),
+      noReminder: z.boolean().optional().describe('Take the reminder off'),
+      due: z.string().optional().describe('New local due date "2026-11-10"'),
+    }),
+  }),
+  def({
+    name: 'todo_done',
+    tier: 'device',
+    description: 'Tick items off the to-do list ("done with the Ana call"). Get the ids from todos_list.',
+    input: z.strictObject({ ids: z.array(z.string().max(20)).min(1).max(20) }),
   }),
   def({
     name: 'now',

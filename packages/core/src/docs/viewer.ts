@@ -9,11 +9,13 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ChatItem } from '@aios/shared';
+import type { ChatWindow } from '../apps/window.js';
 import type { AuditLog } from '../audit.js';
 import type { Store } from '../store.js';
 import { cleanName } from '../system/controls.js';
 import { colLetters } from './cells.js';
 import type { DocEngine } from './engine.js';
+import { APP_NAME, type OpenDocument } from './open.js';
 import { type DocFile, type DocFiles, DocPathError } from './files.js';
 
 type DocumentItem = Extract<ChatItem, { kind: 'document' }>;
@@ -39,6 +41,15 @@ export interface DocumentFilesOptions {
   engine: Pick<DocEngine, 'wordPdf' | 'sheetNames' | 'sheetRange'>;
   audit: AuditLog;
   post: (item: ChatItem) => void;
+  /** F3: viewer cards that live inside another card (a file search's results), by id. */
+  innerItem?: (id: string) => ChatItem | null;
+  /** D3: what the Edit button needs. Without it, Edit clicks are ignored (and audited). */
+  edit?: {
+    open: OpenDocument;
+    /** S7: apps open away from the chat's screen or workspace. */
+    window: Pick<ChatWindow, 'appStarting' | 'appFailed'>;
+    notice: (level: 'info' | 'warning', text: string) => void;
+  };
   clock?: () => number;
 }
 
@@ -69,7 +80,7 @@ export class DocumentFiles {
 
   /** What is behind a card. Null when there is no such card. */
   async file(itemId: string, signal?: AbortSignal): Promise<DocumentFile | null> {
-    const item = this.o.store.getItem(itemId);
+    const item = this.o.store.getItem(itemId) ?? this.o.innerItem?.(itemId) ?? null;
     if (!item || item.kind !== 'document') return null;
     const log = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'docs', event: 'document_opened', itemId, path: item.path, ...entry });
     let file: DocFile;
@@ -104,5 +115,41 @@ export class DocumentFiles {
       log({ ok: false, error: (err as Error).message });
       return { error: `I couldn't show it: ${(err as Error).message}.` };
     }
+  }
+
+  /**
+   * D3: the Edit click. Opens the file behind a document card in its app. The card id is all the
+   * click carries; the path comes from the stored card and is resolved again, so a file moved out
+   * of the folders, swapped for a link or changed to another kind is refused.
+   */
+  async edit(itemId: string): Promise<void> {
+    const audit = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'tool', tool: 'doc_open_app', tier: 'device', via: 'click', itemId, ...entry });
+    const item = this.o.store.getItem(itemId) ?? this.o.innerItem?.(itemId) ?? null;
+    if (!item || item.kind !== 'document') return void audit({ decision: 'denied', reason: 'not a document card' });
+    const ed = this.o.edit;
+    if (!ed) return void audit({ decision: 'denied', reason: 'editing is off', path: item.path });
+    let file: DocFile;
+    try {
+      file = await this.o.files.resolve(item.path);
+    } catch (err) {
+      const why = err instanceof DocPathError ? err.message : "the file couldn't be found";
+      audit({ decision: 'denied', reason: why, path: item.path });
+      return ed.notice('warning', `I can't open ${item.name} for editing now: ${why}.`);
+    }
+    if (file.kind !== item.fileKind) {
+      audit({ decision: 'denied', reason: 'kind changed', path: item.path });
+      return ed.notice('warning', `I can't open ${item.name} for editing now.`);
+    }
+    const app = APP_NAME[file.kind];
+    audit({ decision: 'approved', path: file.path, app });
+    const at = await ed.window.appStarting(app);
+    try {
+      await ed.open(file.kind, file.path);
+    } catch (err) {
+      await ed.window.appFailed(app);
+      return ed.notice('warning', `${app} didn't start: ${(err as Error).message.slice(0, 200)}`);
+    }
+    const where = at && 'screen' in at ? ` on screen ${at.screen}` : at ? ` on workspace ${at.workspace}` : '';
+    ed.notice('info', `Opened ${item.name} in ${app}${where}. Save it there; Open here shows the saved version.`);
   }
 }

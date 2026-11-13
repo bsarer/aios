@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
+import { WidgetBar } from './components/WidgetBar';
 import { applyTheme } from './theme';
 import { useChat } from './useChat';
 
@@ -36,9 +37,11 @@ export function App() {
     onFileChangeConfirm: (id, hash) => send({ type: 'file_change_confirm', id, hash }),
     onFileChangeDiscard: (id) => send({ type: 'file_change_discard', id }),
     onAttachmentSave: (id, folder) => send({ type: 'attachment_save', id, folder }),
+    onDocumentEdit: (id) => send({ type: 'document_edit', id }),
     onActionStop: (id) => send({ type: 'action_stop', id }),
     onAppOpen: (actionId) => send({ type: 'app_open', actionId }),
     onCleanup: (id, list, n, action, hash) => send({ type: 'cleanup_action', id, list, n, action, hash }),
+    onTodo: (id, todoId, action, hash) => send({ type: 'todo_action', id, todoId, action, hash }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
   };
 
@@ -81,7 +84,14 @@ export function App() {
           <div ref={bottom} />
         </div>
       </main>
-      <Composer working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} />
+      <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} />
+      {/* W1: pinned system features along the bottom of the screen. */}
+      <WidgetBar
+        widgets={state.widgets}
+        disabled={conn !== 'open'}
+        onOpen={(widget) => send({ type: 'widget_open', widget })}
+        onPin={(widget, pinned) => send({ type: 'widget_pin', widget, pinned })}
+      />
     </div>
   );
 }

@@ -37,10 +37,14 @@ import { FileCatalog } from './files/catalog.js';
 import { FactReader } from './files/facts.js';
 import { FileIndexer } from './files/indexer.js';
 import { fileSearchTools } from './files/search-tools.js';
+import type { Embedder } from './files/meaning.js';
+import { resultRowItem } from './files/results.js';
 import { fileTools } from './files/tools.js';
 import { DocFiles } from './docs/files.js';
 import { createDocumentOpener } from './docs/open.js';
 import { docTools } from './docs/tools.js';
+import { createVideoPlayer } from './video/play.js';
+import { pickVideo, videoTools } from './video/tools.js';
 import { DocumentFiles } from './docs/viewer.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
@@ -60,6 +64,7 @@ import { ModelClient, ModelError } from './model.js';
 import { dataDir } from './paths.js';
 import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
+import { Dictation } from './speech/dictation.js';
 import { Shell } from './shell.js';
 import { readBattery, readWifi } from './status/system.js';
 import { SystemActions } from './system/actions.js';
@@ -69,6 +74,14 @@ import { omarchyThemePath, readTheme, watchTheme } from './status/theme.js';
 import { Store } from './store.js';
 import { nowTool } from './tools/now.js';
 import { ToolRegistry } from './tools/registry.js';
+import { MorningBrief } from './brief/brief.js';
+import { TodoList } from './todos/list.js';
+import { Todos } from './todos/reminders.js';
+import { todoTools } from './todos/tools.js';
+import { WidgetBoard } from './widgets/widgets.js';
+import { KnowledgeCrawler, knowledgeView, progressText } from './knowledge/crawler.js';
+import { KnowledgeFile } from './knowledge/file.js';
+import { knowledgeReadTool } from './knowledge/tool.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -128,6 +141,7 @@ async function main(): Promise<void> {
     patch: (item) => shell?.patchItem(item),
     ...(fileRoots ? { roots: fileRoots, saveTo: config.files.saveTo } : {}),
     onSaved: () => fileIndexer?.soon(),
+    innerItem: (id) => resultRowItem(store, id),
   });
   for (const t of attachmentTools({ mail: mailClient, files: attachmentFiles })) tools.register(t);
   const outbox = new ImapSmtpOutbox(mailClient, {
@@ -154,6 +168,7 @@ async function main(): Promise<void> {
   // C1: the calendar, when configured. Sign-in comes from `pnpm calendar:login`; until then
   // the tools answer that it isn't signed in.
   let calendarActions: CalendarActions | undefined;
+  let calendarApi: GoogleCalendar | undefined;
   const cal = config.calendar;
   if (cal) {
     const clientSecretRef = cal.clientSecretRef;
@@ -164,6 +179,7 @@ async function main(): Promise<void> {
       refreshToken: async () => (await keyring.get(cal.tokenRef))?.reveal() ?? null,
     });
     const api = new GoogleCalendar({ apiBaseUrl: cal.apiBaseUrl, calendarId: cal.calendarId, auth });
+    calendarApi = api;
     calendarActions = new CalendarActions({
       store,
       api,
@@ -194,7 +210,10 @@ async function main(): Promise<void> {
     audit,
     notice: (level, text) => shell?.agent.notice(level, text),
     onFocus: (focused) => {
-      if (focused) unseen.set(false);
+      if (!focused) return;
+      unseen.set(false);
+      // T2: coming back to the chat counts as AI OS being in use.
+      shell?.briefIfDue();
     },
     onAppsAt: () => shell?.pushStatus(),
   });
@@ -211,8 +230,17 @@ async function main(): Promise<void> {
     docFilesForShow = docFiles;
     const engine = new DocEngine({ wordCli: d.wordCli, sheetCli: d.sheetCli, timeoutMs: d.timeoutSeconds * 1000 });
     docEngine = engine;
-    documentFiles = new DocumentFiles({ store, files: docFiles, engine, audit, post: (item) => shell?.agent.post(item) });
     const open = createDocumentOpener({ word: d.wordApp, sheet: d.sheetApp });
+    // D3: the Edit button on a document card opens it in its app, from the click alone.
+    documentFiles = new DocumentFiles({
+      store,
+      files: docFiles,
+      engine,
+      audit,
+      post: (item) => shell?.agent.post(item),
+      innerItem: (id) => resultRowItem(store, id),
+      edit: { open, window: chatWindow, notice: (level, text) => shell?.agent.notice(level, text) },
+    });
     // doc_open_app is device tier like open_app, so it shares open_app's confirm card.
     apps.push(...docTools({ files: docFiles, engine, viewer: documentFiles, open, window: chatWindow }));
     // D2: changes go on a card; the Save click writes a new file (or, when asked, over the original after a backup).
@@ -227,6 +255,10 @@ async function main(): Promise<void> {
     });
     for (const t of editTools({ files: docFiles, engine, actions: docActions })) tools.register(t);
   }
+  // V1: videos in mpv. Device tier like open_app, so it shares open_app's confirm card.
+  if (config.video.enabled) {
+    apps.push(...videoTools({ play: createVideoPlayer(config.video.player), window: chatWindow, links: config.video.links, ...(fileRoots ? { roots: fileRoots } : {}) }));
+  }
   // F1: managing files. Changes go on a card; the click renames, copies or creates, never replacing anything.
   let fileActions: FileActions | undefined;
   let fileCatalog: FileCatalog | undefined;
@@ -234,11 +266,16 @@ async function main(): Promise<void> {
     // F2: the file index for files_search, kept current by the indexer.
     const catalog = config.files.index ? new FileCatalog(store) : undefined;
     fileCatalog = catalog;
+    // F3: files by meaning, from the local embedding model when [models.embeddings] is set.
+    const emb = config.models.embeddings;
+    const embedder: Embedder | undefined =
+      emb && config.files.meaning ? { model: emb.model, batchSize: emb.batchSize, embed: (texts, signal) => model.embed(texts, signal) } : undefined;
     if (catalog) {
       fileIndexer = new FileIndexer({
         roots: fileRoots,
         catalog,
-        facts: new FactReader({ engine: docEngine }),
+        facts: new FactReader({ engine: docEngine, fullTextChars: config.files.fullTextChars }),
+        embedder,
         model: config.files.summaries ? model : undefined,
         summaryRole: roleFor(config, 'fileSummaries', 'triage'),
         store,
@@ -257,14 +294,27 @@ async function main(): Promise<void> {
       onChanged: (c) => (c.op === 'renamed' ? void indexer?.renamed(c.from, c.to) : indexer?.soon()),
       ...(catalog ? { setTags: (path: string, tags: string[]) => catalog.setTags(path, tags) } : {}),
     });
-    if (catalog && indexer) for (const t of fileSearchTools({ roots: fileRoots, catalog, indexer, actions: fileActions, timeZone: config.user.timezone })) tools.register(t);
+    if (catalog && indexer) {
+      const search = fileSearchTools({
+        roots: fileRoots,
+        catalog,
+        indexer,
+        actions: fileActions,
+        timeZone: config.user.timezone,
+        embedder,
+        meaningMinScore: config.files.meaningMinScore,
+        post: (item) => shell?.agent.post(item),
+        documents: !!documentFiles,
+      });
+      for (const t of search) tools.register(t);
+    }
     const showDocument = documentFiles && docFilesForShow
       ? async (path: string) => {
           const card = documentFiles!.show(await docFilesForShow!.resolve(path));
           return `A card for the ${card.fileKind === 'word' ? 'Word' : 'Excel'} file is in the chat; the user opens it with its Open button. Say so in one line.`;
         }
       : undefined;
-    for (const t of fileTools({ roots: fileRoots, actions: fileActions, viewer: attachmentFiles, ...(showDocument ? { showDocument } : {}) })) tools.register(t);
+    for (const t of fileTools({ roots: fileRoots, actions: fileActions, viewer: attachmentFiles, videos: config.video.enabled, ...(showDocument ? { showDocument } : {}) })) tools.register(t);
   }
   for (const t of systemTools({ controls, actions: systemActions, extra: apps })) tools.register(t);
   const buildLog = new BuildLog(store);
@@ -382,6 +432,86 @@ async function main(): Promise<void> {
       onTrashed: () => fileIndexer?.soon(),
     });
   }
+  // W1: tiles along the bottom of the chat screen; made below, once the features they show exist.
+  let widgets: WidgetBoard | undefined;
+  // T1: the to-do list and its reminders. Adding, changing and ticking off come only from the user's own words.
+  const todos = config.todos.enabled
+    ? new Todos({
+        list: new TodoList(join(configDir(), 'todos.md')),
+        store,
+        audit,
+        timeZone: config.user.timezone,
+        snoozeMinutes: config.todos.snoozeMinutes,
+        quietHours: config.notifications.quietHours,
+        isPaused,
+        post: (item) => {
+          shell?.agent.post(item);
+          widgets?.soon();
+        },
+        patch: (item) => {
+          shell?.patchItem(item);
+          widgets?.soon();
+        },
+        notify: (title, body) => desktopNotify(title, body),
+      })
+    : undefined;
+  if (todos) for (const t of todoTools({ todos, timeZone: config.user.timezone })) tools.register(t);
+  // T2: the morning brief. Code gathers it; the local model, when set, writes two lines on top.
+  const brief = config.brief.enabled
+    ? new MorningBrief({
+        config: config.brief,
+        userName: config.user.name,
+        timeZone: config.user.timezone,
+        store,
+        audit,
+        mail: mailState,
+        calendar: calendarApi && cal ? { api: calendarApi, workday: cal.workday } : undefined,
+        todos: todos?.list,
+        model: localModel,
+        isPaused,
+        quietHours: config.notifications.quietHours,
+        post: (item) => shell?.agent.post(item),
+      })
+    : undefined;
+  if (config.widgets.enabled) {
+    widgets = new WidgetBoard({
+      defaults: config.widgets.pinned,
+      store,
+      audit,
+      sources: {
+        ...(monitor ? { checkup: () => monitor.glance() } : {}),
+        ...(brief ? { brief: () => brief.glance() } : {}),
+        ...(todos ? { todos: () => todos.glance() } : {}),
+      },
+      broadcast: (w) => shell?.broadcast({ type: 'widgets', widgets: w }),
+    });
+  }
+  // K1: the knowledge base, updated hourly in the background. Notes only: never memory, never a tool call.
+  const kc = config.knowledge;
+  const knowledgeFile = kc.enabled ? new KnowledgeFile(join(configDir(), 'knowledge'), config.user.name) : undefined;
+  // K2: the first pass on backfillModel (cloud by default), hourly updates on model (local by default).
+  const knowledgeModel = (which: 'local' | 'cloud') => (which === 'cloud' ? { model, role: 'nightly' as const } : localModel ? { model: localModel, role: 'local' as const } : null);
+  const knowledge = knowledgeFile
+    ? new KnowledgeCrawler({
+        config: kc,
+        userName: config.user.name,
+        userAddresses: [config.mail.address],
+        timeZone: config.user.timezone,
+        file: knowledgeFile,
+        store,
+        audit,
+        mail: mailClient,
+        calendar: calendarApi,
+        files: fileCatalog,
+        displayPath: fileRoots ? (p: string) => fileRoots.display(p) : undefined,
+        models: { backfill: knowledgeModel(kc.backfillModel), hourly: knowledgeModel(kc.model) },
+        isPaused,
+        quietHours: config.notifications.quietHours,
+      })
+    : undefined;
+  if (knowledgeFile) tools.register(knowledgeReadTool({ file: knowledgeFile }));
+  // V2: the chat's microphone button, when [models.speech] is set.
+  const dictation = config.models.speech ? new Dictation({ model, audit, maxSeconds: config.models.speech.maxSeconds }) : undefined;
   const themePath = omarchyThemePath();
   shell = new Shell({
     store,
@@ -403,8 +533,15 @@ async function main(): Promise<void> {
     ...(fileActions ? { fileActions } : {}),
     ...(fileIndexer ? { fileIndex: fileIndexer } : {}),
     attachments: attachmentFiles,
+    ...(documentFiles ? { documents: documentFiles } : {}),
     chatWindow,
+    ...(dictation ? { voice: { maxSeconds: dictation.maxSeconds } } : {}),
     ...(review ? { cleanup: review } : {}),
+    ...(todos ? { todos } : {}),
+    ...(brief ? { brief } : {}),
+    ...(widgets ? { widgets } : {}),
+    ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile, progressText(knowledge.progress(), kc.backfillModel === 'cloud')), run: () => knowledge.run() } } : {}),
+    ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     doctor: async () => formatChecks(await runDoctor(realDoctorProbes(kioskPaths()))),
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
@@ -451,6 +588,7 @@ async function main(): Promise<void> {
     attachments: attachmentFiles,
     ...(documentFiles ? { documents: documentFiles } : {}),
     ...(appLink ? { appLink } : {}),
+    ...(dictation ? { speech: dictation } : {}),
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();
@@ -486,15 +624,23 @@ async function main(): Promise<void> {
   setInterval(nightlyTick, 10 * 60_000).unref();
   // L1: the monitor samples every half minute; the review checks every few minutes whether today's is due.
   monitor?.start();
+  todos?.start();
+  widgets?.start();
   windowTracker?.start();
   const reviewTick = () => void review?.runIfDue().catch((err: unknown) => audit.append({ kind: 'assistant', event: 'review_error', error: (err as Error).message }));
   setTimeout(reviewTick, 2 * 60_000).unref();
   setInterval(reviewTick, 5 * 60_000).unref();
+  // K1: checks every five minutes whether the hourly update is due; the first one a few minutes after start.
+  const knowledgeTick = () => void knowledge?.runIfDue().catch((err: unknown) => audit.append({ kind: 'knowledge', event: 'error', error: (err as Error).message.slice(0, 200) }));
+  setTimeout(knowledgeTick, 3 * 60_000).unref();
+  setInterval(knowledgeTick, 5 * 60_000).unref();
   console.log(`aios-core listening on http://127.0.0.1:${config.ui.port}`);
 
   const shutdown = async () => {
     pipeline.stop();
     monitor?.stop();
+    todos?.stop();
+    widgets?.stop();
     windowTracker?.stop();
     chatWindow.stop();
     await watcher.stop();

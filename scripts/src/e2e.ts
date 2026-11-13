@@ -8,7 +8,8 @@
  * live status values, memory cards and, with the GreenMail stack up, new-mail
  * notifications, the reply flow and opening attachments; C1: the calendar against a pretend
  * Google Calendar (fixtures/calendar.ts); D1: Word and Excel files through pretend WordCraft and
- * GridCraft tools (fixtures/documents.ts). Never touches real accounts or keys.
+ * GridCraft tools (fixtures/documents.ts); V2: the microphone button, with Chromium's fake microphone
+ * and a pretend whisper.cpp server. Never touches real accounts or keys.
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
@@ -28,6 +29,7 @@ import { makeDocFixture } from '../../fixtures/documents.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
+import { type WavInfo, encodeWav, readWav } from '@aios/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
@@ -252,6 +254,13 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: { content: 'Tap **Save** if that is right.' } }] });
     return finish(0.0004);
   }
+  if (last.role === 'user' && /^remind me at 4 tomorrow to call ana$/i.test(lastUser)) {
+    // T1: the model fills in the time as a local ISO time; code checks it and repeats it on the card.
+    const args = JSON.stringify({ items: [{ text: 'Call Ana', remindAt: `${calDay(1)}T16:00` }] });
+    chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_todo', function: { name: 'todo_add', arguments: args } }] } }] });
+    chunk(res, { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 400, completion_tokens: 10, cost: 0.0003 } });
+    return void res.end('data: [DONE]\n\n');
+  }
   if (last.role === 'user' && /remember/i.test(lastUser)) {
     const args = JSON.stringify({ fact: 'Sara prefers short emails' });
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_m', function: { name: 'memory_propose', arguments: args } }] } }] });
@@ -398,7 +407,21 @@ async function main(): Promise<void> {
   if (shots) mkdirSync(shots, { recursive: true });
   // S4: a built app trying the network would hit /probe; its policy must stop it first.
   let probeHits = 0;
+  // V2: the pretend whisper.cpp server keeps the format of each recording it was sent.
+  const heard: (WavInfo | null)[] = [];
   const mock = createServer((req, res) => {
+    if (req.url === '/inference' && req.method === 'POST') {
+      void (async () => {
+        const parts: Buffer[] = [];
+        for await (const c of req) parts.push(c as Buffer);
+        const body = Buffer.concat(parts);
+        const at = body.indexOf('RIFF');
+        heard.push(at < 0 ? null : readWav(new Uint8Array(body.subarray(at))));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ text: ' Remind me to buy milk tomorrow.\n' }));
+      })();
+      return;
+    }
     if (req.url?.startsWith('/probe')) {
       probeHits++;
       res.writeHead(200, { 'access-control-allow-origin': '*', 'content-type': 'text/plain' });
@@ -509,6 +532,12 @@ async function main(): Promise<void> {
   const port = 17_000 + Math.floor(Math.random() * 1000);
   // D1: fixture documents and pretend WordCraft/GridCraft tools.
   const docs = makeDocFixture();
+  // D3: pretend WordCraft and GridCraft apps that only note the file they were given.
+  const appsOpened = join(tmp, 'apps-opened.txt');
+  for (const name of ['pretend-wordcraft', 'pretend-gridcraft']) {
+    writeFileSync(join(tmp, name), `#!/bin/sh\nprintf '%s %s\\n' "${name}" "$1" >> "${appsOpened}"\n`);
+    chmodSync(join(tmp, name), 0o755);
+  }
   // L1: an old, big-enough download for the morning tidy-up. The review only runs from /checkup here,
   // and the resource monitor is off so the test machine's own numbers can't post alerts.
   const downloads = join(tmp, 'Downloads');
@@ -526,9 +555,12 @@ async function main(): Promise<void> {
       `[mail]\naddress = "john@aios.test"\nusername = "john@aios.test"\npasswordRef = "keyring:mail"\nbatchWindowSeconds = 2\n` +
       `imap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n` +
       `[calendar]\nclientId = "${FAKE_CLIENT_ID}"\napiBaseUrl = "${gcal.apiBaseUrl}"\ntokenUrl = "${gcal.tokenUrl}"\n` +
-      `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\n` +
+      `[docs]\nroots = ["${docs.documents}"]\nwordCli = "${docs.wordCli}"\nsheetCli = "${docs.sheetCli}"\nwordApp = "${join(tmp, 'pretend-wordcraft')}"\nsheetApp = "${join(tmp, 'pretend-gridcraft')}"\n` +
       `[files]\nroots = ["${docs.documents}", "${downloads}"]\n` +
       `[assistant.monitor]\nenabled = false\n[assistant.review]\nenabled = false\nminFileMb = 1\n` +
+      // T2: the brief is due from midnight here, so it comes at boot whatever time the test runs.
+      `[brief]\nafter = "00:00"\n` +
+      `[models.speech]\nbaseUrl = "http://127.0.0.1:${mockPort}"\nmaxSeconds = 10\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -570,9 +602,13 @@ async function main(): Promise<void> {
   process.on('exit', () => {
     if (core?.pid && core.exitCode === null) process.kill(-core.pid, 'SIGTERM');
   });
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
+  // V2: Chromium's fake microphone, allowed for the chat page only, playing 3 s of tone then 1 s of quiet, looped.
+  const fakeMic = join(tmp, 'fake-mic.wav');
+  writeFileSync(fakeMic, encodeWav(Float32Array.from({ length: 4 * 48_000 }, (_, i) => (i < 3 * 48_000 ? 0.3 * Math.sin((2 * Math.PI * 220 * i) / 48_000) : 0)), 48_000));
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium', args: ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${fakeMic}`] });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.context().grantPermissions(['microphone'], { origin: `http://127.0.0.1:${port}` });
     // Newer Chromium returns a Promise from scrollIntoView(); mimic it so effects that leak the return value fail here.
     await page.addInitScript(`{
       const orig = Element.prototype.scrollIntoView;
@@ -906,6 +942,16 @@ async function main(): Promise<void> {
     await shot(page, '14-document-sheet');
     await page.keyboard.press('Escape');
     check('Esc closes the document', await waitFor(async () => (await page.getByTestId('document-viewer').count()) === 0));
+    // D3: Edit in the viewer closes it and opens the file in GridCraft, from the click alone.
+    await page.getByTestId('document-open').click();
+    check('the viewer has an Edit button', (await page.getByTestId('document-viewer-edit').innerText()) === 'Edit in GridCraft');
+    await page.getByTestId('document-viewer-edit').click();
+    check('Edit closes the viewer', await waitFor(async () => (await page.getByTestId('document-viewer').count()) === 0));
+    const salesPath = join(docs.documents, 'Finance', 'sales.xlsx');
+    check('Edit opens the file in GridCraft', await waitFor(async () => existsSync(appsOpened) && readFileSync(appsOpened, 'utf8') === `pretend-gridcraft ${salesPath}\n`, 10_000));
+    check('the chat says where it opened', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).includes('Opened sales.xlsx in GridCraft')));
+    await page.getByTestId('document-edit').click();
+    check('Edit on the card opens it too', await waitFor(async () => readFileSync(appsOpened, 'utf8').split('\n').filter(Boolean).length === 2, 10_000));
     // 12. Editing documents (D2): the change waits on a card; Save writes a new file next to the original.
     const reportBefore = readFileSync(join(docs.documents, 'report.docx'));
     await input.fill('move the lease date in report.docx to 30 November');
@@ -942,6 +988,12 @@ async function main(): Promise<void> {
     await input.fill('find the file about the office lease');
     await input.press('Enter');
     check('files_search finds the report by what it says', await waitFor(async () => (await lastAssistant().innerText()).includes('report.docx'), 15_000));
+    // F3: the search also posts a card with the best files, why each matched, and Open.
+    const results = page.locator('[data-kind="file_results"]').last();
+    check('the results card shows the report with a reason and Open', await waitFor(async () => (await results.count()) === 1 && (await results.getByTestId('file-result-name').first().innerText()).includes('report.docx'), 15_000));
+    check('each row says why it matched', (await results.getByTestId('file-result-why').first().innerText()).length > 0);
+    check('the report opens from the card', (await results.getByTestId('file-result-open').count()) >= 1);
+    await shot(page, '16b-file-results');
     await input.fill('/reindex');
     await input.press('Enter');
     check('/reindex says how far the index is', await waitFor(async () => (await page.locator('body').innerText()).includes('Reading your files again in the background'), 10_000));
@@ -955,6 +1007,98 @@ async function main(): Promise<void> {
     await cleanup.getByTestId('cleanup-trash').first().click();
     check('Move to Trash marks the row', await waitFor(async () => (await cleanup.getByTestId('cleanup-file').first().getAttribute('data-state')) === 'trashed'));
     check('the file is in the Trash with its info', !existsSync(oldIso) && existsSync(join(tmp, 'data', 'Trash', 'files', 'old-installer.iso')) && readFileSync(join(tmp, 'data', 'Trash', 'info', 'old-installer.iso.trashinfo'), 'utf8').includes(`Path=${oldIso.split('/').map(encodeURIComponent).join('/')}`));
+    // 16. T1 and T2: a reminder from the user's words, repeated back by code; Done only on the click; /brief.
+    await input.fill('remind me at 4 tomorrow to call Ana');
+    await input.press('Enter');
+    const todoCard = page.locator('[data-kind="todo"]').last();
+    check('the reminder card repeats the checked time', await waitFor(async () => (await todoCard.count()) === 1 && /Call Ana[^]*Reminder: Tomorrow, .*16:00/.test(await todoCard.innerText()), 10_000));
+    const todosFile = join(tmp, 'config', 'aios', 'todos.md');
+    check('the reminder is in todos.md', existsSync(todosFile) && readFileSync(todosFile, 'utf8').includes(`- [ ] Call Ana · remind ${calDay(1)} 16:00`));
+    // W1: the to-do tile at the bottom, used further down.
+    const todoTile = page.locator('[data-testid="widget"][data-widget="todos"]');
+    await todoCard.getByTestId('todo-done').click();
+    check('Done ticks it off in the file', await waitFor(async () => readFileSync(todosFile, 'utf8').includes('- [x] Call Ana')));
+    check('the morning brief came at boot with today\'s events', (await page.locator('[data-kind="brief"]').count()) >= 1 && (await page.locator('[data-kind="brief"]').first().getByTestId('brief-intro').innerText()).includes('John'));
+    await input.fill('/brief');
+    await input.press('Enter');
+    check('/brief shows it again', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) >= 2, 10_000));
+    await shot(page, '16-todos-brief');
+    // W1: pinned tiles along the bottom: checkup, the brief and to-dos by default; a click opens the full card.
+    const tiles = page.getByTestId('widget');
+    check('three widgets are pinned at the bottom', (await tiles.count()) === 3 && (await tiles.evaluateAll((els) => els.map((e) => e.getAttribute('data-widget')).join(','))) === 'checkup,brief,todos');
+    check('tiles show only their names until opened', (await tiles.evaluateAll((els) => els.map((e) => (e as unknown as { innerText: string }).innerText.replace(/[^A-Za-z-]+/g, ' ').trim()).join(','))) === 'Checkup,Today,To-dos');
+    const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
+    const row = await box('[data-testid="widgets"]');
+    const composer = await box('[data-testid="composer"]');
+    check('the tiles line up with the chat column', Math.abs(row.x - composer.x) < 1 && Math.abs(row.x + row.width - (composer.x + composer.width)) < 1, `${row.x}+${row.width} vs ${composer.x}+${composer.width}`);
+    const briefs = await page.locator('[data-kind="brief"]').count();
+    await page.locator('[data-testid="widget"][data-widget="brief"]').getByTestId('widget-open').click();
+    check('clicking the brief tile shows the brief', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) === briefs + 1, 10_000));
+    await todoTile.getByTestId('widget-open').click();
+    check('clicking the to-do tile shows the list', await waitFor(async () => (await page.locator('[data-kind="todo"][data-event="list"]').count()) === 1));
+    await shot(page, 'w1-widgets');
+    await todoTile.hover();
+    await shot(page, 'w1-widgets-hover');
+    await todoTile.getByTestId('widget-unpin').click();
+    check('× unpins a tile', await waitFor(async () => (await tiles.count()) === 2));
+    await page.reload();
+    check('unpinning lasts across a reload', await waitFor(async () => (await page.getByTestId('widget').count()) === 2));
+    await page.getByTestId('widget-add').click();
+    await page.locator('[data-testid="widget-pin"][data-widget="todos"]').click();
+    check('+ pins it again', await waitFor(async () => (await page.getByTestId('widget').count()) === 3));
+    // An overdue item (written by hand, as the user may) turns the to-do and Today buttons amber after the next refresh.
+    writeFileSync(todosFile, `${readFileSync(todosFile, 'utf8')}- [ ] Renew passport · due ${calDay(-2)}\n`);
+    await page.reload();
+    check('an overdue to-do turns its button amber, with a dot', await waitFor(async () => (await todoTile.getAttribute('data-tone')) === 'attention' && (await todoTile.getByTestId('widget-dot').count()) === 1));
+    await shot(page, 'w1-widgets-attention');
+    await input.fill('/unpin checkup');
+    await input.press('Enter');
+    check('/unpin takes a tile off', await waitFor(async () => (await page.locator('[data-testid="widget"][data-widget="checkup"]').count()) === 0));
+    await input.fill('/pin checkup');
+    await input.press('Enter');
+    check('/pin puts it back at the end', await waitFor(async () => (await page.getByTestId('widget').last().getAttribute('data-widget')) === 'checkup'));
+    // K1: /knowledge update writes the knowledge base (code only here: no local model) and shows it.
+    await input.fill('/knowledge update');
+    await input.press('Enter');
+    const knowledgeFile = join(tmp, 'config', 'aios', 'knowledge', 'about-me.md');
+    check('/knowledge update writes and shows the knowledge base', await waitFor(async () => existsSync(knowledgeFile) && (await page.locator('[data-kind="notice"]').last().innerText()).includes('# About John'), 10_000));
+    check('the knowledge base has its sections and the user\'s own', existsSync(knowledgeFile) && /## Upcoming[^]*## Recent activity[^]*## My notes/.test(readFileSync(knowledgeFile, 'utf8')));
+    // V2: the microphone shows the words while the user talks, after what was typed, and sends nothing.
+    // The fake microphone plays fake-mic.wav: 3 seconds of tone (talking), 1 second of quiet (a pause), looped.
+    const mic = page.getByTestId('mic');
+    const userMessages = await page.locator('[data-kind="user"]').count();
+    const sentence = 'Remind me to buy milk tomorrow.';
+    check('the microphone button is on with [models.speech]', await waitFor(async () => (await mic.count()) === 1 && (await mic.isEnabled())));
+    await input.fill('Note:');
+    await mic.click();
+    check('the microphone listens', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    check('it says it is listening', (await page.getByTestId('voice-status').innerText()).includes('Listening'));
+    check('words show in grey while still talking', await waitFor(async () => (await page.getByTestId('voice-interim').count()) === 1 && (await page.getByTestId('voice-interim').innerText()).includes(sentence.replace(/\.$/, '')), 8000));
+    await shot(page, 'v2-listening');
+    check('a finished piece joins the text box at a pause, while still listening', await waitFor(async () => (await input.inputValue()).startsWith(`Note: ${sentence}`) && (await mic.getAttribute('data-state')) === 'listening', 8000), await input.inputValue());
+    await mic.click();
+    check('stopping finishes the last piece', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle' && (await page.getByTestId('voice-interim').count()) === 0));
+    check('only the spoken words were added, after the typed text', new RegExp(`^Note: (${sentence.replace(/\./g, '\\.')} ?)+$`).test(await input.inputValue()), await input.inputValue());
+    check('every piece reached the speech model as 16 kHz mono 16-bit WAV of speech, never silence alone', heard.length >= 2 && heard.every((h) => h?.sampleRate === 16_000 && h.channels === 1 && h.bitsPerSample === 16 && h.seconds > 0.4 && h.seconds < 8), JSON.stringify(heard));
+    await sleep(500);
+    check('nothing was sent by voice', (await page.locator('[data-kind="user"]').count()) === userMessages && (await agentState.innerText()).includes('idle'));
+    await shot(page, 'v2-words');
+    const kept = await input.inputValue();
+    await mic.click();
+    check('the button listens again', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    await sleep(4500);
+    await page.keyboard.press('Escape');
+    check('Esc cancels and puts the text box back as it was', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle') && (await input.inputValue()) === kept, await input.inputValue());
+    const afterCancel = heard.length;
+    await sleep(2000);
+    check('nothing more goes to the speech model after Esc', heard.length === afterCancel && (await input.inputValue()) === kept);
+    await page.keyboard.press('Control+m');
+    check('Ctrl+M starts listening', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    await sleep(2000);
+    await page.keyboard.press('Control+m');
+    check('Ctrl+M stops and adds the words', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle' && (await input.inputValue()).length > kept.length));
+    await input.fill('');
+
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

@@ -166,7 +166,7 @@ describe('mail watcher', () => {
 describe('mail failure messages', () => {
   const err = (props: object, message = 'raw') => Object.assign(new Error(message), props);
   it.each([
-    [err({ authenticationFailed: true }, 'Command failed'), /rejected the login.*pnpm run setup/],
+    [err({ authenticationFailed: true }, 'Command failed'), /rejected the login.*astra setup/],
     [err({ code: 'EAUTH', responseCode: 535 }), /rejected the login/],
     [err({ code: 'ENOTFOUND' }), /can't be found.*network/],
     [err({ code: 'EAI_AGAIN' }), /can't be found/],

@@ -1,4 +1,4 @@
-import { AiosConfig, LocalModelConfig, MODEL_ROLES, type CloudModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
+import { AiosConfig, DEFAULT_PORT, LocalModelConfig, MODEL_ROLES, type CloudModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
 import { TEST_MAILBOX } from './mailbox.js';
 
 // P1: the doctor checks the same references, so the list lives in core.
@@ -144,7 +144,7 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
     ...(calendar ? { calendar } : {}),
     notifications: existing?.notifications,
     cost: existing?.cost,
-    ui: existing?.ui,
+    ui: existing?.ui ?? { port: DEFAULT_PORT },
     assistant: existing?.assistant,
   });
   return { config, secrets };

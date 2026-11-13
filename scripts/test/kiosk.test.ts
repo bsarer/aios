@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BAR_ID, REQUIRE_LINE, addBarButton, addRequire, hyprlandModule, installKiosk, kioskPaths, launcherScript, parseMonitors, removeBarButton, removeRequire, uninstallKiosk, unitFile } from '../src/kiosk.js';
+import { requireLine } from '@aios/core';
 
 const has = (cmd: string) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
 
@@ -42,12 +43,12 @@ describe('install and uninstall', () => {
     const first = await installKiosk(h.p, opts, h.run);
     expect(first.written.sort()).toEqual([h.p.aiosLua, h.p.hyprlandLua, h.p.launcher, h.p.unit].sort());
     expect(readFileSync(`${h.p.hyprlandLua}.aios-backup`, 'utf8')).toBe(OMARCHY_HYPRLAND_LUA);
-    expect(readFileSync(h.p.hyprlandLua, 'utf8')).toBe(`${OMARCHY_HYPRLAND_LUA}\n${REQUIRE_LINE}\n`);
-    expect(h.calls).toEqual(['systemctl --user daemon-reload', 'systemctl --user enable aios-core.service']);
+    expect(readFileSync(h.p.hyprlandLua, 'utf8')).toBe(`${OMARCHY_HYPRLAND_LUA}\n${h.p.requireLine}\n`);
+    expect(h.calls).toEqual(['systemctl --user daemon-reload', 'systemctl --user enable astra.service']);
 
     const second = await installKiosk(h.p, opts, h.run);
     expect(second.written).toEqual([]);
-    expect(readFileSync(h.p.hyprlandLua, 'utf8').split(REQUIRE_LINE)).toHaveLength(2);
+    expect(readFileSync(h.p.hyprlandLua, 'utf8').split(h.p.requireLine)).toHaveLength(2);
   });
 
   it('uninstall restores hyprland.lua exactly and removes every file', async () => {
@@ -58,7 +59,7 @@ describe('install and uninstall', () => {
     expect(readFileSync(h.p.hyprlandLua, 'utf8')).toBe(OMARCHY_HYPRLAND_LUA);
     for (const f of [h.p.aiosLua, h.p.launcher, h.p.unit]) expect(existsSync(f)).toBe(false);
     expect(removed).toHaveLength(4);
-    expect(h.calls).toEqual([`${h.p.launcher} exit`, 'systemctl --user disable --now aios-core.service', 'systemctl --user daemon-reload']);
+    expect(h.calls).toEqual([`${h.p.launcher} exit`, 'systemctl --user disable --now astra.service', 'systemctl --user daemon-reload']);
     expect(await uninstallKiosk(h.p, h.run)).toEqual([]);
   });
 
@@ -66,7 +67,7 @@ describe('install and uninstall', () => {
     const h = home();
     const r = await installKiosk(h.p, { ...opts, hyprland: false }, h.run);
     expect(readFileSync(h.p.hyprlandLua, 'utf8')).toBe(OMARCHY_HYPRLAND_LUA);
-    expect(r.notes.join('\n')).toContain(REQUIRE_LINE);
+    expect(r.notes.join('\n')).toContain(h.p.requireLine);
   });
 
   it('skips Hyprland on an old hyprland.conf setup but still installs the service', async () => {
@@ -117,7 +118,7 @@ describe('S7: the AI button in Omarchy 4’s top bar', () => {
   it('adds one command module at the start of the right section, and only once', () => {
     const added = addBarButton(OMARCHY_SHELL_JSON, "/home/j/.local/bin/aios-kiosk")!;
     const cfg = JSON.parse(added) as { bar: { layout: { right: Record<string, unknown>[]; left: unknown[] } } };
-    expect(cfg.bar.layout.right[0]).toEqual({ id: BAR_ID, type: 'command', exec: "'/home/j/.local/bin/aios-kiosk' bar", interval: 2, tooltip: 'AI OS', onClick: "'/home/j/.local/bin/aios-kiosk' open" });
+    expect(cfg.bar.layout.right[0]).toEqual({ id: BAR_ID, type: 'command', exec: "'/home/j/.local/bin/aios-kiosk' bar", interval: 2, tooltip: 'Astra', onClick: "'/home/j/.local/bin/aios-kiosk' open" });
     expect(cfg.bar.layout.right[1]).toEqual({ id: 'omarchy.tray' });
     expect(cfg.bar.layout.left).toEqual([{ id: 'omarchy.menu' }]);
     expect(addBarButton(added, '/x')).toBe(added);
@@ -185,9 +186,18 @@ package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
       'rule aios-kiosk ^(org\\.aios\\.home|(chrome|chromium|brave)-127\\.0\\.0\\.1__.*)$ fullscreen=true',
       'on hyprland.start',
       'exec /home/j/.local/bin/aios-kiosk open',
-      'bind SUPER + SHIFT + ESCAPE -> exec_cmd:/home/j/.local/bin/aios-kiosk exit (Exit AI OS)',
-      'bind SUPER + SHIFT + H -> exec_cmd:/home/j/.local/bin/aios-kiosk open (Open AI OS)',
+      'bind SUPER + SHIFT + ESCAPE -> exec_cmd:/home/j/.local/bin/aios-kiosk exit (Exit Astra)',
+      'bind SUPER + SHIFT + H -> exec_cmd:/home/j/.local/bin/aios-kiosk open (Open Astra)',
     ]);
+  });
+
+  it('R1: a new install loads astra.lua with its own line, and the old AI OS line still loads aios.lua', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'astra-lua-'));
+    mkdirSync(join(dir, '.config', 'hypr'), { recursive: true });
+    writeFileSync(join(dir, '.config', 'hypr', 'astra.lua'), hyprlandModule({ launcher: '/x/astra-kiosk', autostart: false }));
+    expect(requireLine('astra')).not.toBe(REQUIRE_LINE);
+    expect(runLua(dir, requireLine('astra'))[0]).toMatch(/^rule aios-kiosk /);
+    expect(runLua(dir, REQUIRE_LINE)).toEqual(['']);
   });
 
   it('S6/S7: with a screen chosen, the chat window lives on it, and no workspace is pinned', () => {
@@ -266,7 +276,7 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
     expect(r.lines.filter((l) => l.startsWith('curl'))).toHaveLength(3);
     expect(r.lines.some((l) => l.startsWith('chromium'))).toBe(false);
     // Only the latest failure, with its detail lines.
-    expect(r.lines.find((l) => l.startsWith('notify-send'))).toBe('notify-send -u critical AI OS aios-core failed to start: config is invalid:');
+    expect(r.lines.find((l) => l.startsWith('notify-send'))).toBe('notify-send -u critical Astra aios-core failed to start: config is invalid:');
     expect(r.stderr).toContain('mail.address: Invalid email');
     expect(r.stderr).not.toContain('old');
   });
@@ -280,12 +290,12 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
   it('S7: bar prints the AI button, with a dot while aios-core says something new is waiting', () => {
     const rt = mkdtempSync(join(tmpdir(), 'aios-rt-'));
     const run = launcher({ windowOpen: true, hung: false, env: { XDG_RUNTIME_DIR: rt } });
-    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI', tooltip: 'AI OS' });
+    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI', tooltip: 'Astra' });
     mkdirSync(join(rt, 'aios'));
     writeFileSync(join(rt, 'aios', 'unseen'), '1');
-    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI •', tooltip: 'AI OS: something new', class: 'active' });
+    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI •', tooltip: 'Astra: something new', class: 'active' });
     writeFileSync(join(rt, 'aios', 'unseen'), '0');
-    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI', tooltip: 'AI OS' });
+    expect(JSON.parse(run('bar').stdout)).toEqual({ text: 'AI', tooltip: 'Astra' });
   });
 
   it('exit kills a hung chat within a second', () => {

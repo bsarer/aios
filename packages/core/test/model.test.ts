@@ -385,7 +385,7 @@ describe('ModelClient gate and key (A7)', () => {
     });
     const err = await c.complete(req()).catch((e: unknown) => e as ModelError);
     expect(err).toMatchObject({ kind: 'key_missing' });
-    expect((err as ModelError).userMessage).toMatch(/keyring.*locked.*pnpm run setup/);
+    expect((err as ModelError).userMessage).toMatch(/keyring.*locked.*astra setup/);
     expect(seen).toHaveLength(0);
     expect(calls[0]).toMatchObject({ ok: false, errorKind: 'key_missing' });
   });

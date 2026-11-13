@@ -398,7 +398,7 @@ export class Shell {
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `memory-export-${localDate(this.clock().getTime(), this.o.timeZone)}.md`);
     const summaries = dates.map((d) => f.summary(d) ?? '').join('\n');
-    writeFileSync(path, `# AI OS memory export\n\n${all}\n\n${summaries}`, { mode: 0o600 });
+    writeFileSync(path, `# Astra memory export\n\n${all}\n\n${summaries}`, { mode: 0o600 });
     this.o.audit.append({ kind: 'memory', decision: 'export' });
     return say(`Exported to ${path}`);
   }
@@ -447,7 +447,7 @@ export class Shell {
       }
       case 'doctor': {
         // Code checks only: no model call, so it works while paused too.
-        if (!this.o.doctor) return say('Run `pnpm doctor` in the AI OS folder to check the install.');
+        if (!this.o.doctor) return say('Run `astra doctor` in a terminal to check the install.');
         return say((await this.o.doctor()).join('\n'));
       }
       case 'brief': {

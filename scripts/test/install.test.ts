@@ -94,7 +94,7 @@ describe.skipIf(!tools)('install and upgrade', () => {
     const r = h.sh([], { AIOS_REPO: repo });
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
-    const app = join(h.home, '.local', 'share', 'aios', 'app');
+    const app = join(h.home, '.local', 'share', 'astra', 'app');
     expect(readFileSync(join(app, 'VERSION'), 'utf8')).toBe('one\n');
     // No config yet: the full setup, not --kiosk.
     expect(h.calls().split('\n').filter((l) => l.startsWith('pnpm'))).toEqual([
@@ -105,8 +105,8 @@ describe.skipIf(!tools)('install and upgrade', () => {
     ]);
 
     git(repo, 'tag', 'v0.2.0');
-    mkdirSync(join(h.home, '.config', 'aios'), { recursive: true });
-    writeFileSync(join(h.home, '.config', 'aios', 'config.toml'), '# test\n');
+    mkdirSync(join(h.home, '.config', 'astra'), { recursive: true });
+    writeFileSync(join(h.home, '.config', 'astra', 'config.toml'), '# test\n');
     const again = h.sh([], { AIOS_REPO: repo });
     expect(again.status).toBe(0);
     expect(readFileSync(join(app, 'VERSION'), 'utf8')).toBe('unreleased\n');
@@ -121,7 +121,7 @@ describe.skipIf(!tools)('install and upgrade', () => {
     const h = fakeHome();
     const repo = localRepo(h.home);
     expect(h.sh([], { AIOS_REPO: repo }).status).toBe(0);
-    writeFileSync(join(h.home, '.local', 'share', 'aios', 'app', 'VERSION'), 'edited\n');
+    writeFileSync(join(h.home, '.local', 'share', 'astra', 'app', 'VERSION'), 'edited\n');
     const r = h.sh([], { AIOS_REPO: repo });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('local changes');
@@ -206,6 +206,26 @@ describe.skipIf(!tools)('pnpm backup and install.sh --restore', () => {
     writeFileSync(join(dir, rel), 'x');
     return rel;
   };
+
+  it('R1: puts an Astra backup back as Astra and an AI OS backup back as AI OS, and refuses one holding both', () => {
+    const astra = fakeHome();
+    const a = archive(astra, (d) => [put(d, '.config/astra/config.toml'), put(d, '.local/share/astra/aios.db')]);
+    const r = astra.fn(`check_backup "${a}" && restore_backup "${a}" && echo "dir=$APP_DIR"`);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('dir=astra');
+    expect(existsSync(join(astra.home, '.config/astra/config.toml'))).toBe(true);
+    expect(astra.calls()).toContain('systemctl --user stop astra.service');
+
+    const old = fakeHome();
+    const o = archive(old, (d) => [put(d, '.config/aios/config.toml')]);
+    const r2 = old.fn(`check_backup "${o}" && restore_backup "${o}" && echo "dir=$APP_DIR"`);
+    expect(r2.stdout).toContain('dir=aios');
+    expect(existsSync(join(old.home, '.config/aios/config.toml'))).toBe(true);
+    expect(old.calls()).toContain('systemctl --user stop aios-core.service');
+
+    const both = archive(old, (d) => [put(d, '.config/aios/config.toml'), put(d, '.config/astra/config.toml')]);
+    expect(old.fn(`check_backup "${both}"`).stdout).toContain('refused: ');
+  });
 
   it('refuses archives with anything outside AI OS, links, .. or an installed copy, and changes nothing', () => {
     const h = populated();

@@ -270,7 +270,7 @@ export class KnowledgeCrawler {
       const [from = 0, to = now] = item.ref.split('-').map(Number);
       const turns = this.o.store.chatTurnsBetween(from, to).slice(-60);
       if (!turns.length) return null;
-      return chatRequest(role, name, turns.map((t) => `${t.role === 'user' ? name : 'AI OS'}: ${t.content.replace(/\s+/g, ' ').slice(0, t.role === 'user' ? 600 : 300)}`));
+      return chatRequest(role, name, turns.map((t) => `${t.role === 'user' ? name : 'Astra'}: ${t.content.replace(/\s+/g, ' ').slice(0, t.role === 'user' ? 600 : 300)}`));
     }
     if (!events?.length) return null;
     return calendarRequest(

@@ -108,7 +108,7 @@ describe('building an app', () => {
     const r = rig();
     const result = await r.builder.build({ name: 'Pomodoro', request: 'a pomodoro timer; 25 minutes work, 5 break' });
     expect(result).toEqual({ slug: 'pomodoro', name: 'Pomodoro', created: true, summary: 'A 25-minute focus timer with 5-minute breaks.', costUsd: 0.42, desktopId: 'aios-app-pomodoro.desktop' });
-    const appDir = join(r.env.XDG_DATA_HOME, 'aios', 'apps', 'pomodoro');
+    const appDir = join(r.env.XDG_DATA_HOME, 'astra', 'apps', 'pomodoro');
     expect(r.read('cwd').trim()).toBe(appDir);
     expect(r.read('stdin')).toBe('a pomodoro timer; 25 minutes work, 5 break');
     expect(r.read('args')).toContain('--restricted');
@@ -117,7 +117,7 @@ describe('building an app', () => {
     const desktop = readFileSync(join(r.env.XDG_DATA_HOME, 'applications', 'aios-app-pomodoro.desktop'), 'utf8');
     expect(desktop).toContain('Name=Pomodoro\n');
     expect(desktop).toContain(
-      `Exec=chromium --user-data-dir=${join(r.env.XDG_DATA_HOME, 'aios', 'app-profiles', 'pomodoro')} --class=aios-app-pomodoro --no-first-run --no-default-browser-check --app=file://${appDir}/index.html\n`,
+      `Exec=chromium --user-data-dir=${join(r.env.XDG_DATA_HOME, 'astra', 'app-profiles', 'pomodoro')} --class=aios-app-pomodoro --no-first-run --no-default-browser-check --app=file://${appDir}/index.html\n`,
     );
     // S3 lists it like any installed app.
     expect((await scanApps({ env: r.env })).map((a) => [a.id, a.name])).toContainEqual(['aios-app-pomodoro.desktop', 'Pomodoro']);
@@ -142,7 +142,7 @@ describe('building an app', () => {
     const r = rig();
     expect(await r.builder.unavailable()).toBeNull();
     const noClaude = new AppBuilder({ config: { ...CONFIG, command: 'no-such-claude' }, env: r.env });
-    expect(await noClaude.unavailable()).toMatch(/Claude Code isn't installed where AI OS can find it/);
+    expect(await noClaude.unavailable()).toMatch(/Claude Code isn't installed where Astra can find it/);
   });
 });
 
@@ -269,7 +269,7 @@ describe('build_app', () => {
     expect(t.posted).toEqual([
       { kind: 'build_result', id: expect.any(String), actionId: card.id, ok: true, text: '“Pomodoro” is ready. A 25-minute focus timer with 5-minute breaks.', at: 1_000_000 },
     ]);
-    expect(t.notified).toEqual([['Pomodoro is ready', 'Open it from the chat, or ask AI OS to open it.']]);
+    expect(t.notified).toEqual([['Pomodoro is ready', 'Open it from the chat, or ask Astra to open it.']]);
     expect(t.actions.builtApp(card.id)).toEqual({ name: 'Pomodoro', slug: 'pomodoro' });
   });
 
@@ -403,6 +403,6 @@ describe('build history', () => {
     expect(log.estimate(false)).toEqual({ medianUsd: 0.3, count: 1 });
     log.start({ id: 'g', name: 'g', slug: 'g', created: true, budgetUsd: 2, at: 7 });
     log.recover(8);
-    expect(log.get('g')).toMatchObject({ state: 'failed', error: 'AI OS stopped while it was building', finishedAt: 8 });
+    expect(log.get('g')).toMatchObject({ state: 'failed', error: 'Astra stopped while it was building', finishedAt: 8 });
   });
 });

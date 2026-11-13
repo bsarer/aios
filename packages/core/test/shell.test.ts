@@ -193,10 +193,10 @@ describe('slash commands', () => {
     expect(model.requests).toHaveLength(0);
   });
 
-  it('/doctor shows the install checks written by code, or says to run pnpm doctor (P1)', async () => {
+  it('/doctor shows the install checks written by code, or says to run astra doctor (P1, R1)', async () => {
     const plain = setup();
     await plain.shell.handle({ type: 'send', text: '/doctor' });
-    expect(plain.items().at(-1)).toMatchObject({ text: expect.stringContaining('pnpm doctor') });
+    expect(plain.items().at(-1)).toMatchObject({ text: expect.stringContaining('astra doctor') });
     const withDoctor = setup([], { doctor: async () => ['✓ Config: config.toml loads', '✗ Kiosk: aios.lua is missing'] });
     await withDoctor.shell.handle({ type: 'send', text: '/doctor' });
     expect(withDoctor.items().at(-1)).toMatchObject({ text: '✓ Config: config.toml loads\n✗ Kiosk: aios.lua is missing' });

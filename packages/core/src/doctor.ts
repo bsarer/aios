@@ -6,8 +6,8 @@
 import { execFile } from 'node:child_process';
 import { access, constants, readFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
-import { type AiosConfig, type SecretRef, configDir, parseConfig } from '@aios/shared';
-import { BAR_ID, type KioskPaths, REQUIRE_LINE } from './kiosk-paths.js';
+import { APP_NAME, type AiosConfig, type SecretRef, configDir, parseConfig } from '@aios/shared';
+import { BAR_ID, type KioskPaths } from './kiosk-paths.js';
 import { Keyring } from './secrets/keyring.js';
 import { secretRefs } from './secrets/refs.js';
 import { SYSTEM_COMMANDS } from './system/run.js';
@@ -31,7 +31,7 @@ export interface DoctorProbes {
   exists: (path: string) => Promise<boolean>;
   /** Runs a program without a shell; never throws (code 127 when it is missing). */
   run: (cmd: string, args: string[]) => Promise<{ code: number; stdout: string }>;
-  /** True when aios-core answers on 127.0.0.1:port. */
+  /** True when the core answers on 127.0.0.1:port. */
   health: (port: number) => Promise<boolean>;
   /** Whether a keyring reference is stored. Values are never returned. */
   hasSecret: (ref: SecretRef) => Promise<boolean>;
@@ -57,7 +57,7 @@ export function realDoctorProbes(paths: KioskPaths, env: NodeJS.ProcessEnv = pro
   };
 }
 
-const SETUP_KIOSK = 'run `pnpm run setup --kiosk` in the AI OS folder';
+const SETUP_KIOSK = 'run `astra setup --kiosk`';
 
 /** A program's full path on PATH, or null. */
 async function onPath(p: DoctorProbes, cmd: string): Promise<string | null> {
@@ -76,30 +76,33 @@ export function unitTargets(unit: string): { node?: string; dir?: string } {
 }
 
 export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
+  const svc = p.paths.service;
+  const unitName = svc.replace(/\.service$/, '');
+  const module = p.paths.aiosLua.split('/').pop() ?? 'astra.lua';
   const out: Check[] = [];
   const add = (c: Check) => out.push(c);
 
   // Config.
   const toml = await p.readFile(join(configDir(p.env), 'config.toml'));
   let config: AiosConfig | null = null;
-  if (toml === null) add({ name: 'Config', status: 'fail', detail: `no ${join(configDir(p.env), 'config.toml')}`, fix: 'run `pnpm run setup`' });
+  if (toml === null) add({ name: 'Config', status: 'fail', detail: `no ${join(configDir(p.env), 'config.toml')}`, fix: 'run `astra setup`' });
   else {
     try {
       config = parseConfig(toml);
       add({ name: 'Config', status: 'ok', detail: 'config.toml loads' });
     } catch (err) {
-      add({ name: 'Config', status: 'fail', detail: (err as Error).message.split('\n')[0]!.slice(0, 200), fix: 'fix config.toml, or run `pnpm run setup` again' });
+      add({ name: 'Config', status: 'fail', detail: (err as Error).message.split('\n')[0]!.slice(0, 200), fix: 'fix config.toml, or run `astra setup` again' });
     }
   }
 
   // The service and what it points at.
   const unit = await p.readFile(p.paths.unit);
-  if (unit === null) add({ name: 'Service', status: 'fail', detail: 'aios-core.service is not installed', fix: SETUP_KIOSK });
+  if (unit === null) add({ name: 'Service', status: 'fail', detail: `${svc} is not installed`, fix: SETUP_KIOSK });
   else {
-    const enabled = (await p.run('systemctl', ['--user', 'is-enabled', 'aios-core.service'])).stdout.trim();
-    const active = (await p.run('systemctl', ['--user', 'is-active', 'aios-core.service'])).stdout.trim();
+    const enabled = (await p.run('systemctl', ['--user', 'is-enabled', svc])).stdout.trim();
+    const active = (await p.run('systemctl', ['--user', 'is-active', svc])).stdout.trim();
     const ok = enabled === 'enabled' && active === 'active';
-    add({ name: 'Service', status: ok ? 'ok' : 'fail', detail: `aios-core is ${active || 'unknown'} and ${enabled || 'unknown'}`, ...(ok ? {} : { fix: 'run `systemctl --user enable --now aios-core`; if it keeps stopping, `journalctl --user -u aios-core -n 20` says why' }) });
+    add({ name: 'Service', status: ok ? 'ok' : 'fail', detail: `${unitName} is ${active || 'unknown'} and ${enabled || 'unknown'}`, ...(ok ? {} : { fix: `run \`systemctl --user enable --now ${unitName}\`; if it keeps stopping, \`journalctl --user -u ${unitName} -n 20\` says why` }) });
     const t = unitTargets(unit);
     const missing = [t.node, t.dir].filter((x): x is string => !!x);
     const gone: string[] = [];
@@ -108,19 +111,19 @@ export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
   }
   if (config) {
     const up = await p.health(config.ui.port);
-    add({ name: 'Chat page', status: up ? 'ok' : 'fail', detail: up ? `answers on 127.0.0.1:${config.ui.port}` : `nothing answers on 127.0.0.1:${config.ui.port}`, ...(up ? {} : { fix: '`journalctl --user -u aios-core -n 20` says why it did not start' }) });
+    add({ name: 'Chat page', status: up ? 'ok' : 'fail', detail: up ? `answers on 127.0.0.1:${config.ui.port}` : `nothing answers on 127.0.0.1:${config.ui.port}`, ...(up ? {} : { fix: `\`journalctl --user -u ${unitName} -n 20\` says why it did not start` }) });
   }
 
   // Hyprland: the kiosk line and the session the service sees.
   const lua = await p.readFile(p.paths.hyprlandLua);
-  const hasLine = lua?.split('\n').some((l) => l.trim() === REQUIRE_LINE) ?? false;
+  const hasLine = lua?.split('\n').some((l) => l.trim() === p.paths.requireLine) ?? false;
   const hasModule = await p.exists(p.paths.aiosLua);
   add(
     lua === null
-      ? { name: 'Kiosk', status: 'fail', detail: `no ${p.paths.hyprlandLua} (AI OS needs Omarchy 4, Hyprland 0.55+)` }
+      ? { name: 'Kiosk', status: 'fail', detail: `no ${p.paths.hyprlandLua} (${APP_NAME} needs Omarchy 4, Hyprland 0.55+)` }
       : hasLine && hasModule
-        ? { name: 'Kiosk', status: 'ok', detail: 'hyprland.lua loads aios.lua' }
-        : { name: 'Kiosk', status: 'fail', detail: hasModule ? 'the AI OS line is gone from hyprland.lua (an Omarchy update may have reset it)' : 'aios.lua is missing', fix: SETUP_KIOSK },
+        ? { name: 'Kiosk', status: 'ok', detail: `hyprland.lua loads ${module}` }
+        : { name: 'Kiosk', status: 'fail', detail: hasModule ? `the ${APP_NAME} line is gone from hyprland.lua (an Omarchy update may have reset it)` : `${module} is missing`, fix: SETUP_KIOSK },
   );
   const envOut = (await p.run('systemctl', ['--user', 'show-environment'])).stdout;
   const missingVars = ['WAYLAND_DISPLAY', 'HYPRLAND_INSTANCE_SIGNATURE'].filter((v) => !new RegExp(`^${v}=`, 'm').test(envOut));
@@ -129,7 +132,7 @@ export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
   // Omarchy's commands (S1) and the top bar button (S7).
   const gone: string[] = [];
   for (const c of OMARCHY_COMMANDS) if (!(await onPath(p, c))) gone.push(c);
-  add(gone.length ? { name: 'Omarchy commands', status: 'fail', detail: `missing: ${gone.join(', ')}`, fix: 'system controls that use them will fail; check the Omarchy version (AI OS targets Omarchy 4) and report it so AI OS can follow the rename' } : { name: 'Omarchy commands', status: 'ok', detail: `all ${OMARCHY_COMMANDS.length} found` });
+  add(gone.length ? { name: 'Omarchy commands', status: 'fail', detail: `missing: ${gone.join(', ')}`, fix: `system controls that use them will fail; check the Omarchy version (${APP_NAME} targets Omarchy 4) and report it so ${APP_NAME} can follow the rename` } : { name: 'Omarchy commands', status: 'ok', detail: `all ${OMARCHY_COMMANDS.length} found` });
   const shell = await p.readFile(p.paths.shellJson);
   if (shell !== null) {
     const button = shell.includes(`"${BAR_ID}"`);
@@ -143,7 +146,7 @@ export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
     else {
       const missing: string[] = [];
       for (const r of refs) if (!(await p.hasSecret(r))) missing.push(r);
-      add(missing.length ? { name: 'Keyring', status: 'fail', detail: `not stored: ${missing.join(', ')}`, fix: 'run `pnpm run setup` and type them again (a restored backup never carries secrets)' } : { name: 'Keyring', status: 'ok', detail: `${refs.length} secrets stored` });
+      add(missing.length ? { name: 'Keyring', status: 'fail', detail: `not stored: ${missing.join(', ')}`, fix: 'run `astra setup` and type them again (a restored backup never carries secrets)' } : { name: 'Keyring', status: 'ok', detail: `${refs.length} secrets stored` });
     }
   }
 

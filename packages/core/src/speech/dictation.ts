@@ -59,7 +59,7 @@ export class Dictation {
 }
 
 function friendly(kind: string): string {
-  if (kind === 'paused') return 'AI OS is paused. Type /resume to use the microphone again.';
+  if (kind === 'paused') return 'Astra is paused. Type /resume to use the microphone again.';
   if (kind === 'aborted') return 'Stopped.';
   if (kind === 'timeout') return 'The speech model took too long to answer. Try a shorter recording.';
   if (kind === 'network' || kind === 'unavailable') return "I can't reach the speech model on this computer. Is whisper-server running? See the README's voice section.";

@@ -258,7 +258,7 @@ export class ResourceMonitor {
     this.o.post(item);
     // Numbers only: process and file names stay out of the audit log.
     this.o.audit.append({ kind: 'assistant', event: 'resource_alert', resource, key });
-    if (!inQuietHours(this.now(), this.o.timeZone, this.o.quietHours)) this.o.notify?.('AI OS', a.headline);
+    if (!inQuietHours(this.now(), this.o.timeZone, this.o.quietHours)) this.o.notify?.('Astra', a.headline);
     if (!this.o.model) return;
     try {
       const advice = await resourceAdvice(this.o.model, { resource, facts: a.facts, top: a.top });

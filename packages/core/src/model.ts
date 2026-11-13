@@ -124,7 +124,7 @@ const USER_MESSAGES: Record<ModelErrorKind, string> = {
   paused: 'I am paused. Type /resume to continue.',
   cost_cap: "Today's model spending has reached your daily cap, so I've stopped calling the model until tomorrow. Type /cost to see the numbers, or raise cost.dailyCapUsd in your config.",
   not_configured: 'No model is set up for this job.',
-  key_missing: "I can't read the model API key from the keyring. If you just logged in, the keyring may still be locked; otherwise run `pnpm run setup`.",
+  key_missing: "I can't read the model API key from the keyring. If you just logged in, the keyring may still be locked; otherwise run `astra setup`.",
 };
 
 export class ModelError extends Error {

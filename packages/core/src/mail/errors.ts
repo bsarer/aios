@@ -18,9 +18,9 @@ const TLS = new Set([
 
 export function describeMailError(err: unknown): string {
   const e = (err ?? {}) as { name?: string; code?: string; message?: string; authenticationFailed?: boolean; responseCode?: number; responseText?: string };
-  if (e.name === 'KeyringError') return "the mail password isn't readable from the keyring (it may still be locked, or run `pnpm run setup`)";
+  if (e.name === 'KeyringError') return "the mail password isn't readable from the keyring (it may still be locked, or run `astra setup`)";
   if (e.authenticationFailed || e.code === 'EAUTH' || e.code === 'ENOAUTH' || e.responseCode === 535) {
-    return 'the mail server rejected the login. Check the app password with `pnpm run setup`';
+    return 'the mail server rejected the login. Check the app password with `astra setup`';
   }
   if (e.code && NO_NETWORK.has(e.code)) return "the mail server can't be found. Check the network connection";
   if (e.code && REFUSED.has(e.code)) return 'the mail server refused the connection. Check the host and port in your config';

@@ -256,7 +256,7 @@ export class AppBuilder {
   /** Why building can't work on this computer, or null. Checked before a card is shown. */
   async unavailable(): Promise<string | null> {
     if (!(await onPath(this.o.config.command, this.env))) {
-      return `Claude Code isn't installed where AI OS can find it (looked for "${this.o.config.command}"). Install it and sign in with \`claude\` once, or set [builder] command in the config to its full path.`;
+      return `Claude Code isn't installed where Astra can find it (looked for "${this.o.config.command}"). Install it and sign in with \`claude\` once, or set [builder] command in the config to its full path.`;
     }
     if (!(await this.browser())) return 'No Chromium-based browser is installed to open built apps in (chromium, google-chrome-stable or brave).';
     return null;
@@ -398,7 +398,7 @@ export class AppBuilder {
         '[Desktop Entry]',
         'Type=Application',
         `Name=${name}`,
-        'Comment=Built by AI OS',
+        'Comment=Built by Astra',
         `Exec=${exec}`,
         'Terminal=false',
         'Categories=Utility;',

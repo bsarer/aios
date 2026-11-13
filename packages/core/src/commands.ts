@@ -82,7 +82,7 @@ export const HELP_TEXT = [
   '/brief   show the morning brief now: urgent mail, today\'s events and what is due',
   '/todos   show your open to-dos',
   '/pin <checkup | brief | todos>  pin it as a tile at the bottom of the screen; /unpin takes it off',
-  '/knowledge  show the knowledge base AI OS keeps about you from your mail, calendar, files and chat',
+  '/knowledge  show the knowledge base Astra keeps about you from your mail, calendar, files and chat',
   '/knowledge update  update it now (it updates by itself every hour)',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Esc stops a reply.',

@@ -1,9 +1,9 @@
-/** P1: `pnpm doctor` and `/doctor`, against fake probes. Never the real computer. */
+/** P1, R1: `astra doctor` and `/doctor`, against fake probes. Never the real computer. */
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseCommand } from '../src/commands.js';
 import { type DoctorProbes, OMARCHY_COMMANDS, formatChecks, runDoctor, unitTargets } from '../src/doctor.js';
-import { BAR_ID, REQUIRE_LINE, kioskPaths } from '../src/kiosk-paths.js';
+import { BAR_ID, kioskPaths } from '../src/kiosk-paths.js';
 
 const HOME = '/home/john';
 const env = { HOME, PATH: '/usr/bin:/home/john/.local/share/omarchy/bin' };
@@ -40,9 +40,9 @@ const UNIT = `[Service]\nWorkingDirectory=/home/john/.local/share/aios/app/packa
 /** A working install; each test breaks one thing. */
 function healthy() {
   const files = new Map<string, string>([
-    [join(HOME, '.config', 'aios', 'config.toml'), CONFIG],
+    [join(HOME, '.config', 'astra', 'config.toml'), CONFIG],
     [paths.unit, UNIT],
-    [paths.hyprlandLua, `require("hypr.bindings")\n${REQUIRE_LINE}\n`],
+    [paths.hyprlandLua, `require("hypr.bindings")\n${paths.requireLine}\n`],
     [paths.aiosLua, '-- aios'],
     [paths.shellJson, JSON.stringify({ bar: { layout: { right: [{ id: BAR_ID }] } } })],
     ['/usr/bin/node', ''],
@@ -50,8 +50,8 @@ function healthy() {
     ...OMARCHY_COMMANDS.map((c) => [`/home/john/.local/share/omarchy/bin/${c}`, ''] as [string, string]),
   ]);
   const runs = new Map<string, { code: number; stdout: string }>([
-    ['systemctl --user is-enabled aios-core.service', { code: 0, stdout: 'enabled\n' }],
-    ['systemctl --user is-active aios-core.service', { code: 0, stdout: 'active\n' }],
+    ['systemctl --user is-enabled astra.service', { code: 0, stdout: 'enabled\n' }],
+    ['systemctl --user is-active astra.service', { code: 0, stdout: 'active\n' }],
     ['systemctl --user show-environment', { code: 0, stdout: 'HOME=/home/john\nWAYLAND_DISPLAY=wayland-1\nHYPRLAND_INSTANCE_SIGNATURE=abc\n' }],
     ['secret-tool', { code: 2, stdout: '' }],
   ]);
@@ -100,11 +100,11 @@ describe('doctor', () => {
 
   it('finds a stopped service, a moved Node and a page that does not answer', async () => {
     const h = healthy();
-    h.runs.set('systemctl --user is-active aios-core.service', { code: 3, stdout: 'failed\n' });
+    h.runs.set('systemctl --user is-active astra.service', { code: 3, stdout: 'failed\n' });
     h.files.delete('/usr/bin/node');
     h.down();
     const c = await byName(h.probes);
-    expect(c.Service).toMatchObject({ status: 'fail', detail: 'aios-core is failed and enabled' });
+    expect(c.Service).toMatchObject({ status: 'fail', detail: 'astra is failed and enabled' });
     expect(c['Service paths']).toMatchObject({ status: 'fail', detail: expect.stringContaining('/usr/bin/node') });
     expect(c['Chat page']).toMatchObject({ status: 'fail', detail: 'nothing answers on 127.0.0.1:7777' });
   });
@@ -120,18 +120,18 @@ describe('doctor', () => {
 
   it('stops at a missing or broken config, without guessing the rest', async () => {
     const h = healthy();
-    h.files.delete(join(HOME, '.config', 'aios', 'config.toml'));
+    h.files.delete(join(HOME, '.config', 'astra', 'config.toml'));
     const c = await byName(h.probes);
-    expect(c.Config).toMatchObject({ status: 'fail', fix: 'run `pnpm run setup`' });
+    expect(c.Config).toMatchObject({ status: 'fail', fix: 'run `astra setup`' });
     expect(c.Keyring).toBeUndefined();
     expect(c['Chat page']).toBeUndefined();
-    h.files.set(join(HOME, '.config', 'aios', 'config.toml'), '[user\n');
+    h.files.set(join(HOME, '.config', 'astra', 'config.toml'), '[user\n');
     expect((await byName(h.probes)).Config).toMatchObject({ status: 'fail' });
   });
 
   it('warns about Claude Code and the Word and Excel programs only when they are turned on', async () => {
     const h = healthy();
-    h.files.set(join(HOME, '.config', 'aios', 'config.toml'), CONFIG.replace('[builder]\nenabled = false', '[builder]\nenabled = true').replace('[docs]\nenabled = false', '[docs]\nenabled = true'));
+    h.files.set(join(HOME, '.config', 'astra', 'config.toml'), CONFIG.replace('[builder]\nenabled = false', '[builder]\nenabled = true').replace('[docs]\nenabled = false', '[docs]\nenabled = true'));
     const c = await byName(h.probes);
     expect(c['Claude Code']).toMatchObject({ status: 'warn' });
     expect(c['Word and Excel']).toMatchObject({ status: 'warn' });

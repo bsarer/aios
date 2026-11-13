@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Astra
+Comment=A chat that works with your mail, calendar, files and apps
+Exec=astra open
+Icon=astra
+Terminal=false
+Categories=Utility;
+StartupWMClass=org.aios.home

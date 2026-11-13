@@ -19,7 +19,7 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Tools
-        run: pacman -Syu --noconfirm --needed git nodejs pnpm python libsecret jq curl
+        run: pacman -Syu --noconfirm --needed git nodejs pnpm node-gyp python libsecret jq curl
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

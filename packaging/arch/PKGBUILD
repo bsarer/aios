@@ -15,8 +15,9 @@ license=('LicenseRef-unreleased')
 # nodejs runs it; libsecret (secret-tool) keeps the keys; chromium shows the chat; jq, curl and
 # hyprland are what the kiosk launcher and window rules use.
 depends=('nodejs>=22.13' 'libsecret' 'chromium' 'jq' 'curl' 'bash' 'hyprland')
-# better-sqlite3 is a native module: pnpm builds it against this nodejs with python and a compiler.
-makedepends=('pnpm' 'python' 'gcc' 'make')
+# better-sqlite3 is a native module: pnpm builds it against this nodejs with node-gyp (Arch's
+# nodejs has no npm, which usually brings it), python and a compiler.
+makedepends=('pnpm' 'node-gyp' 'python' 'gcc' 'make')
 optdepends=(
   'claude-code: build small apps from the chat'
   'mpv: play videos'

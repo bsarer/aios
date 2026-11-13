@@ -331,7 +331,7 @@ evals             model bake-off: tasks, runner, report
 
 ## Dependencies added in R1
 
-No new npm packages. The package build uses Arch's own `nodejs`, `pnpm`, `python`, `gcc` and `make` (makedepends; better-sqlite3 is compiled against the system Node), and the package depends on `nodejs`, `libsecret`, `chromium`, `jq`, `curl`, `bash` and `hyprland`, all in Arch's official repositories. CI adds the official `archlinux:base-devel` container image and GitHub's own `actions/upload-artifact@v7` and `actions/download-artifact@v8` (MIT, maintained by GitHub); releases are created with the `gh` CLI that GitHub's runners include.
+No new npm packages. The package build uses Arch's own `nodejs`, `pnpm`, `node-gyp`, `python`, `gcc` and `make` (makedepends; better-sqlite3 is compiled against the system Node), and the package depends on `nodejs`, `libsecret`, `chromium`, `jq`, `curl`, `bash` and `hyprland`, all in Arch's official repositories. CI adds the official `archlinux:base-devel` container image and GitHub's own `actions/upload-artifact@v7` and `actions/download-artifact@v8` (MIT, maintained by GitHub); releases are created with the `gh` CLI that GitHub's runners include.
 
 ## Dependencies added in V2
 

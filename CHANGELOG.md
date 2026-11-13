@@ -2,6 +2,16 @@
 
 Releases are git tags (`v0.1.0`). `./install.sh` installs the newest one; `./install.sh --ref <tag>` a given one.
 
+## v0.2.0 (unreleased): Astra
+
+AI OS becomes **Astra**, an app others can install (R1). Your AI OS keeps working as it is: an
+install with only `~/.config/aios` keeps its folders, service, keyring and port 7777.
+
+- **Arch package** (`packaging/arch`): installs the program in `/usr/lib/astra` with an `astra` command and a launcher entry; nothing in your home folder changes until `astra setup`.
+- **`astra` command:** `astra` opens the chat; `setup`, `doctor`, `backup`, `restore FILE`, `calendar-login`, `uninstall [--purge]`, `version`.
+- **Own names:** `~/.config/astra`, `~/.local/share/astra`, `astra.service`, keyring service `astra`, and port 7780, so Astra and AI OS can live on one computer (on different accounts).
+- `install.sh` installs from source into `~/.local/share/astra/app`; restores put a backup back under the names it was made with.
+
 ## v0.1.0 (alpha, 2026-11)
 
 The first release that can be installed with `install.sh`. AI OS is a chat that runs as a full

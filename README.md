@@ -4,23 +4,36 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. D3 (the Edit button on documents) is in review. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review. F3 (finding files by describing them: whole text, meaning, a results card) is in review. P1 (install.sh, `pnpm doctor`, backup and restore) is in review. Changes are listed in [CHANGELOG.md](CHANGELOG.md); to help, see [CONTRIBUTING.md](CONTRIBUTING.md).
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. D3 (the Edit button on documents) is in review. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review. F3 (finding files by describing them: whole text, meaning, a results card) is in review. P1 (install.sh, doctor, backup and restore) and R1 (the Astra package) are in review. Changes are listed in [CHANGELOG.md](CHANGELOG.md); to help, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Install, upgrade and restore
 
-On Omarchy 4, as yourself (not root), in the desktop session:
+AI OS is becoming **Astra** (R1, in review): the same program as an Arch package with an `astra`
+command. An existing AI OS install (only `~/.config/aios`) keeps its names, service and port 7777;
+a new install is Astra, in `~/.config/astra` and `~/.local/share/astra`, on port 7780.
+
+**Arch package** (Omarchy 4, as yourself, in the desktop session):
 
 ```sh
 git clone https://github.com/bsarer/aios.git && cd aios
-./install.sh --check      # only checks Omarchy 4, Hyprland 0.55+, Node 22.13+, pnpm, git, tar and secret-tool
-./install.sh              # installs the newest release into ~/.local/share/aios/app and runs setup
+packaging/arch/build.sh                         # makes packaging/arch/out/astra-<version>-1-<arch>.pkg.tar.zst
+sudo pacman -U packaging/arch/out/astra-*.pkg.tar.zst
+astra setup                                     # asks its questions, keeps keys in the keyring, then offers the service and kiosk
 ```
 
-- **Upgrade:** run `./install.sh` again (from the clone or from `~/.local/share/aios/app`). It fetches the newest `v*` tag, reinstalls packages, rebuilds the chat page and runs `setup --kiosk`, which keeps your answers. `--ref main` (or any tag) installs that instead. It stops if the installed copy has local changes.
-- **Check:** `pnpm doctor` (or `/doctor` in the chat) checks the config, the service and the Node it points at, the chat page, the `aios.lua` line in `hyprland.lua`, that the service sees the desktop session, the `omarchy-*` commands AI OS uses, the AI button on the top bar and that each keyring secret is stored (never shown). Each problem comes with a one-line fix. Run it after every Omarchy update; most fixes are `pnpm run setup --kiosk`.
-- **Back up:** `pnpm backup` stops the service for a moment and writes `~/aios-backup-<date>.tar.gz` (readable only by you) with `~/.config/aios` (config, memory) and `~/.local/share/aios` (database, audit log, built apps), without the installed copy, the chat's browser profile or caches. **Keyring secrets are never in it**, and it holds your mail cache and memory: keep it private.
-- **Restore:** `./install.sh --restore ~/aios-backup-<date>.tar.gz` checks every entry first (only plain files and folders inside AI OS's own folders), moves what is there now to `*.before-restore-<date>` instead of deleting it, unpacks, then installs as above. On a new computer, run `pnpm run setup` afterwards to type the secrets again; `pnpm doctor` says which are missing.
-- **Reinstall after an Omarchy update:** `pnpm backup`, `pnpm --filter @aios/scripts uninstall`, update Omarchy, `./install.sh --restore <file>`, `pnpm doctor`.
+The package only puts the program in `/usr/lib/astra`, `/usr/bin/astra` and a launcher entry;
+nothing in your home folder changes until `astra setup`. Tagged releases also carry the package
+(CI builds it on every `v*` tag). After a `nodejs` major update, reinstall the package so its
+database module matches.
+
+**From source** (for development): `./install.sh --check`, then `./install.sh`, which installs
+the newest release tag into `~/.local/share/astra/app` and runs setup; run it again to upgrade
+(`--ref main` or a tag installs that instead).
+
+- **Check:** `astra doctor` (or `/doctor` in the chat; `pnpm doctor` in a checkout) checks the config, the service and the Node it points at, the chat page, the `astra.lua` line in `hyprland.lua`, that the service sees the desktop session, the `omarchy-*` commands Astra uses, the AI button on the top bar and that each keyring secret is stored (never shown). Each problem comes with a one-line fix. Run it after every Omarchy update; most fixes are `astra setup --kiosk`.
+- **Back up:** `astra backup` stops the service for a moment and writes `~/astra-backup-<date>.tar.gz` (readable only by you) with the config and memory and the data folder (database, audit log, built apps), without an installed copy, the chat's browser profile or caches. **Keyring secrets are never in it**, and it holds your mail cache and memory: keep it private. An AI OS install writes `~/aios-backup-<date>.tar.gz`.
+- **Restore:** `astra restore <file>` (or `./install.sh --restore <file>`) checks every entry first (only plain files and folders inside the app's own folders), moves what is there now to `*.before-restore-<date>` instead of deleting it, and unpacks. An AI OS backup goes back as AI OS, an Astra one as Astra. Then `astra setup` asks for the secrets again; `astra doctor` says which are missing.
+- **Uninstall:** `astra uninstall` removes the service, kiosk and stored secrets and asks about the config; `--purge` also deletes the config, memory and data after one question. `sudo pacman -R astra` removes the program.
 
 ## Mail
 
@@ -315,6 +328,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in R1
+
+No new npm packages. The package build uses Arch's own `nodejs`, `pnpm`, `python`, `gcc` and `make` (makedepends; better-sqlite3 is compiled against the system Node), and the package depends on `nodejs`, `libsecret`, `chromium`, `jq`, `curl`, `bash` and `hyprland`, all in Arch's official repositories. CI adds the official `archlinux:base-devel` container image and GitHub's own `actions/upload-artifact@v7` and `actions/download-artifact@v8` (MIT, maintained by GitHub); releases are created with the `gh` CLI that GitHub's runners include.
 
 ## Dependencies added in V2
 

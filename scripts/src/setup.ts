@@ -1,5 +1,5 @@
 /**
- * `pnpm run setup`: interactive, idempotent first-run setup.
+ * `astra setup` (or `pnpm run setup`): interactive, idempotent first-run setup.
  * Collects settings, stores secrets in the keyring, writes config, tests the mail login,
  * then (A6) offers to install the systemd service and the Hyprland kiosk.
  *
@@ -97,8 +97,11 @@ async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean, save: (c:
   const hyprland = await p.confirm(`Add one line to ${paths.hyprlandLua} to load the kiosk window rule and keys? (a backup is kept)`, true);
   const bar = await p.confirm('Add an AI button to Omarchy\'s top bar that brings the chat back? (a backup is kept)', true);
   config = await chooseScreen(config, p, save);
-  console.log('building the UI…');
-  await run('pnpm', ['--filter', '@aios/ui', 'build']);
+  // R1: the Arch package ships the UI built; a source checkout builds it here.
+  if (process.env.ASTRA_PACKAGED !== '1') {
+    console.log('building the UI…');
+    await run('pnpm', ['--filter', '@aios/ui', 'build']);
+  }
   const report = await installKiosk(
     paths,
     { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, bar, ...(config.screen.monitor ? { monitor: config.screen.monitor } : {}) },

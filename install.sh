@@ -193,7 +193,7 @@ main() {
       --ref) ref=${2:?--ref needs a tag or branch}; shift ;;
       --check) check=1 ;;
       --restore) restore=${2:?--restore needs a backup file}; shift ;;
-      -h | --help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
+      -h | --help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
       *) die "unknown option $1 (see --help)" ;;
     esac
     shift

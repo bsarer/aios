@@ -79,6 +79,8 @@ export interface ShellOptions {
   knowledge?: { view: () => string; run: () => Promise<{ by: 'model' | 'code'; error?: string } | null> };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
+  /** P1: the install checks for /doctor, written by code. Without it, /doctor says to run `pnpm doctor`. */
+  doctor?: () => Promise<string[]>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** Where /export writes. Default: the memory folder. */
@@ -396,7 +398,7 @@ export class Shell {
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `memory-export-${localDate(this.clock().getTime(), this.o.timeZone)}.md`);
     const summaries = dates.map((d) => f.summary(d) ?? '').join('\n');
-    writeFileSync(path, `# AI OS memory export\n\n${all}\n\n${summaries}`, { mode: 0o600 });
+    writeFileSync(path, `# Astra memory export\n\n${all}\n\n${summaries}`, { mode: 0o600 });
     this.o.audit.append({ kind: 'memory', decision: 'export' });
     return say(`Exported to ${path}`);
   }
@@ -442,6 +444,11 @@ export class Shell {
         const r = await this.o.cleanup.run();
         if (r === 'nothing') say('Nothing to tidy up right now: no big unused files in your folders and no idle windows.');
         return;
+      }
+      case 'doctor': {
+        // Code checks only: no model call, so it works while paused too.
+        if (!this.o.doctor) return say('Run `astra doctor` in a terminal to check the install.');
+        return say((await this.o.doctor()).join('\n'));
       }
       case 'brief': {
         if (!this.o.brief) return say('The morning brief is off. Turn it on with enabled = true under [brief] in your config.');

@@ -58,7 +58,7 @@ describe('the Change button', () => {
 
 describe('link tokens', () => {
   it('are made from a private key kept on disk and name one app each', () => {
-    const path = join(tmp('key'), 'aios', 'app-link.key');
+    const path = join(tmp('key'), 'astra', 'app-link.key');
     const key = linkKey(path);
     expect(key).toHaveLength(32);
     expect(readFileSync(path).equals(key)).toBe(true);
@@ -94,12 +94,12 @@ function rig(mode: 'ok' | 'error' = 'ok') {
   const link = { port: PORT, token: (slug: string) => linkToken(KEY, slug) };
   const builder = new AppBuilder({ config, env, link });
   const plain = new AppBuilder({ config, env });
-  const index = (slug: string) => join(env.XDG_DATA_HOME, 'aios', 'apps', slug, 'index.html');
+  const index = (slug: string) => join(env.XDG_DATA_HOME, 'astra', 'apps', slug, 'index.html');
   return { env, builder, plain, index, read: (slug: string) => readFileSync(index(slug), 'utf8') };
 }
 
 describe('built apps', () => {
-  it('get the Change button and a policy that reaches only AI OS', async () => {
+  it('get the Change button and a policy that reaches only Astra', async () => {
     const r = rig();
     await r.builder.build({ name: 'Snake', request: 'snake' });
     const html = r.read('snake');
@@ -113,7 +113,7 @@ describe('built apps', () => {
     await r.plain.build({ name: 'Snake', request: 'snake' });
     expect(r.read('snake')).not.toContain('change button');
     // A folder with no AI OS desktop entry isn't an app AI OS built, so it is left alone.
-    mkdirSync(join(r.env.XDG_DATA_HOME, 'aios', 'apps', 'stray'), { recursive: true });
+    mkdirSync(join(r.env.XDG_DATA_HOME, 'astra', 'apps', 'stray'), { recursive: true });
     writeFileSync(r.index('stray'), HTML);
     expect(await r.builder.sealAll()).toEqual(['snake']);
     expect(r.read('snake')).toContain('change button');
@@ -190,7 +190,7 @@ describe('asking for a change from inside an app', () => {
     expect(card.title).toBe('Change the app “Snake”? You asked from inside the app: “make it faster\n\nand blue”. Claude Code will edit only that app\'s folder.');
     expect(t.shownCards).toEqual(['Snake']);
     // Nothing ran: the app is as it was until the click.
-    expect(t.link.status(t.body({ slug: 'snake', token: TOKEN, card: res.card }))).toEqual({ ok: true, state: 'pending', message: 'Waiting for you to click Change on the card in the AI OS chat.' });
+    expect(t.link.status(t.body({ slug: 'snake', token: TOKEN, card: res.card }))).toEqual({ ok: true, state: 'pending', message: 'Waiting for you to click Change on the card in the Astra chat.' });
     expect(await t.actions.confirm(card.id, card.hash, '1')).toBe('done');
     expect(t.link.status(t.body({ slug: 'snake', token: TOKEN, card: res.card }))).toMatchObject({ ok: true, state: 'done' });
     // Audits record the length of the words, never the words.
@@ -199,7 +199,7 @@ describe('asking for a change from inside an app', () => {
     expect(t.auditLog()).not.toContain('faster');
   });
 
-  it("refuses a wrong token, another app's token, an app AI OS didn't build, and empty words", async () => {
+  it("refuses a wrong token, another app's token, an app Astra didn't build, and empty words", async () => {
     const t = linkRig();
     await t.r.builder.build({ name: 'Snake', request: 'snake' });
     await t.r.builder.build({ name: 'Solitaire', request: 'solitaire' });

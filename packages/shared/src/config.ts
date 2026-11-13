@@ -2,6 +2,7 @@ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
 import { WIDGET_KINDS, WidgetKind } from './protocol.js';
 import { MONITOR_NAME } from './window.js';
+import { appIds } from './brand.js';
 
 /**
  * Reference to a secret held in the system keyring, e.g. `keyring:openrouter`.
@@ -462,8 +463,8 @@ export function serializeConfig(config: AiosConfig): string {
   return stringifyToml(AiosConfig.parse(config));
 }
 
-/** Respect XDG_CONFIG_HOME, falling back to ~/.config/aios. */
+/** ~/.config/astra (respects XDG_CONFIG_HOME); ~/.config/aios for an install made before R1 (brand.ts). */
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   const base = env.XDG_CONFIG_HOME || `${env.HOME ?? ''}/.config`;
-  return `${base}/aios`;
+  return `${base}/${appIds(env).dir}`;
 }

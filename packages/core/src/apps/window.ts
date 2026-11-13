@@ -194,7 +194,7 @@ export class ChatWindow {
     const hypr = this.o.hypr;
     if (!hypr || this.stopEvents) return;
     this.stopEvents = hypr.events((ev) => this.onEvent(ev));
-    void this.run('restore the chat', 'AI OS', async (h) => {
+    void this.run('restore the chat', 'Astra', async (h) => {
       const [clients, monitors] = await Promise.all([h.clients(), h.monitors()]);
       const chat = clients.find((c) => CHAT_CLASS.test(c.class));
       this.noteAppsAt(monitors, chat);
@@ -304,7 +304,7 @@ export class ChatWindow {
    */
   async moveApp(match: WindowMatch, to: AppTarget): Promise<string> {
     const hypr = this.o.hypr;
-    if (!hypr) throw new Error("windows can't be moved here: AI OS isn't running inside Hyprland");
+    if (!hypr) throw new Error("windows can't be moved here: Astra isn't running inside Hyprland");
     const names = new Set(match.names.map(lower));
     const classes = new Set(match.classes.map(lower));
     const clients = (await hypr.clients()).filter((c) => !CHAT_CLASS.test(c.class) && c.mapped !== false);
@@ -393,7 +393,7 @@ export class ChatWindow {
         error = (err as Error).message.slice(0, 300);
       }
       this.o.audit.append({ kind: 'window', app, step: what, ...(to ? to : {}), ok: !error, ...(error ? { error } : {}) });
-      if (error) this.o.notice('warning', `I couldn't move ${app === 'AI OS' ? 'the chat' : `${app}'s`} window: ${error}`);
+      if (error) this.o.notice('warning', `I couldn't move ${app === 'Astra' ? 'the chat' : `${app}'s`} window: ${error}`);
     });
     this.queue = next.catch(() => undefined);
     return next;

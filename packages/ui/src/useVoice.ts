@@ -60,7 +60,7 @@ export function useVoice(o: { maxSeconds: number | null; onText: (text: string) 
     } catch {
       if (!quiet && !s.failed && !s.abort.signal.aborted) {
         s.failed = true;
-        setError("I can't reach the AI OS service.");
+        setError("I can't reach the Astra service.");
       }
     }
     return null;
@@ -120,7 +120,7 @@ export function useVoice(o: { maxSeconds: number | null; onText: (text: string) 
       const name = (err as Error | undefined)?.name;
       setError(
         name === 'NotAllowedError'
-          ? "The microphone isn't allowed for AI OS. Click the microphone again and choose Allow."
+          ? "The microphone isn't allowed for Astra. Click the microphone again and choose Allow."
           : name === 'NotFoundError'
             ? 'No microphone found. Plug one in and try again.'
             : "I couldn't open the microphone.",

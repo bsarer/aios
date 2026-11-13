@@ -1,5 +1,5 @@
 /**
- * `pnpm run setup`: interactive, idempotent first-run setup.
+ * `astra setup` (or `pnpm run setup`): interactive, idempotent first-run setup.
  * Collects settings, stores secrets in the keyring, writes config, tests the mail login,
  * then (A6) offers to install the systemd service and the Hyprland kiosk.
  *
@@ -68,7 +68,7 @@ async function chooseScreen(config: AiosConfig, p: Prompter, save: (c: AiosConfi
   const list = screens.map((s) => `${s.name} (${s.width}×${s.height}${s.focused ? ', focused now' : ''})`).join(', ');
   const current = screens.find((s) => s.name === config.screen.monitor)?.name ?? screens.find((s) => s.focused)?.name ?? screens[0]!.name;
   for (;;) {
-    const answer = (await p.ask(`Which screen should AI OS take over? ${list}`, { default: current })).trim();
+    const answer = (await p.ask(`Which screen should Astra take over? ${list}`, { default: current })).trim();
     const hit = screens.find((s) => s.name.toLowerCase() === answer.toLowerCase());
     if (!hit) {
       console.log(`Type one of: ${screens.map((s) => s.name).join(', ')}`);
@@ -77,7 +77,7 @@ async function chooseScreen(config: AiosConfig, p: Prompter, save: (c: AiosConfi
     if (hit.name === config.screen.monitor) return config;
     const next = { ...config, screen: { ...config.screen, monitor: hit.name } };
     await save(next);
-    console.log(`AI OS will use ${hit.name}; apps open on the other screens.`);
+    console.log(`Astra will use ${hit.name}; apps open on the other screens.`);
     return next;
   }
 }
@@ -93,12 +93,15 @@ async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean, save: (c:
     console.log(`--- ${paths.aiosLua} (dry run) ---\n${hyprlandModule({ launcher: paths.launcher, autostart: config.ui.kiosk, ...monitor })}`);
     return;
   }
-  if (!(await p.confirm('Run AI OS as a service that starts at login (systemd --user), with the full-screen chat?', true))) return;
+  if (!(await p.confirm('Run Astra as a service that starts at login (systemd --user), with the full-screen chat?', true))) return;
   const hyprland = await p.confirm(`Add one line to ${paths.hyprlandLua} to load the kiosk window rule and keys? (a backup is kept)`, true);
   const bar = await p.confirm('Add an AI button to Omarchy\'s top bar that brings the chat back? (a backup is kept)', true);
   config = await chooseScreen(config, p, save);
-  console.log('building the UI…');
-  await run('pnpm', ['--filter', '@aios/ui', 'build']);
+  // R1: the Arch package ships the UI built; a source checkout builds it here.
+  if (process.env.ASTRA_PACKAGED !== '1') {
+    console.log('building the UI…');
+    await run('pnpm', ['--filter', '@aios/ui', 'build']);
+  }
   const report = await installKiosk(
     paths,
     { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, bar, ...(config.screen.monitor ? { monitor: config.screen.monitor } : {}) },
@@ -107,10 +110,10 @@ async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean, save: (c:
   for (const f of report.written) console.log(`wrote ${f}`);
   for (const n of report.notes) console.log(n);
   if (await p.confirm('Start (or restart) the service now? Stop any `pnpm start` first, they use the same port.', true)) {
-    await run('systemctl', ['--user', 'restart', 'aios-core.service']);
+    await run('systemctl', ['--user', 'restart', paths.service]);
     console.log(`started. Open the chat with ${paths.launcher} open (or ${OPEN_KEYS} after reloading Hyprland).`);
   }
-  console.log(`Exit the chat with ${EXIT_KEYS}. If keys stop working: Ctrl+Alt+F3, log in, then \`systemctl --user stop aios-core\` and \`${paths.launcher} exit\`.`);
+  console.log(`Exit the chat with ${EXIT_KEYS}. If keys stop working: Ctrl+Alt+F3, log in, then \`systemctl --user stop ${paths.service}\` and \`${paths.launcher} exit\`.`);
 }
 
 async function main(): Promise<void> {
@@ -126,7 +129,7 @@ async function main(): Promise<void> {
 
   const existing = await loadExisting(path);
   if (kioskOnly) {
-    if (!existing) throw new Error(`run \`pnpm run setup\` first; ${path} not found`);
+    if (!existing) throw new Error(`run \`astra setup\` first; ${path} not found`);
     const p = terminalPrompter();
     try {
       await kiosk(existing, p, dryRun, (c) => writeConfig(path, c));

@@ -85,7 +85,7 @@ describe('config schema', () => {
   });
 
   it('honours XDG_CONFIG_HOME', () => {
-    expect(configDir({ XDG_CONFIG_HOME: '/x', HOME: '/home/j' })).toBe('/x/aios');
-    expect(configDir({ HOME: '/home/j' })).toBe('/home/j/.config/aios');
+    expect(configDir({ XDG_CONFIG_HOME: '/x', HOME: '/home/j' })).toBe('/x/astra');
+    expect(configDir({ HOME: '/home/j' })).toBe('/home/j/.config/astra');
   });
 });

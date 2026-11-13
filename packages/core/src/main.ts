@@ -5,7 +5,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { configDir, parseConfig } from '@aios/shared';
+import { appIds, configDir, parseConfig } from '@aios/shared';
 import { hyprlandIpc } from './apps/hyprland.js';
 import { createLauncher } from './apps/launcher.js';
 import { scanApps } from './apps/desktop.js';
@@ -14,6 +14,8 @@ import { BuildLog } from './apps/history.js';
 import { AppLink, linkKey, linkToken } from './apps/link.js';
 import { appTools, buildAppTool, buildStatusTool, builtAppOpener, offerBuild } from './apps/tools.js';
 import { UnseenFlag, unseenPath } from './apps/bar.js';
+import { formatChecks, realDoctorProbes, runDoctor } from './doctor.js';
+import { kioskPaths } from './kiosk-paths.js';
 import { ChatWindow } from './apps/window.js';
 import { desktopNotify } from './notify.js';
 import { ResourceMonitor } from './assistant/monitor.js';
@@ -353,7 +355,7 @@ async function main(): Promise<void> {
         card: (id) => systemActions.buildCard(id),
         showCard: (name) => {
           void chatWindow.bringForward(name);
-          desktopNotify(`Change ${name}?`, 'Click Change on the card in the AI OS chat to start.');
+          desktopNotify(`Change ${name}?`, 'Click Change on the card in the Astra chat to start.');
         },
         audit,
       });
@@ -541,6 +543,7 @@ async function main(): Promise<void> {
     ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile, progressText(knowledge.progress(), kc.backfillModel === 'cloud')), run: () => knowledge.run() } } : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
+    doctor: async () => formatChecks(await runDoctor(realDoctorProbes(kioskPaths()))),
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),
@@ -631,7 +634,7 @@ async function main(): Promise<void> {
   const knowledgeTick = () => void knowledge?.runIfDue().catch((err: unknown) => audit.append({ kind: 'knowledge', event: 'error', error: (err as Error).message.slice(0, 200) }));
   setTimeout(knowledgeTick, 3 * 60_000).unref();
   setInterval(knowledgeTick, 5 * 60_000).unref();
-  console.log(`aios-core listening on http://127.0.0.1:${config.ui.port}`);
+  console.log(`${appIds().legacy ? 'aios-core' : 'astra'} listening on http://127.0.0.1:${config.ui.port}`);
 
   const shutdown = async () => {
     pipeline.stop();
@@ -651,6 +654,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(`aios-core failed to start: ${(err as Error).message}`);
+  console.error(`${appIds().legacy ? 'aios-core' : 'astra'} failed to start: ${(err as Error).message}`);
   process.exit(1);
 });

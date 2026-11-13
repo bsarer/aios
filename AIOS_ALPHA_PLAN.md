@@ -389,10 +389,41 @@ One rule: the chat is always full screen on its own workspace, and nothing else 
 - **A visible way out:** a line under the status strip says where apps open (the other screen, or the next workspace with Super+2) and how to come back. At start, core puts a chat window left as the orb by an older version back to full screen.
 - S5's Change button now brings the chat forward (focus) instead of opening it at half screen beside the app.
 *Accept:* checked on the real machine with one screen and with two. Opening Firefox from the chat never covers or shrinks AI OS; an app opened from the launcher never stays on the chat's workspace; the AI button and Super+Shift+H always bring AI OS back full screen; the dot appears for a notification while elsewhere and clears on return; the unit tests and the end-to-end check cover these rules against the pretend Hyprland.
+*Status:* merged; checked by the user on the laptop on 2026-11-02 ("it seems to work fine").
 
-**P1: Packaging and reinstall** (approved 2026-11-02; after S7)
+**P1: Packaging and reinstall** (approved 2026-11-02; after S7; folded into R1 on 2026-11-13: its commands are now `astra doctor`, `astra backup` and `astra restore`)
 `install.sh` (checks Omarchy 4, Hyprland 0.55+, Node 22.13+ and pnpm; installs a release tag into `~/.local/share/aios/app`; runs `setup --kiosk`; again to upgrade), `pnpm doctor` and `/doctor` (service, the `aios.lua` line, session variables, the `omarchy-*` commands S1 uses, the top bar button, the keyring), `pnpm backup` and `install.sh --restore` (config and data, never keyring secrets), a `v0.1.0` tag with a CHANGELOG. Before other developers are invited: CONTRIBUTING.md, a list of GitHub settings for the owner (protect `main`, CODEOWNERS on the safety-critical files), and a secret scan of the whole history.
 *Accept:* backup, uninstall, Omarchy update, install of v0.1.0, restore and `pnpm doctor` all pass on the real machine.
+*Built:* `install.sh` (`--check`, `--ref`, `--restore`; refuses root and local changes in the installed copy), `packages/core/src/doctor.ts` (`pnpm doctor`, `/doctor`), `scripts/src/backup.ts`, `CHANGELOG.md`, `CONTRIBUTING.md` (with the owner's GitHub settings list) and `.github/CODEOWNERS`. History scan before inviting developers (2026-11-02, all 152 commits): no keys, tokens or private keys; the only matches are test fakes. The tag is created by the owner after merge.
+*PR:* [#35](https://github.com/bsarer/aios/pull/35) (open). To do on the real machine, in order, after it is merged:
+1. Tag the release: `git tag v0.1.0 && git push origin v0.1.0`.
+2. `pnpm backup` (writes `~/aios-backup-<date>.tar.gz`; keyring secrets are not in it).
+3. Optional, for a clean test: `pnpm --filter @aios/scripts uninstall`.
+4. Update Omarchy.
+5. `./install.sh --restore ~/aios-backup-<date>.tar.gz` (installs v0.1.0 into `~/.local/share/aios/app` and runs `setup --kiosk`).
+6. `pnpm doctor` (or `/doctor` in the chat); fix any ✗ line with the fix it names. If secrets are reported missing, `pnpm run setup`.
+7. Check the screens again (S7) and that mail, calendar and the AI button work.
+8. If all pass, mark P1 accepted, then before inviting developers: the GitHub settings in CONTRIBUTING.md (protect `main` with CI, one review and Code Owners; Write role for collaborators), and decide private or public (a license only if public).
+
+**Astra R1 to R4: an app others can download** (approved 2026-11-13 at the user's request, after the clickable mockup of the first run; plan: "Astra: packaging and first-run onboarding plan"; P1 is folded into R1, so PR #35 carries both; one milestone at a time with a stop and report)
+The user's AI OS is set up by hand for them. Astra is the same program, packaged so anyone on Omarchy 4 can install it and be walked through setup the first time. Decisions taken with the recommendations (2026-11-13): an Arch package first (the AUR in R4); Gmail by app password first, Sign in with Google in R3; check the name "Astra" for a clash before R4; the repo goes public with an MIT license in R4; test on a second Linux user account on the same computer.
+
+**R1: The Astra package** (approved 2026-11-13)
+- **Names** (`packages/shared/src/brand.ts`): a new install is Astra: `~/.config/astra`, `~/.local/share/astra`, `astra.service`, keyring service `astra`, `~/.local/bin/astra-kiosk`, `hypr/astra.lua`, and port **7780**, so it can't meet an AI OS on 7777 on the same computer. An install that has only `~/.config/aios/config.toml` keeps every AI OS name, so the running AI OS is untouched by the merge. Kept on purpose so apps built before still work: built apps' `aios-app-*` ids, the change-button and CSP markers, the top bar module id, the chat's window class and `aios.db`.
+- **`astra` command** (`scripts/src/astra.ts`): `astra` opens the chat; `setup [--kiosk]`, `doctor`, `backup`, `restore FILE`, `calendar-login`, `uninstall [--purge]`, `version`, `help`. Each runs the script beside it with only the flags it takes. `restore` uses install.sh's checks, and takes Astra or AI OS names from the archive. `uninstall --purge` also deletes config and data after one question.
+- **Arch package** (`packaging/arch`): `PKGBUILD` (the program in `/usr/lib/astra`, `/usr/bin/astra`, a launcher entry and an icon; nothing in the home folder until `astra setup`), `build.sh` (packs the committed tree with `git archive` and runs makepkg). CI (`.github/workflows/package.yml`) builds and checks it in an Arch container on pull requests that touch packaging, and attaches it to the GitHub release on a `v*` tag.
+- `install.sh` stays as the from-source install, now into `~/.local/share/astra/app`.
+*Accept:* on a second user account: `sudo pacman -U astra-0.2.0-1-x86_64.pkg.tar.zst`, `astra setup`, the chat opens on 7780, `astra doctor` passes, `astra backup` and `astra restore` round-trip, `astra uninstall --purge` leaves nothing; the AI OS on the first account keeps working.
+*Checked so far:* unit tests (`scripts/test/astra-command.test.ts`, `packages/shared/test/brand.test.ts`, install, kiosk, doctor, keyring); the package steps run outside Arch (Arch mirrors are blocked in the build sandbox) and `astra help`, `version` and `doctor` from the result; the Arch build itself runs in CI.
+
+**R2: First-run setup wizard and Settings** (next; from the mockup)
+The setup questions move from the terminal to the chat window: welcome, name and timezone, AI provider and key (tested before saving), mail (Gmail app password or IMAP), folders (each one ticked by the user), apps found on the computer (Word and Excel programs, mpv, Ollama, whisper, Claude Code), calendar, then the service and kiosk. Keys only ever reach the keyring. A Settings screen changes the same answers later.
+
+**R3: Sign in with Google** (after R2)
+OAuth for Gmail and Calendar in one consent screen, instead of an app password.
+
+**R4: Public release** (after R3)
+Name check, MIT license, the repo public, the AUR package from the GitHub release, a short site or README for newcomers.
 
 **Daily tasks T1 to T9** (added 2026-11-02 at the user's request; T1 and T2 approved and built 2026-11-07, the rest proposed, not yet approved; each gets its own plan and approval before code, in this order unless the user reorders)
 The everyday jobs the chat should cover next. Sizes are rough: S about a day, M two to four days. All follow the existing rules: reading is free, anything that sends, changes or deletes waits for a hash-checked click, outside text is untrusted, every tool call is audited.

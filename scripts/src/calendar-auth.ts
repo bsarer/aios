@@ -17,7 +17,7 @@ export interface TokenStore {
 }
 
 const PAGE = (text: string) =>
-  `<!doctype html><meta charset="utf-8"><title>AI OS</title><body style="font:16px system-ui;margin:3em">${text.replace(/[<>&]/g, '')}</body>`;
+  `<!doctype html><meta charset="utf-8"><title>Astra</title><body style="font:16px system-ui;margin:3em">${text.replace(/[<>&]/g, '')}</body>`;
 
 /** Opens a URL in the desktop's browser; failures are fine, the URL is printed too. */
 export function xdgOpen(url: string): void {
@@ -50,7 +50,7 @@ export async function signInToCalendar(cal: CalendarConfig, keyring: TokenStore,
     if (url.pathname !== '/') return void res.writeHead(404).end();
     const r = readRedirect(url, pkce.state);
     res.writeHead('code' in r ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(PAGE('code' in r ? 'AI OS is connected to your calendar. You can close this tab.' : `Sign-in did not finish: ${r.error}. Close this tab and try again.`));
+    res.end(PAGE('code' in r ? 'Astra is connected to your calendar. You can close this tab.' : `Sign-in did not finish: ${r.error}. Close this tab and try again.`));
     done(r);
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));

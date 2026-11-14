@@ -469,6 +469,7 @@ The user found the replies formal and stiff. The chat prompt now opens "You are 
 - **Local model:** the brief intro, tidy-up intro and resource advice prompts get one voice line by tone; their workers still have no tools (test).
 - **Code-written lines:** /pause, /resume, the empty tidy-up and the brief's code greeting get warmer wording under friendly and playful; neutral and concise keep the old wording.
 - The rules are the same text under every tone (test: `packages/core/test/personality.test.ts`). No new dependencies.
+- **Fix (2026-11-14, after the first try on the real machine showed no difference between tones):** the Voice block was the last part of a ~3,500-token prompt, followed by the profile, notes and earlier stiff replies, so the chat model barely followed it, and the tones were too alike. Now the block sits right after the opening paragraph, before the rules; each tone is described more sharply and shows the same three moments said its own way; it says earlier replies in another voice are out of date and that the profile's "Tone for replies" is for drafted email; and a one-line reminder of the tone closes the whole system message, after the profile and notes (`voiceReminder`).
 *Accept:* replies read warm and short on the real machine; cards and approvals behave as before; the bake-off's injection group still passes with the new prompt. *Checked so far:* unit tests; the bake-off and the real machine not yet.
 
 **T3: Inbox housekeeping** (M)

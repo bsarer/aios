@@ -63,6 +63,7 @@ import { dataDir } from './paths.js';
 import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
 import { Dictation } from './speech/dictation.js';
+import { Personality } from './personality.js';
 import { Shell } from './shell.js';
 import { readBattery, readWifi } from './status/system.js';
 import { SystemActions } from './system/actions.js';
@@ -89,6 +90,9 @@ async function main(): Promise<void> {
 
   const store = new Store(join(dataDir(), 'aios.db'));
   const audit = new AuditLog(join(dataDir(), 'audit.jsonl'));
+  // P1: the assistant's name and tone; /tone changes the tone from the chat.
+  const personality = new Personality({ defaults: config.personality, store, audit });
+  const tone = () => personality.tone();
   let shell: Shell | undefined;
   const model = new ModelClient({
     models: config.models,
@@ -390,6 +394,7 @@ async function main(): Promise<void> {
     const catalog = fileCatalog;
     const roots = fileRoots;
     monitor = new ResourceMonitor({
+      tone,
       reader: procs,
       config: config.assistant.monitor,
       timeZone: config.user.timezone,
@@ -414,6 +419,7 @@ async function main(): Promise<void> {
         : {}),
     });
     review = new MorningReview({
+      tone,
       config: config.assistant.review,
       timeZone: config.user.timezone,
       store,
@@ -457,6 +463,7 @@ async function main(): Promise<void> {
   // T2: the morning brief. Code gathers it; the local model, when set, writes two lines on top.
   const brief = config.brief.enabled
     ? new MorningBrief({
+        tone,
         config: config.brief,
         userName: config.user.name,
         timeZone: config.user.timezone,
@@ -513,6 +520,7 @@ async function main(): Promise<void> {
   const themePath = omarchyThemePath();
   shell = new Shell({
     store,
+    personality,
     model,
     tools,
     audit,

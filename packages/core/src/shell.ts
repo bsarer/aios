@@ -26,6 +26,7 @@ import type { Battery, Wifi } from './status/system.js';
 import type { SystemActions } from './system/actions.js';
 import type { ToolRegistry } from './tools/registry.js';
 import { WIDGET_TITLES, type WidgetBoard, widgetByName } from './widgets/widgets.js';
+import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
 
 export interface ShellOptions {
   store: Store;
@@ -81,6 +82,8 @@ export interface ShellOptions {
   resources?: () => Promise<string[]>;
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
+  /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
+  personality?: Pick<Personality, 'voice' | 'tone' | 'setTone'>;
   /** Where /export writes. Default: the memory folder. */
   exportDir?: string;
   clock?: () => Date;
@@ -101,6 +104,7 @@ export class Shell {
   constructor(private readonly o: ShellOptions) {
     this.clock = o.clock ?? (() => new Date());
     this.theme = o.theme ?? {};
+    const personality = o.personality;
     this.agent = new Agent({
       model: o.model,
       tools: o.tools,
@@ -110,6 +114,7 @@ export class Shell {
       emit: (ev) => this.broadcast(ev),
       clock: this.clock,
       ...(o.memory ? { memory: o.memory } : {}),
+      ...(personality ? { voice: () => personality.voice() } : {}),
     });
     if (o.memory) o.tools.register(memoryProposeTool({ memory: o.memory, post: (item) => this.agent.post(item), clock: this.clock }));
   }
@@ -401,6 +406,11 @@ export class Shell {
     return say(`Exported to ${path}`);
   }
 
+  /** P1: the warmer wording for code-written lines under the friendly and playful tones. */
+  private warm(friendly: string, plain: string): string {
+    return isWarm(this.o.personality?.tone() ?? 'friendly') ? friendly : plain;
+  }
+
   private async command(cmd: NonNullable<ReturnType<typeof parseCommand>>): Promise<void> {
     this.o.audit.append({ kind: 'command', command: cmd.name });
     const say = (text: string) => this.agent.notice('info', text);
@@ -410,11 +420,11 @@ export class Shell {
       case 'pause':
         this.o.store.setSetting('paused', '1');
         this.running?.abort();
-        say('Paused. I will not call the model or any tools until you type /resume.');
+        say(this.warm("Taking a breather. I won't call the model or any tools until you type /resume.", 'Paused. I will not call the model or any tools until you type /resume.'));
         return this.pushStatus();
       case 'resume':
         this.o.store.setSetting('paused', '0');
-        say('Resumed.');
+        say(this.warm("I'm back.", 'Resumed.'));
         this.o.onResume?.();
         return this.pushStatus();
       case 'cost': {
@@ -440,7 +450,7 @@ export class Shell {
         if (!this.o.cleanup) return;
         if (this.paused) return say('I am paused, so the tidy-up suggestions wait. Type /resume to continue.');
         const r = await this.o.cleanup.run();
-        if (r === 'nothing') say('Nothing to tidy up right now: no big unused files in your folders and no idle windows.');
+        if (r === 'nothing') say(this.warm('All tidy! No big unused files in your folders and no idle windows right now.', 'Nothing to tidy up right now: no big unused files in your folders and no idle windows.'));
         return;
       }
       case 'brief': {
@@ -492,6 +502,15 @@ export class Shell {
         if (!r) return say('An update is already running; type /knowledge in a minute to see it.');
         if (r.error) say(`I couldn't reach the model this time (${r.error}), so I'll carry on at the next update. What was read so far is in the file.`);
         return say(k.view());
+      }
+      case 'tone': {
+        const p = this.o.personality;
+        const list = TONE_NAMES.map((t) => `- ${t}: ${TONE_LINES[t]}`).join('\n');
+        if (!p) return say(`I'm friendly, and the tone can't be changed here.`);
+        if (!cmd.text.trim()) return say(`My tone is ${p.tone()}. You can pick:\n${list}\nFor example /tone playful.`);
+        const tone = toneByName(cmd.text);
+        if (!tone) return say(`I know these tones:\n${list}\nFor example /tone playful.`);
+        return say(p.setTone(tone));
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

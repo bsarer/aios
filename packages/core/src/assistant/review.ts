@@ -12,7 +12,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import type { AssistantConfig, ChatItem, CleanupApp, CleanupFile } from '@aios/shared';
+import type { AssistantConfig, ChatItem, CleanupApp, CleanupFile, Tone } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import type { FileCatalog } from '../files/catalog.js';
 import type { FileRoots } from '../files/roots.js';
@@ -69,6 +69,8 @@ export interface ReviewOptions {
   patch: (item: ChatItem) => void;
   /** After a file went to the Trash, so the index drops it. */
   onTrashed?: () => void;
+  /** P1: the tone for the local model's intro. Default friendly. */
+  tone?: () => Tone;
   now?: () => number;
   newId?: () => string;
 }
@@ -214,7 +216,7 @@ export class MorningReview {
     let appReasons = new Map<string, string>();
     if (this.o.model) {
       try {
-        const picks = await reviewPicks(this.o.model, files, apps, { files: c.maxFiles, apps: c.maxApps });
+        const picks = await reviewPicks(this.o.model, files, apps, { files: c.maxFiles, apps: c.maxApps }, this.o.tone?.());
         ({ intro } = picks);
         fileReasons = picks.files;
         appReasons = picks.apps;

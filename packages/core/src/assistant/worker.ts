@@ -7,9 +7,10 @@
  * wrappers. Its answers are short plain text, cleaned before they are stored, and it can only
  * name candidates by the ids code gave it; buttons are always made by code.
  */
+import type { Tone } from '@aios/shared';
 import { z } from 'zod';
 import type { ModelClient, ModelRequest } from '../model.js';
-import { CLEANUP_REVIEW_SYSTEM_PROMPT, RESOURCE_ADVICE_SYSTEM_PROMPT } from '../prompts.js';
+import { CLEANUP_REVIEW_SYSTEM_PROMPT, localVoiceLine, RESOURCE_ADVICE_SYSTEM_PROMPT } from '../prompts.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
 
 export type LocalModel = Pick<ModelClient, 'structured'>;
@@ -35,19 +36,19 @@ export interface AdviceInput {
   top: string[];
 }
 
-export function adviceRequest(input: AdviceInput): ModelRequest {
+export function adviceRequest(input: AdviceInput, tone: Tone = 'friendly'): ModelRequest {
   const top = input.top.length ? wrapUntrusted('system', 'processes', sanitize({ text: input.top.join('\n') }, { maxChars: 1500 })) : '(none listed)';
   return {
     role: 'local',
     messages: [
-      { role: 'system', content: RESOURCE_ADVICE_SYSTEM_PROMPT },
+      { role: 'system', content: RESOURCE_ADVICE_SYSTEM_PROMPT + localVoiceLine(tone) },
       { role: 'user', content: `Resource: ${input.resource}\n${input.facts}\n\nBiggest users:\n${top}` },
     ],
   };
 }
 
-export async function resourceAdvice(model: LocalModel, input: AdviceInput): Promise<string> {
-  const { value } = await model.structured(adviceRequest(input), 'resource_advice', ResourceAdvice);
+export async function resourceAdvice(model: LocalModel, input: AdviceInput, tone?: Tone): Promise<string> {
+  const { value } = await model.structured(adviceRequest(input, tone), 'resource_advice', ResourceAdvice);
   return cleanLine(value.advice, 300);
 }
 
@@ -76,13 +77,13 @@ export interface AppCandidate {
   idle: string;
 }
 
-export function reviewRequest(files: FileCandidate[], apps: AppCandidate[], limits: { files: number; apps: number }): ModelRequest {
+export function reviewRequest(files: FileCandidate[], apps: AppCandidate[], limits: { files: number; apps: number }, tone: Tone = 'friendly'): ModelRequest {
   const fileText = files.map((f) => `${f.id}: ${f.display} (${f.size}, ${f.lastUsed})`).join('\n');
   const appText = apps.map((a) => `${a.id}: ${a.name} "${a.title}" (${a.memory}, ${a.idle})`).join('\n');
   return {
     role: 'local',
     messages: [
-      { role: 'system', content: CLEANUP_REVIEW_SYSTEM_PROMPT },
+      { role: 'system', content: CLEANUP_REVIEW_SYSTEM_PROMPT + localVoiceLine(tone) },
       {
         role: 'user',
         content: [
@@ -105,8 +106,9 @@ export async function reviewPicks(
   files: FileCandidate[],
   apps: AppCandidate[],
   limits: { files: number; apps: number },
+  tone?: Tone,
 ): Promise<{ intro: string; files: Map<string, string>; apps: Map<string, string> }> {
-  const { value } = await model.structured(reviewRequest(files, apps, limits), 'cleanup_review', CleanupPicks);
+  const { value } = await model.structured(reviewRequest(files, apps, limits, tone), 'cleanup_review', CleanupPicks);
   const keep = (picks: CleanupPicks['files'], known: Set<string>, max: number) => {
     const out = new Map<string, string>();
     for (const p of picks) {

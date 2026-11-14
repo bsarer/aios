@@ -494,6 +494,7 @@ async function main(): Promise<void> {
         config: kc,
         userName: config.user.name,
         userAddresses: [config.mail.address],
+        account: config.mail.address,
         timeZone: config.user.timezone,
         file: knowledgeFile,
         store,
@@ -502,7 +503,8 @@ async function main(): Promise<void> {
         calendar: calendarApi,
         files: fileCatalog,
         displayPath: fileRoots ? (p: string) => fileRoots.display(p) : undefined,
-        models: { backfill: knowledgeModel(kc.backfillModel), hourly: knowledgeModel(kc.model) },
+        // K3: older mail on the local model overnight by default, or the cloud under the knowledge budget.
+        models: { backfill: knowledgeModel(kc.backfillModel), hourly: knowledgeModel(kc.model), older: kc.olderMail === 'off' ? null : knowledgeModel(kc.olderMail === 'cloud' ? 'cloud' : 'local') },
         isPaused,
         quietHours: config.notifications.quietHours,
       })

@@ -80,6 +80,26 @@ describe.skipIf(!reachable)('mail on the GreenMail test stack', () => {
     expect(new Set(thread.map((m) => m.subject.replace(/^Re: /, '')))).toEqual(new Set(['Q4 budget review']));
   });
 
+  it('lists mail for the knowledge base with its bulk headers and flags, by date range (K3)', async () => {
+    const id = `<k3-${Date.now()}@shop.example>`;
+    const c = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });
+    await c.connect();
+    await c.append(
+      'INBOX',
+      `From: Deals <deals@shop.example>\r\nTo: ${TEST_MAILBOX.user}\r\nSubject: K3 sale\r\nMessage-ID: ${id}\r\nList-Unsubscribe: <mailto:u@shop.example>,\r\n <https://shop.example/u>\r\nPrecedence: bulk\r\nDate: ${new Date().toUTCString()}\r\n\r\nBuy now.`,
+      ['\\Flagged'],
+    );
+    await c.logout();
+    const day = 86_400_000;
+    // GreenMail is not Gmail: the tabs to skip are left out of the search, not an error.
+    const listed = await client.list({ since: new Date(Date.now() - day), limit: 500, skipCategories: ['promotions'] });
+    const m = listed.find((x) => x.messageId === id);
+    expect(m).toMatchObject({ starred: true, important: false, threadId: null, bulkHeaders: { 'list-unsubscribe': '<mailto:u@shop.example>, <https://shop.example/u>', precedence: 'bulk' } });
+    // Before today: not in a range that ends yesterday.
+    const earlier = await client.list({ since: new Date(Date.now() - 30 * day), before: new Date(Date.now() - day), limit: 500, skipCategories: [] });
+    expect(earlier.some((x) => x.messageId === id)).toBe(false);
+  });
+
   it('still searches INBOX when the server has no folder it can tell is Sent', async () => {
     // Before, a missing "Sent" (Gmail names it "[Gmail]/Sent Mail") failed every search.
     const admin = new ImapFlow({ host: TEST_MAILBOX.host, port: TEST_MAILBOX.imapPort, secure: false, auth: { user: TEST_MAILBOX.user, pass: TEST_MAILBOX.pass }, logger: false });

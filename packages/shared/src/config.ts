@@ -301,6 +301,15 @@ export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
  * notes from outside text, never memory: the chat reads it only through knowledge_read, inside
  * <untrusted> tags, and nothing in it can call a tool, write memory or change config.
  */
+/** K3: Gmail's inbox tabs, as its search names them (category:promotions). */
+export const GMAIL_CATEGORIES = ['promotions', 'social', 'updates', 'forums'] as const;
+export type GmailCategory = (typeof GMAIL_CATEGORIES)[number];
+const SenderPattern = z
+  .string()
+  .max(320)
+  .regex(/^([^\s@<>"]+@)?[a-z0-9-]+(\.[a-z0-9-]+)+$/i, 'must be an address such as ana@home.example or a domain such as shop.example')
+  .transform((s) => s.toLowerCase());
+
 export const KNOWLEDGE_SOURCES = ['mail', 'calendar', 'files', 'chat'] as const;
 export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
 
@@ -311,12 +320,12 @@ export const KnowledgeConfig = z.strictObject({
   /** The hourly updates: "local", the local model ([models.local]); without one, code writes only Upcoming and Recent activity. "cloud": the nightly role. */
   model: z.enum(['local', 'cloud']).default('local'),
   sources: z.array(z.enum(KNOWLEDGE_SOURCES)).max(KNOWLEDGE_SOURCES.length).default([...KNOWLEDGE_SOURCES]),
-  /** K2: the first pass reads mail (INBOX and Sent) from this many days back, and every indexed file. 0: no first pass. */
-  backfillDays: z.int().min(0).max(730).default(90),
+  /** K2/K3: the first pass reads mail (INBOX and Sent) from this many days back (about 6 months), and every indexed file. 0: no first pass. */
+  backfillDays: z.int().min(0).max(730).default(183),
   /** K2: the first pass runs on the cloud nightly role ("cloud", the default) or the local model ("local"). */
   backfillModel: z.enum(['local', 'cloud']).default('cloud'),
-  /** K2: at most this many emails and files in the first pass, newest first. */
-  backfillMaxMails: z.int().min(0).max(5000).default(600),
+  /** K2/K3: at most this many emails (after the filters below) and files in the first pass, newest first. */
+  backfillMaxMails: z.int().min(0).max(50_000).default(5000),
   backfillMaxFiles: z.int().min(0).max(5000).default(300),
   /** K2: emails and files read per run (the first pass runs every five minutes until it is done). */
   perRun: z.int().min(1).max(500).default(40),
@@ -324,6 +333,29 @@ export const KnowledgeConfig = z.strictObject({
   calendarDays: z.int().min(0).max(30).default(7),
   /** One copy of the file a day is kept in knowledge/history for this many days. */
   keepDays: z.int().min(1).max(90).default(14),
+  /**
+   * K3: mail older than the first pass. "local-overnight" (the default): read on the local model,
+   * only in the `overnight` hours, newest first. "cloud": on backfillModel's cloud role, under
+   * `dailyBudgetUsd`. "off": never.
+   */
+  olderMail: z.enum(['off', 'local-overnight', 'cloud']).default('local-overnight'),
+  /** K3: how far back older mail goes, in months before the first pass's window. */
+  olderMailMonths: z.int().min(0).max(240).default(60),
+  /** K3: the hours older mail is read in when olderMail is "local-overnight". */
+  overnight: z.strictObject({ start: HHMM, end: HHMM }).default({ start: '01:00', end: '07:00' }),
+  /** K3: Gmail tabs never read (Gmail only; other servers have no tabs). */
+  skipCategories: z.array(z.enum(GMAIL_CATEGORIES)).max(GMAIL_CATEGORIES.length).default([...GMAIL_CATEGORIES]),
+  /** K3: skip bulk and automated mail by its headers (List-Unsubscribe, Precedence: bulk, Auto-Submitted, noreply@ senders). */
+  skipAutomated: z.boolean().default(true),
+  /** K3: addresses (ana@home.example) or domains (shop.example) never read. Your own sent mail is always read. */
+  skipSenders: z.array(SenderPattern).max(500).default([]),
+  /** K3: addresses or domains always read, even when a filter above would skip them. */
+  alwaysSenders: z.array(SenderPattern).max(500).default([]),
+  /**
+   * K3: the most the knowledge base spends on the cloud model in a day (as the provider reports
+   * it), inside cost.dailyCapUsd, so reading old mail never uses up the chat's budget. 0: no cloud reading.
+   */
+  dailyBudgetUsd: z.number().min(0).max(50).default(0.5),
 });
 export type KnowledgeConfig = z.infer<typeof KnowledgeConfig>;
 

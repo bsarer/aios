@@ -4,7 +4,8 @@
  * callers sanitize() and wrap it before a model sees it.
  */
 import type { Readable } from 'node:stream';
-import { ImapFlow, type FetchMessageObject, type ListResponse, type MessageAddressObject, type MessageStructureObject } from 'imapflow';
+import type { GmailCategory } from '@aios/shared';
+import { ImapFlow, type FetchMessageObject, type ListResponse, type MessageAddressObject, type MessageStructureObject, type SearchObject } from 'imapflow';
 import { describeMailError } from './errors.js';
 
 /** Folders as the model and UI name them. "Sent" is whatever the server calls it (Gmail: "[Gmail]/Sent Mail"). */
@@ -120,6 +121,47 @@ function headerIds(headers: Buffer | undefined, name: 'references' | 'in-reply-t
   return line.match(/<[^<>\s]+>/g) ?? [];
 }
 
+/** K3: the headers that tell bulk and automated mail apart (`knowledge/mailfilter.ts` decides). */
+export const BULK_HEADERS = ['list-unsubscribe', 'list-id', 'precedence', 'auto-submitted'] as const;
+export type BulkHeaders = Partial<Record<(typeof BULK_HEADERS)[number], string>>;
+
+/** The first value of each of `names` in a fetched header block, unfolded and cut short. */
+export function headerFields<N extends string>(headers: Buffer | undefined, names: readonly N[]): Partial<Record<N, string>> {
+  const unfolded = (headers?.toString('utf8') ?? '').replace(/\r?\n[ \t]+/g, ' ');
+  const out: Partial<Record<N, string>> = {};
+  for (const name of names) {
+    const value = new RegExp(`^${name}:[ \t]*(.*)$`, 'im').exec(unfolded)?.[1];
+    if (value !== undefined) out[name] = value.trim().slice(0, 300);
+  }
+  return out;
+}
+
+/** K3: one message as the knowledge base lists it: the summary plus what code sorts and filters by. */
+export interface ListedMail extends MessageSummary {
+  inReplyTo: string | null;
+  /** Gmail's thread id (X-GM-THRID), or the server's THREADID; null elsewhere. */
+  threadId: string | null;
+  starred: boolean;
+  /** Gmail's Important label. */
+  important: boolean;
+  bulkHeaders: BulkHeaders;
+}
+
+export function listedOf(folder: Folder, msg: FetchMessageObject): ListedMail {
+  return {
+    ...summaryOf(folder, msg),
+    inReplyTo: msg.envelope?.inReplyTo || null,
+    threadId: msg.threadId ?? null,
+    starred: msg.flags?.has('\\Flagged') ?? false,
+    important: msg.labels?.has('\\Important') ?? false,
+    bulkHeaders: headerFields(msg.headers, BULK_HEADERS),
+  };
+}
+
+/** Gmail's search for "not in these tabs" (X-GM-RAW), e.g. "-category:promotions -category:social". */
+export const gmailSkipQuery = (skip: readonly GmailCategory[]) => skip.map((c) => `-category:${c}`).join(' ');
+
+const FETCH_BATCH = 500;
 const BODY_LIMIT = 256 * 1024;
 
 /** Reads a whole stream into memory, or null once it passes maxBytes. */
@@ -274,6 +316,30 @@ export class MailClient {
       });
     }
     return found.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)).slice(0, opts.limit);
+  }
+
+  /**
+   * K3: INBOX and Sent mail from `since` up to `before`, newest first, at most `limit` from each
+   * folder, with flags and the bulk headers. On Gmail, INBOX leaves out the `skipCategories` tabs
+   * in the search itself, and Gmail's thread id and Important label come along.
+   */
+  async list(opts: { since: Date; before?: Date | undefined; limit: number; skipCategories: readonly GmailCategory[] }): Promise<ListedMail[]> {
+    const found: ListedMail[] = [];
+    for (const folder of FOLDERS) {
+      await this.inFolder(folder, async (client) => {
+        const gmail = client.capabilities.has('X-GM-EXT-1');
+        const q: SearchObject = { since: opts.since, ...(opts.before ? { before: opts.before } : {}) };
+        if (gmail && folder === 'INBOX' && opts.skipCategories.length) q.gmraw = gmailSkipQuery(opts.skipCategories);
+        const uids = ((await client.search(q, { uid: true })) || []).sort((a, b) => b - a).slice(0, opts.limit);
+        for (let i = 0; i < uids.length; i += FETCH_BATCH) {
+          const batch = uids.slice(i, i + FETCH_BATCH).join(',');
+          for await (const msg of client.fetch(batch, { uid: true, envelope: true, internalDate: true, flags: true, headers: [...BULK_HEADERS], threadId: gmail, labels: gmail }, { uid: true })) {
+            found.push(listedOf(folder, msg));
+          }
+        }
+      });
+    }
+    return found.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
   }
 
   async read(id: string): Promise<FullMessage | null> {

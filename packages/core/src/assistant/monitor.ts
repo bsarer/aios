@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AssistantConfig, ChatItem } from '@aios/shared';
+import type { AssistantConfig, ChatItem, Tone } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import { inQuietHours } from '../mail/pipeline.js';
 import { ModelError } from '../model.js';
@@ -40,6 +40,8 @@ export interface MonitorOptions {
   notify?: (title: string, body: string) => void;
   quietHours?: { start: string; end: string } | undefined;
   audit: AuditLog;
+  /** P1: the tone for the local model's advice. Default friendly. */
+  tone?: () => Tone;
   /** The biggest files in the allowed folders on a drive, for a disk alert. */
   bigFiles?: (drivePath: string, limit: number) => Promise<{ display: string; bytes: number }[]>;
   home?: string;
@@ -261,7 +263,7 @@ export class ResourceMonitor {
     if (!inQuietHours(this.now(), this.o.timeZone, this.o.quietHours)) this.o.notify?.('AI OS', a.headline);
     if (!this.o.model) return;
     try {
-      const advice = await resourceAdvice(this.o.model, { resource, facts: a.facts, top: a.top });
+      const advice = await resourceAdvice(this.o.model, { resource, facts: a.facts, top: a.top }, this.o.tone?.());
       const cur = this.items.get(item.id);
       if (advice && cur) {
         const next = { ...cur, advice };

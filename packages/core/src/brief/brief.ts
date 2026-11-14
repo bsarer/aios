@@ -11,7 +11,7 @@
  * change anything.
  */
 import { randomUUID } from 'node:crypto';
-import type { BriefConfig, BriefEvent, ChatItem, MailRow } from '@aios/shared';
+import type { BriefConfig, BriefEvent, ChatItem, MailRow, Tone } from '@aios/shared';
 import { z } from 'zod';
 import type { AuditLog } from '../audit.js';
 import type { CalEvent, CalendarApi } from '../calendar/google.js';
@@ -21,7 +21,7 @@ import { cleanLine, type LocalModel } from '../assistant/worker.js';
 import { inQuietHours } from '../mail/pipeline.js';
 import type { MailEvent, MailState } from '../mail/state.js';
 import { ModelError, type ModelRequest } from '../model.js';
-import { MORNING_BRIEF_SYSTEM_PROMPT } from '../prompts.js';
+import { localVoiceLine, MORNING_BRIEF_SYSTEM_PROMPT } from '../prompts.js';
 import type { Store } from '../store.js';
 import type { Todo, TodoList } from '../todos/list.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
@@ -51,13 +51,13 @@ export interface BriefFacts {
 }
 
 /** The local model's request: no tools; everything from mail, invites and the list inside <untrusted> wrappers. */
-export function briefRequest(f: BriefFacts): ModelRequest {
+export function briefRequest(f: BriefFacts, tone: Tone = 'friendly'): ModelRequest {
   const wrap = (source: 'email' | 'calendar' | 'system', id: string, lines: string[], max: number) =>
     lines.length ? wrapUntrusted(source, id, sanitize({ text: lines.join('\n') }, { maxChars: max })) : '(none)';
   return {
     role: 'local',
     messages: [
-      { role: 'system', content: MORNING_BRIEF_SYSTEM_PROMPT },
+      { role: 'system', content: MORNING_BRIEF_SYSTEM_PROMPT + localVoiceLine(tone) },
       {
         role: 'user',
         content: [
@@ -81,17 +81,25 @@ export function briefRequest(f: BriefFacts): ModelRequest {
   };
 }
 
-export async function briefIntro(model: LocalModel, f: BriefFacts): Promise<string> {
-  const { value } = await model.structured(briefRequest(f), 'morning_brief', BriefIntro);
+export async function briefIntro(model: LocalModel, f: BriefFacts, tone?: Tone): Promise<string> {
+  const { value } = await model.structured(briefRequest(f, tone), 'morning_brief', BriefIntro);
   return cleanLine(value.intro, 260);
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The intro when the local model isn't there or fails: counts and times written by code. */
-export function codeIntro(f: BriefFacts, hour: number): string {
-  const hello = `${hour < 5 ? 'Hello' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}, ${f.userName}.`;
-  if (!f.mails.length && !f.events.length && !f.todos.length) return `${hello} Nothing urgent${f.calendar === 'ok' ? ', no events' : ''} and nothing due today.`;
+export function codeIntro(f: BriefFacts, hour: number, tone: Tone = 'friendly'): string {
+  // P1: friendly and playful get the warmer greeting; neutral and concise keep the plain one.
+  const warm = tone === 'friendly' || tone === 'playful';
+  const hello = warm
+    ? `${hour < 5 ? 'Hi' : hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening'}, ${f.userName}!`
+    : `${hour < 5 ? 'Hello' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}, ${f.userName}.`;
+  if (!f.mails.length && !f.events.length && !f.todos.length) {
+    return warm
+      ? `${hello} Nothing urgent${f.calendar === 'ok' ? ', no events' : ''} and nothing due today. Enjoy the quiet.`
+      : `${hello} Nothing urgent${f.calendar === 'ok' ? ', no events' : ''} and nothing due today.`;
+  }
   const parts: string[] = [];
   if (f.mails.length) parts.push(`${plural(f.mails.length, 'urgent email')}`);
   if (f.calendar === 'ok') parts.push(f.events.length ? `${plural(f.events.length, 'event')} (the first ${f.events[0]!.when === 'all day' ? 'all day' : `at ${f.events[0]!.when.slice(0, 5)}`})` : 'no events');
@@ -114,6 +122,8 @@ export interface MorningBriefOptions {
   todos?: Pick<TodoList, 'open'> | undefined;
   /** Null without [models.local]: code writes the intro. */
   model: LocalModel | null;
+  /** P1: the tone for the intro. Default friendly. */
+  tone?: () => Tone;
   isPaused: () => boolean;
   quietHours?: { start: string; end: string } | undefined;
   post: (item: ChatItem) => void;
@@ -264,13 +274,13 @@ export class MorningBrief {
     let intro = '';
     if (this.o.model) {
       try {
-        intro = await briefIntro(this.o.model, facts);
+        intro = await briefIntro(this.o.model, facts, this.o.tone?.());
         if (intro) by = 'local';
       } catch (err) {
         this.o.audit.append({ kind: 'brief', event: 'intro_failed', error: err instanceof ModelError ? err.kind : (err as Error).message.slice(0, 200) });
       }
     }
-    if (by === 'code') intro = codeIntro(facts, Number(utcToLocal(now, tz).slice(11, 13)));
+    if (by === 'code') intro = codeIntro(facts, Number(utcToLocal(now, tz).slice(11, 13)), this.o.tone?.());
     const { userName: _name, ...card } = facts;
     const item: BriefItem = { kind: 'brief', id: this.o.newId?.() ?? randomUUID(), intro, by, ...card, at: now };
     this.o.store.setSetting('brief.lastAt', String(now));

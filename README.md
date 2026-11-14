@@ -155,6 +155,8 @@ Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`
 
 Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
 
+Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"friendly"` default, `"playful"`, `"neutral"`, `"concise"`). Type `/tone` in the chat to see it and `/tone playful` to change it; the change applies to the next reply and is kept.
+
 ## Videos
 
 "Play holiday.mp4 from Downloads" or "watch this: https://www.youtube.com/watch?v=…" plays the video in mpv, on another screen or the next workspace, like any app. Files must be videos in your allowed folders (`[files] roots`, which now include `~/Videos` by default; if your config lists its own `roots`, add `"~/Videos"` there); links must be `https://` links to a site by name (no IP addresses, local names or ports). YouTube and most sites need `yt-dlp` installed next to mpv. A link that comes from an email, invite or document never starts by itself: a card asks you first.

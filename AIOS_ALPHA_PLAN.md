@@ -28,6 +28,7 @@ An app on Omarchy that takes over the whole screen (kiosk mode) and is, from the
 14. Local system assistant (milestone L1, added 2026-11-01): a small model served by Ollama on this computer watches disk, memory and CPU and posts an alert in the chat when they run low, and each morning suggests big unused files to move to the Trash and idle windows to close; more background jobs can move to it by config.
 15. Sending files by email (milestone M1, added 2026-11-02 at the user's request): "email the lease to Sara" attaches files from the allowed folders to a draft; the card lists them and they go out only on the Send click.
 16. Voice to text (milestone V2, added 2026-11-10 at the user's request): a microphone button in the chat turns what the user says into text in the message box, with whisper.cpp on this computer; the user still presses Send.
+17. A friendlier voice (milestone P1, added 2026-11-14 at the user's request): the assistant is called Astra and talks in a warm, plain and lightly playful way, with a tone setting (friendly, playful, neutral, concise) in config and a /tone command.
 
 ### Out of scope (parked for after alpha)
 Docs and document reader (beyond S2's email attachments), file management, access-control UI, system power and maintenance (keep-awake, sleep/restart/shut down, system updates, disabling input devices), spoken replies and wake words (V2 adds voice to text only), multi-user, MCP gateway. (Local models: the L1 system assistant only, for now.) The design keeps seams for all of these (see §10).
@@ -452,6 +453,14 @@ The 🎙 button next to the message box (and **Ctrl+M**) listens; a second click
 - **Microphone permission:** Chromium asks once for AI OS's own profile and remembers it; no browser flags or system-wide policies.
 - No new dependencies (whisper.cpp is a separate program; the README has the build and a user service).
 *Accept:* clicking 🎙, saying a sentence and clicking again puts the sentence in the box and sends nothing; Esc throws a recording away; without `[models.speech]` the button stays off; a non-loopback speech address is refused; unit tests (`packages/core/test/speech.test.ts`, `packages/shared/test/audio.test.ts`) and the e2e run with Chromium's fake microphone and a pretend whisper server; checked on the real machine. *Checked so far:* unit tests and e2e; not yet on the real machine.
+
+**P1: Astra's voice and tone** (S; approved 2026-11-14 at the user's request: named Astra, friendly by default, /tone now)
+The user found the replies formal and stiff. The chat prompt now opens "You are Astra, the assistant of AI OS" and ends with a Voice block (`voiceRules` in `prompts.ts`) after the rules: warm, plain words with contractions, short replies, at most one light quip, three example exchanges, and no jokes or emoji around anything suspicious, security, money, errors, health or bad news. It says the voice never changes the rules, and that drafted email stays in the user's voice.
+- **Setting:** `[personality] name` (default `"Astra"`, letters, spaces, apostrophes and hyphens, at most 30, since it goes into the prompt) and `tone` (`friendly` default, `playful`, `neutral`, `concise`). `/tone` shows it and `/tone playful` changes it at once; the choice is kept in the store like the pinned widgets (`personality.ts`) and audited. No tool changes it, and a model that writes `/tone` does nothing (test). A Settings panel is a later step.
+- **Local model:** the brief intro, tidy-up intro and resource advice prompts get one voice line by tone; their workers still have no tools (test).
+- **Code-written lines:** /pause, /resume, the empty tidy-up and the brief's code greeting get warmer wording under friendly and playful; neutral and concise keep the old wording.
+- The rules are the same text under every tone (test: `packages/core/test/personality.test.ts`). No new dependencies.
+*Accept:* replies read warm and short on the real machine; cards and approvals behave as before; the bake-off's injection group still passes with the new prompt. *Checked so far:* unit tests; the bake-off and the real machine not yet.
 
 **T3: Inbox housekeeping** (M)
 Archive, mark read or unread, move to a folder, snooze until a time, unsubscribe (List-Unsubscribe header, mailto or one-click POST only). Each is a write-tier card; several messages go on one card listing them. Never offered while email text is in view, like calendar changes.

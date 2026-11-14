@@ -17,6 +17,7 @@ export type Command =
   | { name: 'pin'; text: string }
   | { name: 'unpin'; text: string }
   | { name: 'knowledge'; update: boolean }
+  | { name: 'tone'; text: string }
   | { name: 'unknown'; raw: string };
 
 /** null when the text is a normal message. */
@@ -58,6 +59,8 @@ export function parseCommand(text: string): Command | null {
       return { name: 'unpin', text: rest.join(' ') };
     case 'knowledge':
       return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(rest.join(' ').trim()) };
+    case 'tone':
+      return { name: 'tone', text: rest.join(' ') };
     default:
       return { name: 'unknown', raw: t };
   }
@@ -80,6 +83,7 @@ export const HELP_TEXT = [
   '/pin <checkup | brief | todos>  pin it as a tile at the bottom of the screen; /unpin takes it off',
   '/knowledge  show the knowledge base AI OS keeps about you from your mail, calendar, files and chat',
   '/knowledge update  update it now (it updates by itself every hour)',
+  '/tone [friendly | playful | neutral | concise]  show or change how I talk',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Esc stops a reply.',
 ].join('\n');

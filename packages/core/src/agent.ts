@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatItem, ServerEvent } from '@aios/shared';
 import type { Memory } from './memory/memory.js';
 import { type ChatMessage, type ModelClient, ModelError, type ModelResult } from './model.js';
+import type { Voice } from './personality.js';
 import { chatSystemPrompt } from './prompts.js';
 import type { Store } from './store.js';
 import { formatNow } from './tools/now.js';
@@ -112,6 +113,8 @@ export interface AgentOptions {
   emit: (ev: ServerEvent) => void;
   /** Profile, recalled facts and summaries, and a token-budgeted window (A3). */
   memory?: Memory;
+  /** P1: the assistant's name and tone, read every turn so /tone applies at once. Default: Astra, friendly. */
+  voice?: () => Voice;
   clock?: () => Date;
   newId?: () => string;
 }
@@ -148,7 +151,7 @@ export class Agent {
     store.saveTurn({ role: 'user', content: text }, at());
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), knowledge: tools.has('knowledge_read') });
+      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), knowledge: tools.has('knowledge_read'), ...(this.o.voice ? { assistantName: this.o.voice().name, tone: this.o.voice().tone } : {}) });
       const messages = quarantineEarlierEmail(
         this.o.memory
           ? this.o.memory.context(system, text, store.recentTurns(CONTEXT_TURNS_BUDGETED))

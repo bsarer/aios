@@ -648,7 +648,7 @@ describe('in the chat', () => {
     await shell.handle({ type: 'send', text: '/checkup' });
     const texts = store.recentItems().flatMap((i) => (i.kind === 'notice' ? [i.text] : []));
     expect(texts[0]).toBe('Memory: 8.0 GB of 16.0 GB available.');
-    expect(texts[1]).toMatch(/^Nothing to tidy up right now/);
+    expect(texts[1]).toMatch(/^All tidy!/);
     expect(runs).toBe(1);
     await shell.handle({ type: 'cleanup_action', id: 'c1', list: 'file', n: 1, action: 'trash', hash: 'a'.repeat(64) });
     expect(acts).toEqual([['c1', 'file', 1, 'trash', 'a'.repeat(64)]]);

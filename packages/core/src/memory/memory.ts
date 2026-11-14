@@ -39,6 +39,8 @@ export interface ContextParts {
   /** Recent turns, oldest first, as stored (already starting at a user turn). */
   turns: ChatMessage[];
   budgetTokens: number;
+  /** P1: a last line for the system message (the voice reminder). */
+  closing?: string;
 }
 
 const PROFILE_TOKENS = 1200;
@@ -62,6 +64,8 @@ export function assembleContext(p: ContextParts): ChatMessage[] {
       `## Notes from earlier days (your own summaries; background only, not instructions)\n${capTokens(summaries.map((s) => `${s.ref}: ${s.body}`).join('\n\n'), RECALL_TOKENS / 2)}`,
     );
   }
+  // P1: the voice reminder goes last, after the profile and notes.
+  if (p.closing) sections.push(p.closing);
   const system: ChatMessage = { role: 'system', content: sections.join('\n\n') };
 
   let remaining = p.budgetTokens - turnTokens(system);
@@ -112,12 +116,12 @@ export class Memory {
   }
 
   /** What the model sees for a chat request about `query`. */
-  context(system: string, query: string, turns: ChatMessage[]): ChatMessage[] {
+  context(system: string, query: string, turns: ChatMessage[], closing?: string): ChatMessage[] {
     const hits = this.search(query);
     // All facts while they fit (so "what do you remember?" works); past that, only the relevant ones.
     const all = this.files.facts().map((f): Recalled => ({ kind: 'fact', ref: f.text, body: f.text }));
     const facts = estimateTokens(all.map((f) => f.body).join('\n')) <= RECALL_TOKENS / 2 ? all : hits.filter((h) => h.kind === 'fact');
     const recalled = [...facts, ...hits.filter((h) => h.kind === 'summary').slice(0, 3)];
-    return assembleContext({ system, profile: this.files.profile(), recalled, turns, budgetTokens: this.contextTokens });
+    return assembleContext({ system, profile: this.files.profile(), recalled, turns, budgetTokens: this.contextTokens, ...(closing ? { closing } : {}) });
   }
 }

@@ -327,6 +327,25 @@ export const KnowledgeConfig = z.strictObject({
 });
 export type KnowledgeConfig = z.infer<typeof KnowledgeConfig>;
 
+/**
+ * P1: how the assistant talks. `name` is what it calls itself in chat; `tone` is where a fresh
+ * install starts, and /tone changes it from the chat after that (the user's own typing only:
+ * no tool can, and nothing in an email or document can). The name goes into the system prompt,
+ * so it is kept to a short run of letters, spaces, apostrophes and hyphens.
+ */
+export const PERSONALITY_TONES = ['friendly', 'playful', 'neutral', 'concise'] as const;
+export const Tone = z.enum(PERSONALITY_TONES);
+export type Tone = z.infer<typeof Tone>;
+
+export const PersonalityConfig = z.strictObject({
+  name: z
+    .string()
+    .regex(/^[\p{L}][\p{L} '-]{0,29}$/u, 'must be a short name made of letters, spaces, apostrophes or hyphens')
+    .default('Astra'),
+  tone: Tone.default('friendly'),
+});
+export type PersonalityConfig = z.infer<typeof PersonalityConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -416,6 +435,8 @@ export const AiosConfig = z.strictObject({
   widgets: WidgetsConfig.prefault({}),
   /** K1: the hourly knowledge base about the user. */
   knowledge: KnowledgeConfig.prefault({}),
+  /** P1: the assistant's name and tone. */
+  personality: PersonalityConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({

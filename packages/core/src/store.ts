@@ -81,6 +81,12 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS knowledge_items (key TEXT PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL, at INTEGER NOT NULL, phase TEXT NOT NULL,
                                 state TEXT NOT NULL, notes TEXT, attempts INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
    CREATE INDEX IF NOT EXISTS knowledge_items_state ON knowledge_items(state, kind, at);`,
+  // K3: the order items are read in (0 first), and the hashed signals behind it: who the user
+  // writes to, and which emails and threads they replied to. No addresses or ids in the clear.
+  `ALTER TABLE knowledge_items ADD COLUMN priority INTEGER NOT NULL DEFAULT 3;
+   UPDATE knowledge_items SET priority = CASE kind WHEN 'sent' THEN 0 WHEN 'mail' THEN 3 WHEN 'file' THEN 4 WHEN 'chat' THEN 5 ELSE 6 END;
+   CREATE INDEX IF NOT EXISTS knowledge_items_pending ON knowledge_items(state, phase, priority, at);
+   CREATE TABLE IF NOT EXISTS knowledge_signals (kind TEXT NOT NULL, value TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (kind, value));`,
 ];
 
 export interface UsageRow {

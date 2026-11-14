@@ -17,7 +17,7 @@ import {
   AuditLog,
   type Delta,
   type FullMessage,
-  type MessageSummary,
+  type ListedMail,
   FileCatalog,
   KnowledgeCrawler,
   KnowledgeFile,
@@ -54,6 +54,14 @@ const CONFIG: KnowledgeConfig = {
   sources: ['mail', 'calendar', 'files', 'chat'],
   calendarDays: 7,
   keepDays: 14,
+  olderMail: 'off',
+  olderMailMonths: 60,
+  overnight: { start: '01:00', end: '07:00' },
+  skipCategories: ['promotions', 'social', 'updates', 'forums'],
+  skipAutomated: true,
+  skipSenders: [],
+  alwaysSenders: [],
+  dailyBudgetUsd: 0.5,
 };
 
 /** A pretend mailbox: one hostile email whose whole body is the attack, in INBOX and in Sent. */
@@ -73,7 +81,8 @@ function mailbox(now: number) {
     html: null,
     attachments: [],
   }));
-  return { search: async (): Promise<MessageSummary[]> => mails, read: async (id: string) => mails.find((m) => m.id === id) ?? null };
+  const listed: ListedMail[] = mails.map((m) => ({ ...m, threadId: null, starred: false, important: false, bulkHeaders: {} }));
+  return { list: async (): Promise<ListedMail[]> => listed, read: async (id: string) => mails.find((m) => m.id === id) ?? null };
 }
 
 function setup() {

@@ -7,7 +7,7 @@
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type KnowledgeConfig, parseConfig } from '@aios/shared';
+import { type GmailCategory, type KnowledgeConfig, parseConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import { AuditLog } from '../src/audit.js';
 import type { CalEvent } from '../src/calendar/google.js';
@@ -18,7 +18,7 @@ import { KnowledgeCrawler, type ModelChoice, knowledgeView, progressText } from 
 import { cleanTidied, mergeNotes, ownText } from '../src/knowledge/extract.js';
 import { KnowledgeFile, cleanNote, emptyKnowledge, parseKnowledge, renderKnowledge } from '../src/knowledge/file.js';
 import { knowledgeReadTool } from '../src/knowledge/tool.js';
-import type { FullMessage, MessageSummary } from '../src/mail/imap.js';
+import type { BulkHeaders, FullMessage, ListedMail, MessageSummary } from '../src/mail/imap.js';
 import { ModelError, type ModelRequest } from '../src/model.js';
 import { chatSystemPrompt } from '../src/prompts.js';
 import { Shell } from '../src/shell.js';
@@ -42,6 +42,14 @@ const CONFIG: KnowledgeConfig = {
   sources: ['mail', 'calendar', 'files', 'chat'],
   calendarDays: 7,
   keepDays: 3,
+  olderMail: 'off',
+  olderMailMonths: 60,
+  overnight: { start: '01:00', end: '07:00' },
+  skipCategories: ['promotions', 'social', 'updates', 'forums'],
+  skipAutomated: true,
+  skipSenders: [],
+  alwaysSenders: [],
+  dailyBudgetUsd: 0.5,
 };
 
 function event(id: string, start: string, end: string, o: Partial<CalEvent> = {}): CalEvent {
@@ -55,6 +63,13 @@ interface FakeMail {
   subject: string;
   text: string;
   at: number;
+  inReplyTo?: string;
+  threadId?: string;
+  starred?: boolean;
+  important?: boolean;
+  headers?: BulkHeaders;
+  /** Gmail tab; the pretend list leaves out the tabs it is asked to skip, like Gmail's search. */
+  category?: GmailCategory;
 }
 
 /** A pretend mailbox with search and read, like MailClient. */
@@ -64,13 +79,25 @@ function mailbox(mails: FakeMail[]) {
     return m ? { name: m[1]!, address: m[2]! } : { name: '', address: s };
   };
   const summary = (m: FakeMail): MessageSummary => ({ id: m.id, messageId: `<${m.id}@x>`, from: addr(m.from), to: [addr(m.to)], subject: m.subject, date: new Date(m.at) });
-  const searches: { since?: Date; limit: number }[] = [];
+  const listed = (m: FakeMail): ListedMail => ({
+    ...summary(m),
+    inReplyTo: m.inReplyTo ?? null,
+    threadId: m.threadId ?? null,
+    starred: m.starred ?? false,
+    important: m.important ?? false,
+    bulkHeaders: m.headers ?? {},
+  });
+  const searches: { since: Date; before?: Date | undefined; limit: number; skipCategories: readonly GmailCategory[] }[] = [];
   return {
     mails,
     searches,
-    search: async (_q: string, o: { since?: Date; limit: number }) => {
+    list: async (o: { since: Date; before?: Date | undefined; limit: number; skipCategories: readonly GmailCategory[] }) => {
       searches.push(o);
-      return mails.filter((m) => !o.since || m.at >= o.since.getTime()).sort((a, b) => b.at - a.at).slice(0, o.limit).map(summary);
+      const inRange = (m: FakeMail) => m.at >= o.since.getTime() && (!o.before || m.at < o.before.getTime());
+      const tab = (m: FakeMail) => !m.category || !o.skipCategories.includes(m.category);
+      // At most `limit` from each folder, like MailClient.list.
+      const folder = (f: string) => mails.filter((m) => m.id.startsWith(f) && inRange(m) && tab(m)).sort((a, b) => b.at - a.at).slice(0, o.limit);
+      return [...folder('INBOX:'), ...folder('Sent:')].sort((a, b) => b.at - a.at).map(listed);
     },
     read: async (id: string): Promise<FullMessage | null> => {
       const m = mails.find((x) => x.id === id);
@@ -256,7 +283,14 @@ describe('the first pass', () => {
     const r = rig();
     const run = (await r.crawler.run())!;
     expect(run).toMatchObject({ by: 'model', phase: 'backfill', found: 4, read: 4, tidied: true });
-    expect(r.box.searches[0]).toEqual({ since: new Date(local('2026-11-10T10:00') - 90 * DAY), limit: 600 });
+    // A month at a time going back, until the 90-day window is listed.
+    const start = local('2026-11-10T10:00');
+    expect(r.box.searches.slice(0, 3).map((q) => [q.since.getTime(), q.before?.getTime()])).toEqual([
+      [start - 30 * DAY, start],
+      [start - 60 * DAY, start - 30 * DAY],
+      [start - 90 * DAY, start - 60 * DAY],
+    ]);
+    expect(r.box.searches[0]).toMatchObject({ limit: 600, skipCategories: ['promotions', 'social', 'updates', 'forums'] });
     // Every item on the backfill (cloud) role; the user's own sent mail first.
     expect(r.requests.map((q) => q.role)).toEqual(['nightly', 'nightly', 'nightly', 'nightly', 'nightly']);
     expect(r.requests[0]!.req.messages.at(-1)!.content).toContain('An email John wrote and sent');
@@ -274,7 +308,7 @@ describe('the first pass', () => {
     const k = r.file.read();
     expect(k.sections.work).toEqual([{ text: 'Signing the Hydro contract with Kemal Arslan.', source: 'mail', on: '2026-11-07' }]);
     expect(k.sections.recent).toEqual([{ text: 'Agreed to bdinner/b with Ana', source: 'mail', on: '2026-11-08' }]);
-    expect(progressText(r.crawler.progress(), true)).toBe('Reading your history on the cloud model: 2 of 3 emails and 0 of 1 files so far. It continues every five minutes.');
+    expect(progressText(r.crawler.progress(), true)).toBe('Reading the last 3 months of mail on the cloud model: 2 of 3 emails and 0 of 1 files so far. It continues every five minutes.\nCloud spending on it: $0.00 today of the $0.50 daily budget, $0.00 in all.');
   });
 
   it('sends the model only the item, inside one untrusted wrapper, with no tools', async () => {
@@ -452,10 +486,12 @@ describe('reading the knowledge base', () => {
     expect(r.requests).toHaveLength(asked);
   });
 
-  it('is on by default: a 90-day first pass on the cloud, then hourly on the local model', () => {
+  it('is on by default: a 6-month first pass on the cloud, hourly on the local model, older mail overnight', () => {
     const m = (role: string) => `[models.${role}]\nbaseUrl = "https://example.invalid/v1"\nmodel = "m"\napiKeyRef = "keyring:model-${role}"\n`;
     const toml = `[user]\nname = "John"\ntimezone = "${TZ}"\n${m('chat')}${m('triage')}${m('nightly')}[mail]\naddress = "john@aios.test"\nusername = "john@aios.test"\npasswordRef = "keyring:mail"\nimap = { host = "127.0.0.1", port = 3143, tls = false }\nsmtp = { host = "127.0.0.1", port = 3025, tls = false }\n`;
     expect(() => parseConfig(`${toml}[knowledge]\neveryMinutes = 5\n`)).toThrow(/everyMinutes/);
-    expect(parseConfig(toml).knowledge).toEqual({ ...CONFIG, keepDays: 14 });
+    expect(parseConfig(toml).knowledge).toEqual({ ...CONFIG, keepDays: 14, backfillDays: 183, backfillMaxMails: 5000, olderMail: 'local-overnight' });
+    expect(() => parseConfig(`${toml}[knowledge]\nskipSenders = ["not an address"]\n`)).toThrow(/skipSenders/);
+    expect(parseConfig(`${toml}[knowledge]\nskipSenders = ["Shop.Example", "Ana@Home.Example"]\n`).knowledge.skipSenders).toEqual(['shop.example', 'ana@home.example']);
   });
 });

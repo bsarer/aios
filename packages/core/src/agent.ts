@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import type { ChatItem, ServerEvent } from '@aios/shared';
 import type { Memory } from './memory/memory.js';
 import { type ChatMessage, type ModelClient, ModelError, type ModelResult } from './model.js';
-import { chatSystemPrompt } from './prompts.js';
+import type { Voice } from './personality.js';
+import { chatSystemPrompt, voiceReminder } from './prompts.js';
 import type { Store } from './store.js';
 import { formatNow } from './tools/now.js';
 import type { ToolRegistry, UntrustedSource } from './tools/registry.js';
@@ -112,6 +113,8 @@ export interface AgentOptions {
   emit: (ev: ServerEvent) => void;
   /** Profile, recalled facts and summaries, and a token-budgeted window (A3). */
   memory?: Memory;
+  /** P1: the assistant's name and tone, read every turn so /tone applies at once. Default: Astra, friendly. */
+  voice?: () => Voice;
   clock?: () => Date;
   newId?: () => string;
 }
@@ -147,12 +150,15 @@ export class Agent {
     this.post({ kind: 'user', id: this.newId(), text, at: at() });
     store.saveTurn({ role: 'user', content: text }, at());
 
+    // P1: read once per message, so a /tone typed just before applies to this reply.
+    const voice = this.o.voice?.() ?? { name: 'Astra', tone: 'friendly' as const };
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), knowledge: tools.has('knowledge_read') });
+      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), knowledge: tools.has('knowledge_read'), assistantName: voice.name, tone: voice.tone });
+      const closing = voiceReminder(voice.tone);
       const messages = quarantineEarlierEmail(
         this.o.memory
-          ? this.o.memory.context(system, text, store.recentTurns(CONTEXT_TURNS_BUDGETED))
-          : [{ role: 'system', content: system }, ...store.recentTurns(CONTEXT_TURNS)],
+          ? this.o.memory.context(system, text, store.recentTurns(CONTEXT_TURNS_BUDGETED), closing)
+          : [{ role: 'system', content: `${system}\n\n${closing}` }, ...store.recentTurns(CONTEXT_TURNS)],
         (name) => tools.returnsUntrusted(name),
       );
       // Decided in code from what the model can see, so an email cannot talk its way out of it.

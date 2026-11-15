@@ -11,6 +11,8 @@ install with only `~/.config/aios` keeps its folders, service, keyring and port 
 - **`astra` command:** `astra` opens the chat; `setup`, `doctor`, `backup`, `restore FILE`, `calendar-login`, `uninstall [--purge]`, `version`.
 - **Own names:** `~/.config/astra`, `~/.local/share/astra`, `astra.service`, keyring service `astra`, and port 7780, so Astra and AI OS can live on one computer (on different accounts).
 - `install.sh` installs from source into `~/.local/share/astra/app`; restores put a backup back under the names it was made with.
+- **Voice and tone:** `[personality]` (the assistant's name and tone) and `/tone` to change it from the chat; the knowledge base reads a large Gmail inbox (K3).
+- **Setup keeps your settings:** running `astra setup` again keeps the sections it doesn't ask about (`[files]` folders, `[screen]`, `[personality]`, `[knowledge]`, speech and embeddings models). Before, a re-run dropped them.
 
 ## v0.1.0 (alpha, 2026-11)
 

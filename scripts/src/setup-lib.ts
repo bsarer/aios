@@ -137,15 +137,17 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
     } as AiosConfig['calendar'];
   }
 
+  // Everything setup doesn't ask about ([files], [screen], [personality], [knowledge] and the rest)
+  // is kept as it was; only a calendar the user said no to is dropped.
+  const { calendar: _oldCalendar, ...kept } = existing ?? {};
   const config = AiosConfig.parse({
-    user: { name, timezone },
-    models,
+    ...kept,
+    user: { ...existing?.user, name, timezone },
+    // Embeddings (F3) and speech (V2) aren't asked about, so they stay; a local model the user said no to goes.
+    models: { ...(existing?.models.embeddings ? { embeddings: existing.models.embeddings } : {}), ...(existing?.models.speech ? { speech: existing.models.speech } : {}), ...models },
     mail,
     ...(calendar ? { calendar } : {}),
-    notifications: existing?.notifications,
-    cost: existing?.cost,
     ui: existing?.ui ?? { port: DEFAULT_PORT },
-    assistant: existing?.assistant,
   });
   return { config, secrets };
 }

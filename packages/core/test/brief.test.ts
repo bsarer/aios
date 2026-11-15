@@ -183,7 +183,7 @@ describe('morning brief', () => {
   it('writes its own intro without the local model, or when it fails', async () => {
     const none = rig({ model: 'none' });
     await none.brief.run();
-    expect(none.card()).toMatchObject({ by: 'code', intro: 'Good morning, John. Today: 2 urgent emails, 3 events (the first at 09:30) and 2 things due, 1 overdue.' });
+    expect(none.card()).toMatchObject({ by: 'code', intro: 'Morning, John! Today: 2 urgent emails, 3 events (the first at 09:30) and 2 things due, 1 overdue.' });
     const fails = rig({ model: 'fails' });
     await fails.brief.run();
     expect(fails.card().by).toBe('code');
@@ -194,7 +194,7 @@ describe('morning brief', () => {
     const off = rig({ calendar: 'none', model: 'none' });
     await off.brief.run();
     expect(off.card()).toMatchObject({ calendar: 'off', events: [], free: [] });
-    expect(off.card().intro).toBe('Good morning, John. Today: 2 urgent emails and 2 things due, 1 overdue.');
+    expect(off.card().intro).toBe('Morning, John! Today: 2 urgent emails and 2 things due, 1 overdue.');
     const broken = rig({ calendar: 'error' });
     await broken.brief.run();
     expect(broken.card()).toMatchObject({ calendar: 'error', events: [] });

@@ -539,6 +539,7 @@ Ten minutes before an event (`calendar` EventSource), a card with recent mail th
 
 **T8: Open links and web lookup** (S for opening, M for reading pages)
 "Open my bank's site" opens a URL the user gave (or a saved bookmark) in the default browser on a card. Fetching and summarizing a page is a separate step: page text is untrusted like email, with no write-tier tools or memory while it is in view.
+*Opening, done:* `web_open` (device tier) opens a link or a search from `[web] search` in a new Chromium window away from the chat, and the screen follows it; `/web` without the model; a link from outside text gets a card naming the site. *Checked so far:* unit tests (`packages/core/test/web.test.ts`); not yet on the real machine.
 
 **T9: Power and updates** (S for sleep, restart and shut down; M for system updates)
 Sleep, restart and shut down on a card, through Omarchy's own commands. System updates (`omarchy-update`) on a card with the list of packages, and a warning to save work first.

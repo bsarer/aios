@@ -251,6 +251,7 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
     fake('pgrep', o.hung ? 'exit 0' : 'exit 1');
     fake('pkill', 'exit 0');
     fake('chromium', 'exit 0');
+    fake('systemctl', 'exit 0');
     const script = join(dir, 'aios-kiosk');
     writeFileSync(script, launcherScript({ port: 7777, profileDir: '/home/j/.local/share/aios/chromium' }));
     chmodSync(script, 0o755);
@@ -272,6 +273,11 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
     expect(chromium).toContain('--app=http://127.0.0.1:7777/');
   });
 
+  it('leaves a running service alone', () => {
+    const r = launcher({ windowOpen: false, hung: false })('open');
+    expect(r.lines.some((l) => l.startsWith('systemctl'))).toBe(false);
+  });
+
   it('focuses the window instead of opening a second one', () => {
     const r = launcher({ windowOpen: true, hung: false })('open');
     expect(r.lines.some((l) => l.startsWith('chromium'))).toBe(false);
@@ -286,7 +292,9 @@ describe.skipIf(!has('bash') || !has('jq'))('the aios-kiosk launcher', () => {
   it('when the service never comes up, says why in a notification and opens no error page', () => {
     const r = launcher({ windowOpen: false, hung: false, down: true, env: { AIOS_KIOSK_WAIT: '3' } })('open');
     expect(r.status).toBe(1);
-    expect(r.lines.filter((l) => l.startsWith('curl'))).toHaveLength(3);
+    // One look first, which starts the stopped service (U1: opening from the app menu after astra stop), then three waits.
+    expect(r.lines.filter((l) => l.startsWith('curl'))).toHaveLength(4);
+    expect(r.lines).toContain('systemctl --user start astra.service');
     expect(r.lines.some((l) => l.startsWith('chromium'))).toBe(false);
     // Only the latest failure, with its detail lines.
     expect(r.lines.find((l) => l.startsWith('notify-send'))).toBe('notify-send -u critical Astra aios-core failed to start: config is invalid:');

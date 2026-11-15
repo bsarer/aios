@@ -36,13 +36,14 @@ jobs:
           pkg=$(ls packaging/arch/out/astra-*.pkg.tar.zst)
           pacman -Qip "$pkg"
           files=$(pacman -Qlp "$pkg")
-          for f in /usr/bin/astra /usr/lib/astra/scripts/src/astra.ts /usr/lib/astra/packages/ui/dist/index.html /usr/share/applications/astra.desktop; do
+          for f in /usr/bin/astra /usr/lib/astra/scripts/src/astra.ts /usr/lib/astra/packages/ui/dist/index.html /usr/share/applications/astra.desktop /usr/lib/astra/BUILD_INFO.json; do
             grep -q " $f\$" <<<"$files" || { echo "missing $f"; exit 1; }
           done
           ! grep -E ' /usr/lib/astra/(scripts|packages/[^/]+)/test/' <<<"$files"
           pacman -U --noconfirm --nodeps "$pkg"
           astra version
-          astra help
+          astra help | grep -q "astra update"
+          jq -e ".commit | test(\"^[0-9a-f]{40}$\")" /usr/lib/astra/BUILD_INFO.json
       - uses: actions/upload-artifact@v7
         with:
           name: astra-arch

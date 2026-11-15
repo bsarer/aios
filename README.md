@@ -32,6 +32,8 @@ nothing in your home folder changes until `astra setup`. Tagged releases also ca
 (CI builds it on every `v*` tag). After a `nodejs` major update, reinstall the package so its
 database module matches.
 
+**Update:** type `/update` in the chat and press Update, or run `astra update` (`--check` only looks). It pulls the checkout the package was built in, builds, installs (sudo asks for your password) and restarts Astra; your settings, keys and data stay. **Stop:** `astra stop` closes the chat and stops Astra until you open it from the app menu, run `astra`, or log in again.
+
 **From source** (for development): `./install.sh --check`, then `./install.sh`, which installs
 the newest release tag into `~/.local/share/astra/app` and runs setup; run it again to upgrade
 (`--ref main` or a tag installs that instead).

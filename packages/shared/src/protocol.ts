@@ -368,6 +368,18 @@ export const ChatItem = z.discriminatedUnion('kind', [
     moreTodos: z.int().min(0),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('update'),
+    /** U1: /update. Written by code; changes are commit subjects from the repository: plain text only. */
+    id: z.string(),
+    state: z.enum(['available', 'current', 'unavailable', 'started', 'failed']),
+    headline: z.string(),
+    changes: z.array(z.string()),
+    /** More changes than listed. */
+    more: z.int().min(0),
+    detail: z.string().optional(),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -464,6 +476,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */
   z.strictObject({ type: z.literal('app_open'), actionId: z.string().max(100) }),
+  /** U1: Update on an /update card; opens a terminal running astra update, nothing else. */
+  z.strictObject({ type: z.literal('update_start'), id: z.string().max(100) }),
   z.strictObject({
     type: z.literal('draft_edit'),
     id: z.string().max(100),

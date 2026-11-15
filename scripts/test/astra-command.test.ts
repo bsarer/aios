@@ -17,6 +17,9 @@ describe('astra', () => {
     expect(route(['setup', '--terminal', '--dry-run'])).toEqual({ kind: 'script', file: script('setup.ts'), args: ['--dry-run'] });
     expect(route(['setup', '--kiosk'])).toEqual({ kind: 'script', file: script('setup.ts'), args: ['--kiosk'] });
     expect(route(['doctor'])).toMatchObject({ kind: 'script', file: script('doctor.ts') });
+    expect(route(['update'])).toEqual({ kind: 'script', file: script('update.ts'), args: [] });
+    expect(route(['update', '--check'])).toEqual({ kind: 'script', file: script('update.ts'), args: ['--check'] });
+    expect(route(['stop'])).toEqual({ kind: 'stop' });
     expect(route(['backup'])).toMatchObject({ kind: 'script', file: script('backup.ts') });
     expect(route(['uninstall', '--purge'])).toEqual({ kind: 'script', file: script('uninstall.ts'), args: ['--purge'] });
     expect(route(['restore', '/home/j/astra-backup.tar.gz'])).toEqual({ kind: 'restore', file: '/home/j/astra-backup.tar.gz' });
@@ -32,6 +35,8 @@ describe('astra', () => {
     expect(route(['restore', '--force'])).toMatchObject({ kind: 'error' });
     expect(route(['restore', 'a', 'b'])).toMatchObject({ kind: 'error' });
     expect(route(['open', 'x'])).toMatchObject({ kind: 'error' });
+    expect(route(['stop', 'now'])).toMatchObject({ kind: 'error' });
+    expect(route(['update', '--force'])).toMatchObject({ kind: 'error' });
     expect(route(['settings', '--terminal'])).toMatchObject({ kind: 'error' });
   });
 

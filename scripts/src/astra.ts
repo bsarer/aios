@@ -6,6 +6,9 @@
  *   astra setup              set up Astra in a window (R2)
  *   astra settings           change the answers, in the same window
  *   astra setup --terminal   the same questions in this terminal; --kiosk reinstalls only the service and kiosk
+ *   astra stop               close the chat and stop Astra until you open it again (or log in)
+ *   astra update [--check]   pull, build and install the newest version; settings stay (asks for
+ *                            your password to install); --check only says whether there is one
  *   astra doctor             check the install; one line per check, each with a fix
  *   astra backup             write ~/astra-backup-<time>.tar.gz (never keyring secrets)
  *   astra restore FILE       put a backup back (what is there now is moved aside)
@@ -29,6 +32,7 @@ export type Route =
   | { kind: 'script'; file: string; args: string[] }
   | { kind: 'restore'; file: string }
   | { kind: 'open' }
+  | { kind: 'stop' }
   | { kind: 'version' }
   | { kind: 'help' }
   | { kind: 'error'; message: string };
@@ -37,6 +41,7 @@ const SCRIPTS: Record<string, { file: string; flags: string[] }> = {
   setup: { file: 'setup.ts', flags: ['--kiosk', '--dry-run', '--terminal'] },
   settings: { file: 'onboard.ts', flags: [] },
   doctor: { file: 'doctor.ts', flags: [] },
+  update: { file: 'update.ts', flags: ['--check'] },
   backup: { file: 'backup.ts', flags: [] },
   'calendar-login': { file: 'calendar-login.ts', flags: [] },
   uninstall: { file: 'uninstall.ts', flags: ['--purge', '--yes'] },
@@ -47,6 +52,7 @@ export function route(argv: string[]): Route {
   const [cmd, ...rest] = argv;
   if (cmd === undefined || cmd === 'open') return rest.length ? { kind: 'error', message: `astra open takes no arguments` } : { kind: 'open' };
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') return { kind: 'help' };
+  if (cmd === 'stop') return rest.length ? { kind: 'error', message: 'astra stop takes no arguments' } : { kind: 'stop' };
   if (cmd === 'version' || cmd === '--version') return { kind: 'version' };
   if (cmd === 'restore') {
     const [file, ...more] = rest;
@@ -103,6 +109,13 @@ function main(argv: string[]): number {
       // R2: the first time, setup opens in a window and opens the chat when it's done.
       if (!existsSync(launcher) || !existsSync(join(configDir(), 'config.toml'))) return run(process.execPath, ['--import', 'tsx', join(here, 'onboard.ts')], join(ROOT, 'scripts'));
       return run(launcher, ['open'], ROOT);
+    }
+    case 'stop': {
+      const { launcher, service } = kioskPaths();
+      if (existsSync(launcher)) run(launcher, ['exit'], ROOT);
+      const code = run('systemctl', ['--user', 'stop', service], ROOT);
+      if (code === 0) console.log(`${APP_NAME} stopped. Open it from the app menu, or run astra, to start it again.`);
+      return code;
     }
     case 'restore':
       // install.sh holds the tested checks: plain files only, no links or '..', only Astra's folders.

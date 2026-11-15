@@ -69,7 +69,10 @@ export async function checkForUpdate(info: BuildInfo | null, git: Git, opts: { f
 
 /** What runs in the terminal: fixed words only. */
 export const UPDATE_COMMAND = ['/usr/bin/astra', 'update'] as const;
-const HOLD = `${UPDATE_COMMAND.join(' ')}; echo; read -rp "Press Enter to close this window. " _`;
+
+/** Words that may run in a terminal: no spaces, quotes or shell characters. */
+const WORD = /^[A-Za-z0-9/_.,=-]{1,200}$/;
+const hold = (words: readonly string[]) => `${words.join(' ')}; echo; read -rp "Press Enter to close this window. " _`;
 
 /** Terminals to try, each with how it takes a command. Omarchy's own is xdg-terminal-exec. */
 const TERMINALS: [string, string[]][] = [
@@ -87,15 +90,30 @@ export class UpdateError extends Error {}
  * so it keeps running when the update restarts this service, and sudo works in it (this service
  * runs with NoNewPrivileges, which a child process would keep).
  */
-export async function openUpdateTerminal(
+export function openUpdateTerminal(
   env: NodeJS.ProcessEnv = process.env,
   start: (cmd: string, args: string[]) => Promise<void> = startDetached(env),
   has: (cmd: string) => Promise<boolean> = (c) => onPath(c, env),
 ): Promise<string> {
+  return openTerminal(UPDATE_COMMAND, 'astra-update', env, start, has);
+}
+
+/**
+ * Opens a terminal running fixed words (astra update, astra addons) in a new systemd service.
+ * Returns the terminal's name. Also used by the setup window's add-ons step.
+ */
+export async function openTerminal(
+  words: readonly string[],
+  unit: string,
+  env: NodeJS.ProcessEnv = process.env,
+  start: (cmd: string, args: string[]) => Promise<void> = startDetached(env),
+  has: (cmd: string) => Promise<boolean> = (c) => onPath(c, env),
+): Promise<string> {
+  if (!words.length || !words.every((w) => WORD.test(w)) || !/^[a-z-]{1,40}$/.test(unit)) throw new UpdateError('that command can’t run in a terminal');
   let term: [string, string[]] | undefined;
   for (const t of TERMINALS) if (await has(t[0])) { term = t; break; }
-  if (!term) throw new UpdateError('no terminal found. Open one and run astra update.');
-  const inner = [term[0], ...term[1], 'bash', '-c', HOLD];
+  if (!term) throw new UpdateError(`no terminal found. Open one and run ${words.join(' ').replace('/usr/bin/', '')}.`);
+  const inner = [term[0], ...term[1], 'bash', '-c', hold(words)];
   // Not uwsm-app: it starts apps in a scope, a child of this service, which keeps NoNewPrivileges,
   // so sudo refuses at once without asking for the password. systemd-run makes a service that the
   // user's systemd starts, with nothing inherited from this one.
@@ -104,7 +122,7 @@ export async function openUpdateTerminal(
     const v = env[k];
     return v && /^[A-Za-z0-9_.:/-]{1,200}$/.test(v) ? ['--setenv', `${k}=${v}`] : [];
   });
-  await start('systemd-run', ['--user', '--collect', '--quiet', '--unit', `astra-update-${Date.now()}`, ...pass, '--', ...inner]);
+  await start('systemd-run', ['--user', '--collect', '--quiet', '--unit', `${unit}-${Date.now()}`, ...pass, '--', ...inner]);
   return term[0];
 }
 

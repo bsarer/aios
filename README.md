@@ -192,6 +192,8 @@ Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[br
 
 Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"friendly"` default, `"playful"`, `"neutral"`, `"concise"`). Type `/tone` in the chat to see it and `/tone playful` to change it; the change applies to the next reply and is kept.
 
+Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one.
+
 ## Videos
 
 "Play holiday.mp4 from Downloads" or "watch this: https://www.youtube.com/watch?v=…" plays the video in mpv, on another screen or the next workspace, like any app. Files must be videos in your allowed folders (`[files] roots`, which now include `~/Videos` by default; if your config lists its own `roots`, add `"~/Videos"` there); links must be `https://` links to a site by name (no IP addresses, local names or ports). YouTube and most sites need `yt-dlp` installed next to mpv. A link that comes from an email, invite or document never starts by itself: a card asks you first.

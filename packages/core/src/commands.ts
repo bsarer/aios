@@ -19,6 +19,8 @@ export type Command =
   | { name: 'unpin'; text: string }
   | { name: 'knowledge'; update: boolean }
   | { name: 'tone'; text: string }
+  | { name: 'feedback'; list: true }
+  | { name: 'feedback'; list: false; text: string }
   | { name: 'unknown'; raw: string };
 
 /** null when the text is a normal message. */
@@ -64,6 +66,11 @@ export function parseCommand(text: string): Command | null {
       return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(rest.join(' ').trim()) };
     case 'tone':
       return { name: 'tone', text: rest.join(' ') };
+    case 'feedback': {
+      // Keep the idea as typed, line breaks included.
+      const text = t.slice(1 + head.length).trim();
+      return /^list$/i.test(text) ? { name: 'feedback', list: true } : { name: 'feedback', list: false, text };
+    }
     default:
       return { name: 'unknown', raw: t };
   }
@@ -88,6 +95,7 @@ export const HELP_TEXT = [
   '/knowledge  show the knowledge base Astra keeps about you from your mail, calendar, files and chat',
   '/knowledge update  update it now (it updates by itself every hour)',
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
+  '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Esc stops a reply.',
 ].join('\n');

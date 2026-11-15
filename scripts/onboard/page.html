@@ -95,7 +95,7 @@
   let step = 0, seen = 0, S = null, editing = false;
   const A = { name: '', timezone: '', ai: { provider: 'openrouter', baseUrl: '', model: '', key: '' }, local: null,
     mail: { address: '', password: '', imap: { host: '', port: 993 }, smtp: { host: '', port: 465 } },
-    folders: [], apps: { docs: true, video: true, builder: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '' };
+    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '' };
   const T = { ai: null, mail: null, mailProvider: undefined, finished: null };
 
   function okToLeave() {
@@ -235,8 +235,16 @@
           el('div', {}, el('label', { for: 'app-' + id, class: 'flat' }, name, el('span', { class: 'badge' + (path ? '' : ' missing'), text: path ? 'Found' : 'Not found' })), el('span', { text: path ? feature + ' · ' + path : feature + '. ' + how })))),
         el('div', { class: 'toggle' }, el('input', { type: 'checkbox', disabled: true, checked: !!S.ollama.length }),
           el('div', {}, el('b', {}, 'Ollama', el('span', { class: 'badge' + (S.ollama.length ? '' : ' missing'), text: S.ollama.length ? 'Running' : 'Not running' })), el('span', { text: S.ollama.length ? 'The local model. Chosen on the AI step.' : 'Optional: the local model for private system checks.' }))),
-        el('div', { class: 'toggle' }, el('input', { type: 'checkbox', disabled: true, checked: !!S.apps.whisper }),
-          el('div', {}, el('b', {}, 'whisper.cpp', el('span', { class: 'badge' + (S.apps.whisper ? '' : ' missing'), text: S.apps.whisper ? 'Found' : 'Not found' })), el('span', { text: 'Optional: speaking to the chat. See the README to set it up.' }))),
+        (() => {
+          const ready = S.apps.speech || (S.existing && S.existing.apps.voice);
+          const badge = S.apps.speech ? 'Running' : ready ? 'Set up' : S.apps.whisper ? 'Not running' : 'Not found';
+          const how = ready ? 'Speaking to the chat. Your voice stays on this computer.' + (S.apps.whisper ? ' · ' + S.apps.whisper : '')
+            : S.apps.whisper ? 'Optional: speaking to the chat. Found ' + S.apps.whisper + ', but it isn’t answering on 127.0.0.1:8178. Start it (see Voice in the README), then open astra settings.'
+            : 'Optional: speaking to the chat. See Voice in the README to set it up, then open astra settings.';
+          return el('div', { class: 'toggle' },
+            el('input', { type: 'checkbox', id: 'app-voice', disabled: !ready, checked: !!ready && A.apps.voice, onchange: (e) => { A.apps.voice = e.target.checked; } }),
+            el('div', {}, el('label', { for: 'app-voice', class: 'flat' }, 'whisper.cpp', el('span', { class: 'badge' + (ready ? '' : ' missing'), text: badge })), el('span', { text: how })));
+        })(),
       ];
     },
     desktop: () => {
@@ -311,6 +319,7 @@
     const offered = S.folders.map((f) => f.path);
     A.folders = e ? [...e.folders] : offered.filter((f) => ['~/Documents', '~/Downloads', '~/Pictures', '~/Music', '~/Videos'].includes(f));
     if (e) for (const f of e.folders) if (!offered.includes(f)) S.folders.push({ path: f });
+    if (!e) A.apps.voice = !!S.apps.speech;
     if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; }
     if (!A.monitor && S.screens.length > 1) A.monitor = (S.screens.find((s) => s.focused) || S.screens[0]).name;
     if (e) { seen = STEPS.length - 1; T.mailProvider = undefined; }

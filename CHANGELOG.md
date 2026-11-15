@@ -13,6 +13,7 @@ install with only `~/.config/aios` keeps its folders, service, keyring and port 
 - `install.sh` installs from source into `~/.local/share/astra/app`; restores put a backup back under the names it was made with.
 - **Voice and tone:** `[personality]` (the assistant's name and tone) and `/tone` to change it from the chat; the knowledge base reads a large Gmail inbox (K3).
 - **Setup in a window** (R2): `astra` the first time, `astra setup` and `astra settings` open setup in a window. It asks only what it can't find out, tests the AI key and the mail sign-in before you go on (with what to do when they fail), and fills in Gmail's and Google Workspace's servers. `astra setup --terminal` keeps the terminal questions.
+- **Voice in setup:** setup finds whisper.cpp where the README builds it (`~/.local/src/whisper.cpp`) and turns the microphone on when its server answers on 127.0.0.1:8178.
 - **Setup keeps your settings:** running `astra setup` again keeps the sections it doesn't ask about (`[files]` folders, `[screen]`, `[personality]`, `[knowledge]`, speech and embeddings models). Before, a re-run dropped them.
 
 ## v0.1.0 (alpha, 2026-11)

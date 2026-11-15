@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import providers from '../providers.json' with { type: 'json' };
 import { type FoundApps, GMAIL, SetupAnswers, buildConfig, cleanPassword, readPresets, serversFor, summarize } from '../src/onboard/answers.js';
 import { checkAiKey, checkMail } from '../src/onboard/checks.js';
+import { type Probes, findApps, whisperRunning } from '../src/onboard/probe.js';
 import { type SetupDeps, startSetupServer } from '../src/onboard/server.js';
 
 const presets = readPresets(providers as Record<string, unknown>);
@@ -74,11 +75,22 @@ describe('R2 answers: only what needs the person is asked', () => {
   it('Settings keeps stored keys left empty, and every section it does not show', () => {
     const first = buildConfig(answers(), null, presets, all, GMAIL).config;
     const tuned = AiosConfig.parse({ ...first, personality: { ...first.personality, tone: 'playful' }, cost: { dailyCapUsd: 5 }, models: { ...first.models, speech: { baseUrl: 'http://127.0.0.1:8178' } } });
-    const again = buildConfig(answers({ ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: '' }, mail: { address: 'baris@gmail.com', password: '' } }), tuned, presets, all, GMAIL);
+    const again = buildConfig(answers({ ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: '' }, mail: { address: 'baris@gmail.com', password: '' }, apps: { docs: true, video: true, builder: true, voice: true } }), tuned, presets, all, GMAIL);
     expect(again.secrets.size).toBe(0);
     expect(again.config).toEqual(tuned);
     // A new address needs its own password.
     expect(() => buildConfig(answers({ mail: { address: 'other@gmail.com', password: '' } }), tuned, presets, all, GMAIL)).toThrow(/password/);
+  });
+
+  it('turns voice on only when a whisper.cpp server answers, or was set up before, and off when unticked', () => {
+    const voice = { docs: true, video: true, builder: true, voice: true };
+    expect(buildConfig(answers({ apps: voice }), null, presets, none, GMAIL).config.models.speech).toBeUndefined();
+    const on = buildConfig(answers({ apps: voice }), null, presets, { ...none, speech: true }, GMAIL).config;
+    expect(on.models.speech?.baseUrl).toBe('http://127.0.0.1:8178');
+    expect(summarize(on, presets)).toMatchObject({ apps: { voice: true } });
+    const custom = AiosConfig.parse({ ...on, models: { ...on.models, speech: { baseUrl: 'http://127.0.0.1:9000', language: 'tr' } } });
+    expect(buildConfig(answers({ apps: voice, mail: { address: 'baris@gmail.com', password: '' } }), custom, presets, none, GMAIL).config.models.speech).toMatchObject({ baseUrl: 'http://127.0.0.1:9000', language: 'tr' });
+    expect(buildConfig(answers({ mail: { address: 'baris@gmail.com', password: '' } }), custom, presets, none, GMAIL).config.models.speech).toBeUndefined();
   });
 
   it('tells the window about the config without any secret', () => {
@@ -233,5 +245,29 @@ describe('R2 setup server: only its own page can drive it', () => {
     } finally {
       await t.s.close();
     }
+  });
+});
+
+describe('R2 app scan: looks only', () => {
+  const probes = (files: string[], answering: boolean): Probes => ({
+    home: '/home/j',
+    path: '/usr/bin:/bin',
+    isDir: () => false,
+    isExecutable: async (f) => files.includes(f),
+    run: async () => '',
+    fetch: (async (u: string) => {
+      if (answering && String(u) === 'http://127.0.0.1:8178/') return new Response('<html>whisper.cpp</html>');
+      throw new Error('refused');
+    }) as unknown as typeof fetch,
+    mx: async () => [],
+    readFile: async () => '',
+  });
+
+  it('finds whisper-server where the README builds it, and whether it is running', async () => {
+    const built = '/home/j/.local/src/whisper.cpp/build/bin/whisper-server';
+    expect(await findApps(probes([built], true))).toMatchObject({ whisper: built, speech: true });
+    expect(await findApps(probes(['/usr/bin/whisper-server'], false))).toMatchObject({ whisper: '/usr/bin/whisper-server', speech: false });
+    expect(await findApps(probes([], false))).toMatchObject({ whisper: null, speech: false });
+    expect(await whisperRunning(probes([], true))).toBe(true);
   });
 });

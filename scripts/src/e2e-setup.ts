@@ -39,7 +39,7 @@ function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, st
       name: 'John',
       timezone: 'Europe/Istanbul',
       folders: [{ path: '~/Documents' }, { path: '~/Downloads' }, { path: '~/Projects' }],
-      apps: { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: '/usr/bin/mpv', claude: null, whisper: null },
+      apps: { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: '/usr/bin/mpv', claude: null, whisper: '/home/john/.local/src/whisper.cpp/build/bin/whisper-server', speech: true },
       ollama: ['qwen3:8b'],
       screens: [
         { name: 'DP-1', width: 2560, height: 1440, focused: false },
@@ -131,6 +131,7 @@ async function main(): Promise<void> {
     await next(page);
     check(await page.isDisabled('#app-docs'), 'apps that are not installed can’t be turned on');
     check(await page.isChecked('#app-video'), 'found apps start on');
+    check((await page.isChecked('#app-voice')) && (await page.textContent('main'))?.includes('Running'), 'a running whisper.cpp server turns voice on');
     await next(page);
     check((await page.textContent('main'))?.includes('You have 2 screens'), 'two screens ask which is Astra’s');
     check((await page.getAttribute('button.card[aria-pressed="true"]', 'aria-pressed')) === 'true' && (await page.textContent('button.card[aria-pressed="true"] b')) === 'eDP-1', 'the focused screen is picked');
@@ -145,6 +146,7 @@ async function main(): Promise<void> {
     check(c.models.triage.model === c.models.chat.model && c.models.local?.model === 'qwen3:8b', 'triage shares the chat model; the local model is on');
     check(c.files.roots.includes('~/Projects') && c.video.enabled && !c.docs.enabled, 'folders and apps are saved');
     check(c.screen.monitor === 'eDP-1', 'the screen is saved');
+    check(c.models.speech?.baseUrl === 'http://127.0.0.1:8178', 'voice is set up for the running whisper.cpp server');
     check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'the key and app password went to the keyring');
     check(!JSON.stringify(c).includes(FAKE_KEY) && !JSON.stringify(c).includes('abcdefghijklmnop'), 'no secret is in the config');
     check(state.installs === 1, 'the desktop parts were installed once');
@@ -169,6 +171,8 @@ async function main(): Promise<void> {
     await next(again);
     await again.click('nav button:has-text("Folders")');
     check(await again.isChecked('[id="f-~/Projects"]'), 'ticked folders come back');
+    await again.click('nav button:has-text("Apps")');
+    check(await again.isChecked('#app-voice'), 'voice comes back on');
     await again.click('nav button:has-text("Finish")');
     check((await again.textContent('#next')) === 'Save', 'the last button is Save');
     await next(again);

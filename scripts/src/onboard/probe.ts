@@ -9,6 +9,7 @@ import { constants, existsSync, statSync } from 'node:fs';
 import { access, readdir, readFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
+import { SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 import { parseMonitors } from '../kiosk.js';
 import type { FoundApps } from './answers.js';
@@ -67,6 +68,9 @@ async function findUnpacked(p: Probes, app: string, bin: string): Promise<string
   return null;
 }
 
+/** Where the README builds whisper.cpp's server; the package `whisper.cpp` puts it on PATH. */
+const WHISPER_PLACES = ['~/.local/src/whisper.cpp/build/bin/whisper-server', '~/.local/bin/whisper-server'];
+
 export async function findApps(p: Probes): Promise<FoundApps & { whisper: string | null }> {
   const home = ['~/.local/bin'];
   return {
@@ -76,8 +80,18 @@ export async function findApps(p: Probes): Promise<FoundApps & { whisper: string
     gridcraftCli: (await find(p, ['gridcraft-cli'], home)) ?? (await findUnpacked(p, 'gridcraft', 'gridcraft-cli')),
     mpv: await find(p, ['mpv']),
     claude: await find(p, ['claude'], ['~/.local/bin/claude', '~/.claude/local/claude']),
-    whisper: await find(p, ['whisper-server', 'whisper-cpp-server']),
+    whisper: await find(p, ['whisper-server', 'whisper-cpp-server'], WHISPER_PLACES),
+    speech: await whisperRunning(p),
   };
+}
+
+/** True when something answers on [models.speech]'s default address (whisper-server serves a page at /). */
+export async function whisperRunning(p: Probes, baseUrl = SpeechConfig.parse({}).baseUrl): Promise<boolean> {
+  try {
+    return (await p.fetch(`${baseUrl}/`)).ok;
+  } catch {
+    return false;
+  }
 }
 
 const OllamaTags = z.looseObject({ models: z.array(z.looseObject({ name: z.string().min(1).max(200) })).max(500) });

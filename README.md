@@ -226,7 +226,7 @@ Set it up:
    WantedBy=default.target
    ```
    then `systemctl --user daemon-reload && systemctl --user enable --now whisper-server`. No `--convert` or ffmpeg is needed: the chat sends 16 kHz WAV.
-3. Add to `~/.config/aios/config.toml` and restart AI OS (`pnpm kiosk:restart`):
+3. Astra: open `astra settings`; the Apps step shows whisper.cpp as Running, with voice ticked. Save. (AI OS, or by hand: add to `~/.config/aios/config.toml` and restart, `pnpm kiosk:restart`.)
    ```toml
    [models.speech]
    # baseUrl = "http://127.0.0.1:8178"   (the default, matching the service above; only this computer's addresses are accepted)

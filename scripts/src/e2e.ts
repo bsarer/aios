@@ -1117,11 +1117,14 @@ async function main(): Promise<void> {
     await input.press('ArrowDown');
     await input.press('ArrowDown');
     check('Down past the newest gives the half-typed text back', await waitFor(async () => (await input.inputValue()) === 'half typed'), await input.inputValue());
+    // Wait for the recalled text to settle before replacing it, so a late render can't put it back.
     await input.fill('');
-    await input.press('Shift+Enter');
-    await input.type('second line');
+    check('the box clears', await waitFor(async () => (await input.inputValue()) === ''));
+    await input.fill('first line\nsecond line');
+    await sleep(100);
     await input.press('ArrowUp');
-    check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === '\nsecond line', JSON.stringify(await input.inputValue()));
+    await sleep(100);
+    check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === 'first line\nsecond line', JSON.stringify(await input.inputValue()));
     await input.fill('');
 
     // The lightbulb saves an idea through /feedback, the same as typing it; Esc closes the box.

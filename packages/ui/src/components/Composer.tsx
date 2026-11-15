@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { down, edited, emptyRecall, onFirstLine, onLastLine, type Recall, remember, seed, up } from '../history';
 import { useVoice } from '../useVoice';
 
@@ -37,10 +37,17 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
     if (!next) return;
     e.preventDefault();
     recall.current = next.recall;
+    caretToEnd.current = true;
     setText(next.text);
-    // The caret goes to the end, so Up again steps back once more on a one-line entry.
-    requestAnimationFrame(() => ref.current?.setSelectionRange(next.text.length, next.text.length));
   };
+  // The caret goes to the end of a recalled entry, so Up again steps back once more on a one-line
+  // entry. Done as the text renders, not later, so it can't land on whatever is typed next.
+  const caretToEnd = useRef(false);
+  useLayoutEffect(() => {
+    if (!caretToEnd.current) return;
+    caretToEnd.current = false;
+    ref.current?.setSelectionRange(text.length, text.length);
+  }, [text]);
   // V2: what was said goes into the text box, after anything already typed. It is never sent from here.
   const voice = useVoice({
     maxSeconds: disabled ? null : voiceMaxSeconds,

@@ -304,33 +304,36 @@ describe('triage pipeline', () => {
     expect(notes()[0]!.mails!.map((m) => m.urgency)).toEqual(['high', 'normal', 'low']);
   });
 
-  it('holds mail during quiet hours and posts it after', async () => {
+  it('during quiet hours, posts mail to the inbox marked quiet (it never peeks out)', async () => {
     const { p, arrive, notes, setNow } = pipelineSetup({ quietHours: { start: '22:00', end: '07:00' } });
     setNow('2026-10-19T20:30:00Z'); // 23:30 Istanbul
     arrive(1);
-    await new Promise((r) => setTimeout(r, 40));
-    await p.run();
-    expect(notes()).toHaveLength(0);
+    await until(() => notes().length === 1);
+    expect(notes()[0]!.quiet).toBe(true);
+    expect(notes()[0]!.text).toBe('1 new email.');
     setNow('2026-10-20T04:30:00Z'); // 07:30
+    arrive(1);
     await p.run();
-    expect(notes()).toHaveLength(1);
-    expect(notes()[0]!.text).toMatch(/^While you were away: 1 new email\./);
-    // Held mail is marked so the chat shows one line for it, not the whole list.
-    expect(notes()[0]!.catchUp).toBe(true);
+    await until(() => notes().length === 2);
+    expect(notes()[1]!.quiet).toBeUndefined();
   });
 
-  it('limits notifications per hour and posts the rest together later', async () => {
+  it('over the hourly limit, still posts every email to the inbox, marked quiet', async () => {
+    // Before the side rail, the limit held mail back: a 7th email in an hour showed nowhere.
     const { p, arrive, notes, advance } = pipelineSetup({ maxPerHour: 2 });
     for (let i = 0; i < 4; i++) {
       arrive(1);
       await p.run();
       advance(60_000);
     }
-    expect(notes()).toHaveLength(2);
+    await until(() => notes().length === 4);
+    expect(notes().map((n) => n.quiet ?? false)).toEqual([false, false, true, true]);
+    expect(notes().flatMap((n) => n.mails ?? [])).toHaveLength(4);
     advance(60 * 60 * 1000);
+    arrive(1);
     await p.run();
-    expect(notes()).toHaveLength(3);
-    expect(notes()[2]!.mails).toHaveLength(2);
+    await until(() => notes().length === 5);
+    expect(notes()[4]!.quiet).toBeUndefined();
   });
 
   it('while paused, queues without calling the model, then catches up', async () => {

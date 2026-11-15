@@ -77,5 +77,9 @@ describe('urgent peek', () => {
     const items = [note('n', NOW, [mail('INBOX:1', 'high')])];
     expect(peekFor(items, opened, new Set(), NOW + QUIET_MS, NOW)).toBeNull();
     expect(peekFor(items, opened, new Set(), NOW - 1, NOW)?.id).toBe('INBOX:1');
+    // Core marks mail quiet in quiet hours or over the hourly limit: listed, never peeking.
+    const quiet: ChatItem = { kind: 'notification', id: 'q', text: '1 new email.', at: NOW, mails: [mail('INBOX:9', 'high')], quiet: true };
+    expect(peekFor([quiet], opened, new Set(), 0, NOW)).toBeNull();
+    expect(inboxRows([quiet], NOW).map((r) => r.id)).toEqual(['INBOX:9']);
   });
 });

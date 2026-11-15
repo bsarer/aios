@@ -834,28 +834,48 @@ async function main(): Promise<void> {
     check('a failed build says why on the card and in a message', await waitFor(async () => (await diceCard.getAttribute('data-state')) === 'failed' && (await failMsg.getAttribute('data-ok')) === 'false' && (await failMsg.innerText()).includes("Building “Dice” didn't work: it reached its $1 spending cap before finishing.")), await failMsg.innerText());
     check('a failed build has no Open button, and a notification says it failed', (await failMsg.getByTestId('build-open').count()) === 0 && notified().includes("Building Dice didn't work|"), notified());
     await shot(page, 's4-failed');
-    // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
+    // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification, shown in the side rail's inbox.
     if (await mailStackUp()) {
       check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('status').innerText()).includes('Mail: connected'), 15_000));
       const stamp = Date.now();
       await deliverTestMail(`E2E urgent ${stamp}`);
       await deliverTestMail(`E2E normal ${stamp}`);
-      const note = page.locator('[data-kind="notification"]').last();
-      check('new mail posts one notification', await waitFor(async () => (await note.count()) > 0 && (await note.getByTestId('mail-row').count()) === 2, 40_000));
-      check('notification headline counts urgent mail', (await note.innerText()).includes('2 new emails. 1 looks urgent. 1 low-priority.'));
-      check('low-priority mail keeps its buttons', (await note.getByTestId('mail-digest').getByTestId('mail-read').count()) === 1);
+      // Calm mail alerts: new mail waits in the side rail's inbox, and only urgent mail peeks out.
+      const inbox = page.getByTestId('inbox');
+      const openInbox = async () => {
+        if (!(await inbox.isVisible())) await page.getByTestId('rail-mail').click();
+        await inbox.waitFor({ state: 'visible' });
+      };
+      check('new mail shows a count on the rail', await waitFor(async () => (await page.getByTestId('rail-mail').getAttribute('data-fresh')) === '2', 40_000));
+      check('the status strip counts the urgent mail', (await page.getByTestId('mail-count').innerText()).includes('2 · 1 urgent'));
+      check('the urgent mail peeks out beside the rail', await waitFor(async () => (await page.getByTestId('mail-peek').count()) === 1 && (await page.getByTestId('mail-peek').innerText()).includes(`E2E urgent ${stamp}`)));
+      check('new mail puts nothing in the chat', (await page.locator('[data-kind="notification"]').count()) === 0);
+      await shot(page, '8-mail-peek');
+      await page.getByTestId('peek-open').click();
+      await inbox.waitFor({ state: 'visible' });
+      check('the inbox lists the urgent email under Needs you, low priority folded', (await inbox.getByTestId('mail-row').count()) === 1 && (await inbox.getByTestId('mail-needs').innerText()).includes(`E2E urgent ${stamp}`));
+      check('opening the inbox clears the rail count', await waitFor(async () => (await page.getByTestId('rail-mail').getAttribute('data-fresh')) === '0'));
+      await inbox.getByTestId('mail-low-show').click();
+      check('low-priority mail keeps its buttons', (await inbox.getByTestId('mail-digest').getByTestId('mail-read').count()) === 1);
+      await sleep(400); // the chat moving aside for the panel
+      await shot(page, '8b-inbox');
+      await page.keyboard.press('Escape');
+      check('Esc closes the inbox', await waitFor(async () => (await inbox.count()) === 0));
       await input.fill('why was that low-priority email low?');
       await input.press('Enter');
       check('the chat finds the low-priority email from the notification', await waitFor(async () => (await lastAssistant().innerText()).includes(`The low-priority one is: E2E normal ${stamp}`), 15_000));
-      await shot(page, '8-mail-notification');
-      await note.getByTestId('mail-ignore').last().click();
-      check('Ignore greys out the row', await waitFor(async () => (await note.getByTestId('mail-ignore').count()) === 1));
-      await note.getByTestId('mail-read').first().click();
+      await openInbox();
+      await inbox.getByTestId('mail-low-show').click();
+      await inbox.getByTestId('mail-ignore').last().click();
+      check('Ignore greys out the row', await waitFor(async () => (await inbox.getByTestId('mail-ignore').count()) === 1));
+      await inbox.getByTestId('mail-read').first().click();
+      check('Read closes the inbox', await waitFor(async () => (await inbox.count()) === 0));
       check('Read opens the email through mail_read', await waitFor(async () => (await lastAssistant().innerText()).includes(`That email is about: E2E urgent ${stamp}`), 15_000));
       await shot(page, '9-mail-read');
 
       // 9. Reply flow (A5): Draft reply → card → Edit → Send transmits exactly the shown text; Discard sends nothing.
-      await note.getByTestId('mail-draft-reply').first().click();
+      await openInbox();
+      await inbox.getByTestId('mail-draft-reply').first().click();
       const draft = page.locator('[data-kind="draft"]').last();
       check('Draft reply shows a pending draft card', await waitFor(async () => (await draft.getAttribute('data-state')) === 'pending', 15_000));
       check('draft is addressed to the sender', (await draft.getByTestId('draft-to-text').innerText()) === 'sara.kaya@northwind.example');
@@ -873,7 +893,8 @@ async function main(): Promise<void> {
       check('the edited text is what was sent', sent.length === 1 && sent[0]!.replace(/\r\n/g, '\n').trimEnd() === edited, JSON.stringify(sent));
       await shot(page, '12-draft-sent');
 
-      await note.getByTestId('mail-draft-reply').first().click();
+      await openInbox();
+      await inbox.getByTestId('mail-draft-reply').first().click();
       const second = page.locator('[data-kind="draft"]').last();
       check('a second draft card appears', await waitFor(async () => (await page.locator('[data-kind="draft"]').count()) === 2 && (await second.getAttribute('data-state')) === 'pending', 15_000));
       await second.getByTestId('draft-discard').click();

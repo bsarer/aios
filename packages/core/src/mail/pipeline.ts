@@ -141,7 +141,8 @@ export class MailPipeline {
     const oldest = Math.min(...ready.map((e) => e.date ?? e.receivedAt));
     const order = { high: 0, normal: 1, low: 2 } as const;
     rows.sort((a, b) => order[a.urgency] - order[b.urgency]);
-    this.o.post({ kind: 'notification', id: this.newId(), text: headline(rows, now - oldest > CATCH_UP_AFTER_MS), at: now, mails: rows });
+    const catchUp = now - oldest > CATCH_UP_AFTER_MS;
+    this.o.post({ kind: 'notification', id: this.newId(), text: headline(rows, catchUp), at: now, mails: rows, ...(catchUp ? { catchUp: true } : {}) });
     this.o.state.markNotified(
       ready.map((e) => e.messageId),
       now,

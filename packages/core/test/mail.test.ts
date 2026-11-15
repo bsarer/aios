@@ -257,6 +257,7 @@ describe('triage pipeline', () => {
     expect(model.requests).toHaveLength(1);
     expect(notes()[0]!.text).toBe('3 new emails.');
     expect(notes()[0]!.mails).toHaveLength(3);
+    expect(notes()[0]!.catchUp).toBeUndefined();
   });
 
   it('mail_recent finds notified mail by its priority, newest first, as untrusted text', async () => {
@@ -314,6 +315,8 @@ describe('triage pipeline', () => {
     await p.run();
     expect(notes()).toHaveLength(1);
     expect(notes()[0]!.text).toMatch(/^While you were away: 1 new email\./);
+    // Held mail is marked so the chat shows one line for it, not the whole list.
+    expect(notes()[0]!.catchUp).toBe(true);
   });
 
   it('limits notifications per hour and posts the rest together later', async () => {

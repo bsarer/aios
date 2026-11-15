@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { FeedbackButton } from './components/FeedbackButton';
+import { MailRail, useInbox } from './components/MailRail';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
 import { WidgetBar } from './components/WidgetBar';
@@ -9,6 +10,8 @@ import { useChat } from './useChat';
 
 export function App() {
   const { state, conn, send, outdated } = useChat();
+  // Calm mail alerts: new mail waits in the side rail's inbox instead of the chat.
+  const inbox = useInbox(state.items);
   // Up/Down in the message box: the user's own messages in the chat, oldest first.
   const earlier = useMemo(() => state.items.flatMap((i) => (i.kind === 'user' ? [i.text] : [])), [state.items]);
   const bottom = useRef<HTMLDivElement>(null);
@@ -29,6 +32,7 @@ export function App() {
     onMemoryDecision: (id, decision) => send({ type: 'memory', id, decision }),
     onSend: (text) => send({ type: 'send', text }),
     onIgnoreMail: (itemId, mailId) => send({ type: 'mail_ignore', itemId, mailId }),
+    onOpenInbox: () => inbox.setOpen(true),
     onDraftSend: (id, hash) => send({ type: 'draft_send', id, hash }),
     onDraftDiscard: (id) => send({ type: 'draft_discard', id }),
     onActionConfirm: (id, hash, choice) => send({ type: 'action_confirm', id, hash, ...(choice === undefined ? {} : { choice }) }),
@@ -61,8 +65,9 @@ export function App() {
   }, [state.items]);
 
   return (
-    <div className="flex h-full flex-col">
-      <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} />
+    // While the inbox is open on a wide screen, the chat moves aside for it (styles.css).
+    <div className={`flex h-full flex-col ${inbox.open ? 'inbox-open' : ''}`}>
+      <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} mail={{ fresh: inbox.fresh, urgent: inbox.urgent }} onMail={() => inbox.setOpen(!inbox.open)} />
       {/* S7: the chat keeps its own screen; this says where apps are and how to come back. */}
       {state.status?.appsAt && (
         <div data-testid="apps-hint" className="mx-auto mt-1 text-[13px] opacity-60">
@@ -92,6 +97,7 @@ export function App() {
       </main>
       <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
       {/* W1: pinned system features along the bottom of the screen. */}
+      <MailRail inbox={inbox} disabled={conn !== 'open'} onSend={actions.onSend} onIgnoreMail={actions.onIgnoreMail} />
       {/* The floating Feedback button: it only sends /feedback, the same as typing it. */}
       <FeedbackButton disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} />
       <WidgetBar

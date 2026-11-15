@@ -217,6 +217,12 @@ Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it
 
 Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
 
+## Music
+
+"Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which Omarchy installs. `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
+
+Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
+
 ## Voice
 
 Click the 🎙 button next to the message box, or press **Ctrl+M**, and talk (V2). The button turns red while it listens. Your words appear as you talk: the sentence you're saying shows in grey under the box, and each time you pause it joins the message box, after anything you'd already typed. Click 🎙 or press Ctrl+M again when you're done. Read it, fix it if needed, and press Enter: voice never sends anything by itself. **Esc** cancels and puts the box back as it was. A recording stops by itself after 60 seconds. The words trail your voice by a second or two, more on a slow computer.

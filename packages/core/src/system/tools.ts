@@ -78,6 +78,10 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
       }
       return `Play ${q(cleanName(String(args.path ?? '').split('/').pop() ?? ''))} in mpv`;
     }
+    case 'music_control': {
+      const what: Record<string, string> = { play: 'Play the music', pause: 'Pause the music', toggle: 'Play or pause the music', next: 'Skip to the next song', previous: 'Go back to the previous song' };
+      return what[String(args.action)] ?? 'Change the music';
+    }
     default:
       return `Run ${tool}`;
   }

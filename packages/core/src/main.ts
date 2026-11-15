@@ -49,6 +49,9 @@ import { createDocumentOpener } from './docs/open.js';
 import { docTools } from './docs/tools.js';
 import { createVideoPlayer } from './video/play.js';
 import { pickVideo, videoTools } from './video/tools.js';
+import { createMusicPlayer, describeNowPlaying } from './music/player.js';
+import { musicTools } from './music/tools.js';
+import { runCommand } from './system/run.js';
 import { DocumentFiles } from './docs/viewer.js';
 import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
@@ -270,6 +273,9 @@ async function main(): Promise<void> {
   if (config.video.enabled) {
     apps.push(...videoTools({ play: createVideoPlayer(config.video.player), window: chatWindow, links: config.video.links, ...(fileRoots ? { roots: fileRoots } : {}) }));
   }
+  // MU1: Spotify (or any MPRIS player) through playerctl. music_control is device tier, so it shares open_app's confirm card.
+  const musicPlayer = config.music.enabled ? createMusicPlayer(runCommand, config.music.players) : undefined;
+  if (musicPlayer) apps.push(...musicTools({ player: musicPlayer }));
   // F1: managing files. Changes go on a card; the click renames, copies or creates, never replacing anything.
   let fileActions: FileActions | undefined;
   let fileCatalog: FileCatalog | undefined;
@@ -560,6 +566,7 @@ async function main(): Promise<void> {
     ...(widgets ? { widgets } : {}),
     ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile, progressText(knowledge.progress(), kc.backfillModel === 'cloud')), run: () => knowledge.run() } } : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
+    ...(musicPlayer ? { music: { now: async () => describeNowPlaying(await musicPlayer.nowPlaying().catch(() => null)) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     doctor: async () => formatChecks(await runDoctor(realDoctorProbes(kioskPaths()))),
     // U1: the package's root is three folders up from packages/core/src.

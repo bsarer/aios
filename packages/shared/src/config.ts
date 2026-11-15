@@ -196,6 +196,14 @@ export const CalendarConfig = z.strictObject({
     .strictObject({ start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) })
     .default({ start: '09:00', end: '18:00' }),
   apiBaseUrl: z.url({ protocol: /^https?$/ }).default('https://www.googleapis.com/calendar/v3'),
+  /**
+   * C3: the same Google sign-in also asks to read Google Contacts (contacts.readonly and
+   * contacts.other.readonly), so "email Sam" finds Sam's address. Read only. The consent page
+   * lets the user untick it; the calendar keeps working either way.
+   */
+  contacts: z.boolean().default(true),
+  /** People API v1. Checked 2026-11-15 against https://people.googleapis.com/$discovery/rest?version=v1 (revision 20261111). */
+  peopleApiBaseUrl: z.url({ protocol: /^https?$/ }).default('https://people.googleapis.com/v1'),
   authUrl: z.url({ protocol: /^https?$/ }).default('https://accounts.google.com/o/oauth2/v2/auth'),
   tokenUrl: z.url({ protocol: /^https?$/ }).default('https://oauth2.googleapis.com/token'),
 });

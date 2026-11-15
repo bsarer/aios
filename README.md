@@ -141,6 +141,15 @@ Google Calendar, through its REST API with plain `fetch` (no Google SDK), signed
 
 AI OS asks only for `calendar.events` (see and change events), not calendar settings or sharing. Google shows an "unverified app" warning for a personal project like this; that's expected. **While the consent screen is in "Testing", Google expires the sign-in after 7 days**, and the chat will then say to run `pnpm calendar:login`. To stop that, set the consent screen's publishing status to **In production**; for your own use it stays unverified. Settings: `[calendar]` `clientId`, `calendarId` (default `primary`), `defaultMinutes`, `workday`.
 
+### Contacts
+
+With the calendar signed in, Astra can also look people up in your **Google Contacts** (read only), so "email Sam" finds Sam's address and "what's Sara's number?" just answers. It uses the same Google sign-in: no second login and no new settings to fill in.
+
+- **How:** `contacts_find` searches your saved contacts and the people Gmail saved because you emailed them ("other contacts"), by name, address, number or company. Saved contacts come first. When several people could be meant, the chat asks which one before drafting. Drafts still show the usual card, and nothing is sent without your click.
+- **Read only:** Astra asks Google only for `contacts.readonly` and `contacts.other.readonly`. It can't add, change or delete a contact.
+- **Outside text:** Gmail names an "other contact" with whatever the sender put in their From line, so contact text reaches the model like an email does: sanitized and inside `<untrusted>` tags. Only plain addresses and phone numbers are kept. After a lookup, calendar, file and system changes aren't offered for that reply.
+- **Turning it on:** enable the **People API** in the same Google Cloud project as the calendar, then run `astra calendar-login` (or `pnpm calendar:login`) once and leave the contacts boxes ticked on Google's page. Untick them and the calendar works as before. `[calendar] contacts = false` stops Astra asking at all.
+
 ## Word and Excel files
 
 The chat reads, summarizes and shows `.docx` and `.xlsx` files from your document folders (D1), using the command-line tools of [WordCraft](https://github.com/storytold/wordcraft) and [GridCraft](https://github.com/storytold/gridcraft), open-source word processor and spreadsheet apps (MIT OR Apache-2.0). Since D2 it can also change them and create new ones, always through a card you click.

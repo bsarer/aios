@@ -50,6 +50,8 @@ export * from './calendar/google.js';
 export * from './calendar/oauth.js';
 export * from './calendar/time.js';
 export * from './calendar/tools.js';
+export * from './contacts/google.js';
+export * from './contacts/tools.js';
 export * from './docs/actions.js';
 export * from './docs/cells.js';
 export * from './docs/changes.js';

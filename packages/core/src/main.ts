@@ -28,6 +28,8 @@ import { WindowTracker } from './assistant/windows.js';
 import { CalendarActions } from './calendar/actions.js';
 import { GoogleAuth, GoogleCalendar } from './calendar/google.js';
 import { calendarTools } from './calendar/tools.js';
+import { GoogleContacts } from './contacts/google.js';
+import { contactsTools } from './contacts/tools.js';
 import { AuditLog } from './audit.js';
 import { DocActions } from './docs/actions.js';
 import { editTools } from './docs/edit.js';
@@ -195,6 +197,8 @@ async function main(): Promise<void> {
     });
     const calendar = calendarTools({ api, actions: calendarActions, timeZone: config.user.timezone, defaultMinutes: cal.defaultMinutes, workday: cal.workday, selfAddresses: [config.mail.address] });
     for (const t of calendar) tools.register(t);
+    // C3: Google Contacts, read only, on the same sign-in.
+    if (cal.contacts) for (const t of contactsTools({ api: new GoogleContacts({ apiBaseUrl: cal.peopleApiBaseUrl, auth }) })) tools.register(t);
   }
   const controls = new SystemControls();
   const systemActions = new SystemActions({

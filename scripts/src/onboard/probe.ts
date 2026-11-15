@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 import { parseMonitors } from '../kiosk.js';
-import { whisperPaths } from '../addons.js';
+import { signalPaths, whisperPaths } from '../addons.js';
 import type { FoundApps } from './answers.js';
 
 /** The folders offered, in this order, when they exist. */
@@ -84,8 +84,8 @@ export async function findApps(p: Probes): Promise<FoundApps & { whisper: string
     claude: await find(p, ['claude'], ['~/.local/bin/claude', '~/.claude/local/claude']),
     whisper: await find(p, ['whisper-server', 'whisper-cpp-server'], WHISPER_PLACES),
     speech: await whisperRunning(p),
-    // SG1: the Signal add-on; the AUR and upstream's tarball put it in /usr/bin or /opt.
-    signal: await find(p, ['signal-cli'], ['/opt/signal-cli/bin/signal-cli']),
+    // SG1: on PATH (the AUR), then where the Signal add-on puts it, then upstream's JVM tarball in /opt.
+    signal: await find(p, ['signal-cli'], [signalPaths().bin, '/opt/signal-cli/bin/signal-cli']),
   };
 }
 

@@ -20,6 +20,8 @@ describe('astra', () => {
     expect(route(['update'])).toEqual({ kind: 'script', file: script('update.ts'), args: [] });
     expect(route(['update', '--check'])).toEqual({ kind: 'script', file: script('update.ts'), args: ['--check'] });
     expect(route(['stop'])).toEqual({ kind: 'stop' });
+    expect(route(['addons', '--voice', '--video'])).toEqual({ kind: 'script', file: script('addons.ts'), args: ['--voice', '--video'] });
+    expect(route(['addons', '--everything'])).toMatchObject({ kind: 'error' });
     expect(route(['backup'])).toMatchObject({ kind: 'script', file: script('backup.ts') });
     expect(route(['uninstall', '--purge'])).toEqual({ kind: 'script', file: script('uninstall.ts'), args: ['--purge'] });
     expect(route(['restore', '/home/j/astra-backup.tar.gz'])).toEqual({ kind: 'restore', file: '/home/j/astra-backup.tar.gz' });

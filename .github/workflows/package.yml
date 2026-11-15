@@ -4,7 +4,7 @@ name: Package
 
 on:
   pull_request:
-    paths: ['packaging/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/package.yml']
+    paths: ['packaging/**', 'scripts/addons.json', 'package.json', 'pnpm-lock.yaml', '.github/workflows/package.yml']
   push:
     tags: ['v*']
 
@@ -23,6 +23,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Every package Astra depends on, lists as optional or installs as an add-on must exist in Arch's repositories.
+      - name: Check package names
+        shell: bash
+        run: |
+          source packaging/arch/PKGBUILD
+          names=("${depends[@]%%[<>=]*}" "${optdepends[@]%%:*}")
+          names+=($(jq -r 'to_entries[] | select(.value | type == "object") | .value.packages[]' scripts/addons.json))
+          printf '%s\n' "${names[@]}" | sort -u | xargs pacman -Si >/dev/null
       # makepkg refuses to run as root.
       - name: Build
         run: |

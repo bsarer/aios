@@ -25,7 +25,7 @@ function check(ok: unknown, what: string): void {
   console.log(`  ✓ ${what}`);
 }
 
-function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; installs: number; mailTests: { address: string; password: string; host: string }[] }): SetupDeps {
+function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; installs: number; mailTests: { address: string; password: string; host: string }[]; addons: string[][] }): SetupDeps {
   return {
     page: () => readFile(join(here, '..', 'onboard', 'page.html'), 'utf8'),
     presets: readPresets(providers as Record<string, unknown>),
@@ -39,13 +39,23 @@ function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, st
       name: 'John',
       timezone: 'Europe/Istanbul',
       folders: [{ path: '~/Documents' }, { path: '~/Downloads' }, { path: '~/Projects' }],
-      apps: { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: '/usr/bin/mpv', claude: null, whisper: '/home/john/.local/src/whisper.cpp/build/bin/whisper-server', speech: true },
+      apps: { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: '/usr/bin/mpv', claude: null, whisper: '/home/john/.local/src/whisper.cpp/build/bin/whisper-server', speech: true, embed: 'embeddinggemma' },
       ollama: ['qwen3:8b'],
       screens: [
         { name: 'DP-1', width: 2560, height: 1440, focused: false },
         { name: 'eDP-1', width: 1920, height: 1200, focused: true },
       ],
+      // Music is installed once the add-ons terminal has run.
+      addons: [
+        { id: 'video', label: 'Videos', blurb: 'Play videos.', installed: true },
+        { id: 'music', label: 'Music controls', blurb: 'Pause and skip.', installed: state.addons.flat().includes('music') },
+        { id: 'voice', label: 'Speak to Astra', blurb: 'whisper.cpp.', installed: false },
+      ],
     }),
+    installAddons: async (ids) => {
+      state.addons.push(ids);
+      return 'xdg-terminal-exec';
+    },
     mx: async (address) => (address.endsWith('@example.org') ? ['aspmx.l.google.com.'] : []),
     checkAi: async ({ key }) => (key === FAKE_KEY ? { ok: true, message: 'OpenRouter answered.' } : { ok: false, message: 'OpenRouter rejected this key.', fix: 'Make a new key.' }),
     checkMail: async ({ address, password, servers }) => {
@@ -66,7 +76,7 @@ const next = (p: Page) => p.click('#next');
 const heading = (p: Page) => p.textContent('h1');
 
 async function main(): Promise<void> {
-  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[] };
+  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[], addons: [] as string[][] };
   const server = await startSetupServer(fakeDeps(state));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
   const errors: string[] = [];
@@ -129,6 +139,17 @@ async function main(): Promise<void> {
     check((await page.isChecked('[id="f-~/Documents"]')) && !(await page.isChecked('[id="f-~/Projects"]')), 'usual folders start ticked');
     await page.check('[id="f-~/Projects"]');
     await next(page);
+    check((await heading(page))?.includes('Add what Astra can do'), 'the add-ons step');
+    check((await page.isDisabled('#addon-video')) && (await page.isChecked('#addon-video')), 'installed add-ons show as installed');
+    check(await page.isDisabled('#addons-install'), 'Install waits for a tick');
+    await page.check('#addon-music');
+    await page.click('#addons-install');
+    await page.waitForSelector('.result.ok');
+    check(JSON.stringify(state.addons) === '[["music"]]' && (await page.textContent('.result'))?.includes('password'), 'Install opens the terminal for the ticked add-ons only');
+    await page.click('#addons-check');
+    await page.waitForSelector('#addon-music:disabled');
+    check(await page.isChecked('#addon-music'), 'Check again shows what the terminal installed');
+    await next(page);
     check(await page.isDisabled('#app-docs'), 'apps that are not installed can’t be turned on');
     check(await page.isChecked('#app-video'), 'found apps start on');
     check((await page.isChecked('#app-voice')) && (await page.textContent('main'))?.includes('Running'), 'a running whisper.cpp server turns voice on');
@@ -146,6 +167,7 @@ async function main(): Promise<void> {
     check(c.models.triage.model === c.models.chat.model && c.models.local?.model === 'qwen3:8b', 'triage shares the chat model; the local model is on');
     check(c.files.roots.includes('~/Projects') && c.video.enabled && !c.docs.enabled, 'folders and apps are saved');
     check(c.screen.monitor === 'eDP-1', 'the screen is saved');
+    check(c.models.embeddings?.model === 'embeddinggemma', 'finding files by meaning uses the local embedding model');
     check(c.models.speech?.baseUrl === 'http://127.0.0.1:8178', 'voice is set up for the running whisper.cpp server');
     check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'the key and app password went to the keyring');
     check(!JSON.stringify(c).includes(FAKE_KEY) && !JSON.stringify(c).includes('abcdefghijklmnop'), 'no secret is in the config');

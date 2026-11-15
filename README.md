@@ -32,6 +32,8 @@ nothing in your home folder changes until `astra setup`. Tagged releases also ca
 (CI builds it on every `v*` tag). After a `nodejs` major update, reinstall the package so its
 database module matches.
 
+**Add-ons:** setup's Add-ons step installs what features need, or run `astra addons` to see them and `astra addons --voice --video --music --local` to install (one password). Voice builds whisper.cpp for you and runs it on this computer only.
+
 **Update:** type `/update` in the chat and press Update, or run `astra update` (`--check` only looks). It pulls the checkout the package was built in, builds, installs (sudo asks for your password) and restarts Astra; your settings, keys and data stay. **Stop:** `astra stop` closes the chat and stops Astra until you open it from the app menu, run `astra`, or log in again.
 
 **From source** (for development): `./install.sh --check`, then `./install.sh`, which installs

@@ -90,13 +90,13 @@
 
   const STEPS = [
     ['welcome', 'Welcome'], ['ai', 'AI'], ['mail', 'Mail'], ['calendar', 'Calendar'],
-    ['folders', 'Folders'], ['apps', 'Apps'], ['desktop', 'Desktop'], ['done', 'Finish'],
+    ['folders', 'Folders'], ['addons', 'Add-ons'], ['apps', 'Apps'], ['desktop', 'Desktop'], ['done', 'Finish'],
   ];
   let step = 0, seen = 0, S = null, editing = false;
   const A = { name: '', timezone: '', ai: { provider: 'openrouter', baseUrl: '', model: '', key: '' }, local: null,
     mail: { address: '', password: '', imap: { host: '', port: 993 }, smtp: { host: '', port: 465 } },
     folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '' };
-  const T = { ai: null, mail: null, mailProvider: undefined, finished: null };
+  const T = { ai: null, mail: null, mailProvider: undefined, finished: null, addons: null, pick: new Set() };
 
   function okToLeave() {
     const s = STEPS[step][0];
@@ -221,6 +221,31 @@
         el('label', { for: 'f-' + f.path, class: 'flat', text: f.path }))),
       el('p', { class: 'hint', text: 'Up to eight folders. Others can be added later in ~/.config/astra/config.toml.' }),
     ],
+    addons: () => {
+      const missing = S.addons.filter((a) => !a.installed);
+      const installBtn = el('button', { type: 'button', class: 'btn', id: 'addons-install', disabled: !T.pick.size, onclick: async () => {
+        installBtn.disabled = true;
+        T.addons = await call('addons', { ids: [...T.pick] });
+        render();
+      } }, 'Install ticked');
+      const again = el('button', { type: 'button', class: 'btn', id: 'addons-check', onclick: async () => {
+        again.disabled = true; again.textContent = 'Checking…';
+        const fresh = await call('state');
+        S.addons = fresh.addons; S.apps = fresh.apps; S.ollama = fresh.ollama;
+        for (const a of S.addons) if (a.installed) T.pick.delete(a.id);
+        T.addons = null;
+        render();
+      } }, 'Check again');
+      return [
+        el('h1', { text: 'Add what Astra can do' }),
+        el('p', { class: 'lead', text: missing.length ? 'Each one installs the programs it needs from Arch, in a terminal, after one password. You can skip them and add them later with astra settings.' : 'Everything is installed.' }),
+        S.addons.map((a) => el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'addon-' + a.id, disabled: a.installed, checked: a.installed || T.pick.has(a.id), onchange: (e) => { if (e.target.checked) T.pick.add(a.id); else T.pick.delete(a.id); render(); } }),
+          el('div', {}, el('label', { for: 'addon-' + a.id, class: 'flat' }, a.label, a.installed ? el('span', { class: 'badge', text: 'Installed' }) : null), el('span', { text: a.blurb })))),
+        missing.length ? el('div', { class: 'gap' }, installBtn, ' ', again) : null,
+        result(T.addons),
+      ];
+    },
     apps: () => {
       const rows = [
         ['docs', 'WordCraft and GridCraft', 'Reading and editing Word and Excel files', S.apps.wordcraftCli && S.apps.gridcraftCli, 'Install WordCraft and GridCraft, then open astra settings.'],

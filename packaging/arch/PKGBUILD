@@ -13,17 +13,23 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/bsarer/aios'
 license=('LicenseRef-unreleased')
 # nodejs runs it; libsecret (secret-tool) keeps the keys; chromium shows the chat; jq, curl and
-# hyprland are what the kiosk launcher and window rules use.
-depends=('nodejs>=22.13' 'libsecret' 'chromium' 'jq' 'curl' 'bash' 'hyprland')
+# hyprland are what the kiosk launcher and window rules use. The rest are the programs the chat's
+# own features call (Omarchy has them; listed so Astra never finds one missing): notify-send
+# (libnotify), nmcli (networkmanager), bluetoothctl (bluez-utils), wpctl (wireplumber), pactl
+# (libpulse), gtk-launch (gtk3), xdg-open (xdg-utils), pgrep (procps-ng), git for astra update.
+depends=('nodejs>=22.13' 'libsecret' 'chromium' 'jq' 'curl' 'bash' 'hyprland'
+  'libnotify' 'networkmanager' 'bluez-utils' 'wireplumber' 'libpulse' 'gtk3' 'xdg-utils' 'procps-ng' 'git' 'systemd')
 # better-sqlite3 is a native module: pnpm builds it against this nodejs with node-gyp (Arch's
 # nodejs has no npm, which usually brings it), python and a compiler.
 makedepends=('pnpm' 'node-gyp' 'python' 'gcc' 'make')
+# Add-ons: `astra addons` (and setup's Add-ons step) installs these, and builds whisper.cpp for
+# voice, from scripts/addons.json; listed here too for pacman -Qi.
 optdepends=(
-  'claude-code: build small apps from the chat'
-  'mpv: play videos'
-  'playerctl: pause, play and skip Spotify and other music players'
-  'ollama: the local model, finding files by meaning and the system assistant'
-  'whisper.cpp: speaking to the chat'
+  'mpv: play videos (astra addons --video)'
+  'yt-dlp: play YouTube and other links (astra addons --video)'
+  'playerctl: pause, play and skip Spotify and other music players (astra addons --music)'
+  'ollama: the local model, finding files by meaning and the system assistant (astra addons --local)'
+  'cmake: build whisper.cpp for speaking to the chat (astra addons --voice)'
 )
 # Built JavaScript and a native module with its own build ids; stripping only saves a little.
 options=('!strip' '!debug')

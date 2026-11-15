@@ -291,6 +291,30 @@ export const VideoConfig = z.strictObject({
 export type VideoConfig = z.infer<typeof VideoConfig>;
 
 /**
+ * T8: opening links and web searches in Chromium from the chat. `browser` is started with
+ * options aios-core chooses, then `--`, then one checked http(s) address.
+ */
+export const WebConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** The browser's command (Chromium, which the Astra package installs). An absolute path when the service doesn't see it on PATH. */
+  browser: z.string().min(1).max(500).default('chromium'),
+  /** Where web searches go: an https address with %s where the words go. */
+  search: z
+    .string()
+    .min(1)
+    .max(500)
+    .regex(/^https:\/\/[^\s]+$/, 'must be an https:// address')
+    .refine((s) => s.split('%s').length === 2, 'must contain %s once, where the search words go')
+    .default('https://www.google.com/search?q=%s'),
+  /** Let the chat read a page's text (web_read) when the user gives its link, to summarize it. */
+  read: z.boolean().default(true),
+  /** The most of a page that is read, in bytes, and the most of its text the model gets. */
+  maxBytes: z.int().min(10_000).max(10_000_000).default(2_000_000),
+  maxChars: z.int().min(1000).max(60_000).default(16_000),
+});
+export type WebConfig = z.infer<typeof WebConfig>;
+
+/**
  * MU1: the music that is playing (Spotify, or any MPRIS player) through playerctl. `players`
  * is playerctl's --player list, tried in order; `%any` means any other player.
  */
@@ -487,6 +511,8 @@ export const AiosConfig = z.strictObject({
   brief: BriefConfig.prefault({}),
   /** V1: watching videos in mpv. */
   video: VideoConfig.prefault({}),
+  /** T8: links and web searches in Chromium. */
+  web: WebConfig.prefault({}),
   /** MU1: pausing, skipping and naming the music that is playing. */
   music: MusicConfig.prefault({}),
   /** W1: tiles along the bottom of the chat screen. */

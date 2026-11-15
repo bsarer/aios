@@ -153,7 +153,7 @@ export class Agent {
     // P1: read once per message, so a /tone typed just before applies to this reply.
     const voice = this.o.voice?.() ?? { name: 'Astra', tone: 'friendly' as const };
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), music: tools.has('music_control'), knowledge: tools.has('knowledge_read'), contacts: tools.has('contacts_find'), assistantName: voice.name, tone: voice.tone });
+      const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), web: tools.has('web_open'), webRead: tools.has('web_read'), music: tools.has('music_control'), knowledge: tools.has('knowledge_read'), contacts: tools.has('contacts_find'), assistantName: voice.name, tone: voice.tone });
       const closing = voiceReminder(voice.tone);
       const messages = quarantineEarlierEmail(
         this.o.memory

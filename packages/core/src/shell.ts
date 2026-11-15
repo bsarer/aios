@@ -30,6 +30,7 @@ import { type FeedbackLog, feedbackListText } from './feedback.js';
 import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
 import type { UpdateCheck } from './update.js';
 import type { MusicAction } from './music/player.js';
+import { pickWeb } from './web/tools.js';
 
 /** MU1: /music's words, mapped by code to music_control's actions. */
 const MUSIC_WORDS: Record<string, MusicAction> = {
@@ -574,6 +575,18 @@ export class Shell {
         );
         if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
         return say(r.content.replace(/ Say it in one short line\.$/, ''));
+      }
+      case 'web': {
+        if (!this.o.tools.has('web_open')) return say('Opening links is off. Turn it on with enabled = true under [web] in your config.');
+        const picked = pickWeb(cmd.text);
+        if ('error' in picked) return say(picked.error);
+        // The user's own typed command, so nothing untrusted is in view: audited and rate limited like any device change.
+        const r = await this.o.tools.execute(
+          { id: `web-${Date.now()}`, name: 'web_open', arguments: JSON.stringify(picked.args) },
+          { signal: AbortSignal.timeout(30_000), untrustedInContext: false, userText: `/web ${cmd.text}` },
+        );
+        if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+        return say(r.content.replace(/ You can't see the page\. Say it in one short line\.$/, '.').replace(/\.\.$/, '.'));
       }
       case 'todos': {
         if (!this.o.todos?.listCard) return say('To-dos are off. Turn them on with enabled = true under [todos] in your config.');

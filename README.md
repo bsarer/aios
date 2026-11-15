@@ -219,6 +219,16 @@ Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it
 
 Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
 
+## Links and web searches
+
+"Open bbc.com", "go to github.com" or "search the web for cheap flights to Ankara" opens a new Chromium window, on another screen or the next workspace like any app, and the screen goes with it. Chromium comes with the Astra package. Links must be `http://` or `https://` (a site's name alone gets `https://`); nothing on this computer (`localhost`, `127.x`) and no user names or passwords in links. Opening a page sends nothing from it back to the chat. A link or search that comes from an email, invite or document never opens by itself: a card names the site and asks you first.
+
+Summaries: "summarize https://www.bbc.com/news/…" or, after opening a page, "summarize that page" reads it. Astra fetches the page itself, not through your browser, so pages behind a sign-in can't be read, and it can't see tabs you opened yourself: send their link. It reads only a link from your own message (or a page it opened for you), never one an email, document or page gives. It reads only public sites, never this computer or your local network, at most 2 MB of each. Page text is outside text like an email: while it is in view, changes wait for a click on a card.
+
+`/web bbc.com` opens a link and `/web cheap flights to Ankara` searches, without asking the model.
+
+Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `search` (default `"https://www.google.com/search?q=%s"`; any https address with `%s` where the words go, such as `"https://duckduckgo.com/?q=%s"`), `read` (default true; false turns summaries off), `maxBytes` (default 2000000), `maxChars` (default 16000, the most of a page's text the AI gets).
+
 ## Music
 
 "Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which Omarchy installs. `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.

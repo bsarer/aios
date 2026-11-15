@@ -1138,6 +1138,11 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('/feedback list shows the idea from the button', await waitFor(async () => (await lastNotice()).includes('Show the weather on the brief')), await lastNotice());
 
+    // The gear opens settings; this checkout has no /usr/bin/astra, so it says to use a terminal.
+    check('the Settings gear is in the status strip', (await page.getByTestId('settings').count()) === 1);
+    await page.getByTestId('settings').click();
+    check('the gear answers in the chat', await waitFor(async () => /settings/i.test(await lastNotice())), await lastNotice());
+
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

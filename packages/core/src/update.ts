@@ -101,7 +101,8 @@ export async function openUpdateTerminal(
   return term[0];
 }
 
-function startDetached(env: NodeJS.ProcessEnv) {
+/** Starts a command detached; resolves once it has run 1.5 s or exited 0. Also used by settings.ts. */
+export function startDetached(env: NodeJS.ProcessEnv) {
   return (cmd: string, args: string[]) =>
     new Promise<void>((resolve, reject) => {
       const child = spawn(cmd, args, { shell: false, detached: true, stdio: 'ignore', env });

@@ -15,6 +15,7 @@ import { AppLink, linkKey, linkToken } from './apps/link.js';
 import { appTools, buildAppTool, buildStatusTool, builtAppOpener, offerBuild } from './apps/tools.js';
 import { UnseenFlag, unseenPath } from './apps/bar.js';
 import { formatChecks, realDoctorProbes, runDoctor } from './doctor.js';
+import { openSettingsWindow } from './settings.js';
 import { checkForUpdate, openUpdateTerminal, readBuildInfo, realGit } from './update.js';
 import { kioskPaths } from './kiosk-paths.js';
 import { ChatWindow } from './apps/window.js';
@@ -565,6 +566,7 @@ async function main(): Promise<void> {
       },
       open: () => openUpdateTerminal(),
     },
+    settings: { open: () => openSettingsWindow() },
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),

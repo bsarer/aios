@@ -468,12 +468,13 @@ export const AiosConfig = z.strictObject({
   calendar: CalendarConfig.optional(),
   notifications: z
     .strictObject({
-      maxPerHour: z.int().min(1).default(6),
+      /** Off unless set: at most this many urgent-mail peeks an hour. Mail itself is never held back. */
+      maxPerHour: z.int().min(1).optional(),
       quietHours: z
         .strictObject({ start: HourMinute, end: HourMinute })
         .optional(),
     })
-    .default({ maxPerHour: 6 }),
+    .default({}),
   memory: z
     .strictObject({
       /** Token budget for one chat request: system prompt, profile, recalled notes and recent turns. */

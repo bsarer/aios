@@ -1,8 +1,9 @@
 /**
  * From queued mail to a chat notification (plan §5): wait out a short batch window,
- * triage the batch in one model call, then post one notification. Respects pause,
- * quiet hours and a per-hour limit by holding triaged mail and posting it later as
- * one catch-up. A failed triage keeps the mail queued and retries.
+ * triage the batch in one model call, then post one notification. Pause holds mail
+ * (no model calls) and posts it later as one catch-up. Quiet hours and the per-hour
+ * limit don't hold mail: it goes to the side rail's inbox marked `quiet`, so urgent
+ * mail doesn't peek out. A failed triage keeps the mail queued and retries.
  */
 import { randomUUID } from 'node:crypto';
 import type { ChatItem, MailRow, ModelRole } from '@aios/shared';
@@ -26,7 +27,8 @@ export interface PipelineOptions {
   isPaused: () => boolean;
   timeZone: string;
   batchWindowMs: number;
-  maxPerHour: number;
+  /** Off when unset: no hourly limit. */
+  maxPerHour?: number | undefined;
   quietHours?: { start: string; end: string } | undefined;
   /** L1: 'local' when mail triage runs on the local model. Default 'triage'. */
   role?: ModelRole;
@@ -135,14 +137,15 @@ export class MailPipeline {
     const ready = this.o.state.withStatus('triaged', 200);
     if (!ready.length) return;
     const now = this.now();
-    if (inQuietHours(now, this.o.timeZone, this.o.quietHours)) return;
-    if (this.o.state.notificationsSince(now - HOUR) >= this.o.maxPerHour) return;
+    // Calm mail alerts: new mail always goes to the side rail's inbox, which never interrupts.
+    // Quiet hours and the hourly limit only keep urgent mail from peeking out (`quiet`).
+    const quiet = inQuietHours(now, this.o.timeZone, this.o.quietHours) || (this.o.maxPerHour !== undefined && this.o.state.notificationsSince(now - HOUR) >= this.o.maxPerHour);
     const rows = ready.map(toRow);
     const oldest = Math.min(...ready.map((e) => e.date ?? e.receivedAt));
     const order = { high: 0, normal: 1, low: 2 } as const;
     rows.sort((a, b) => order[a.urgency] - order[b.urgency]);
     const catchUp = now - oldest > CATCH_UP_AFTER_MS;
-    this.o.post({ kind: 'notification', id: this.newId(), text: headline(rows, catchUp), at: now, mails: rows, ...(catchUp ? { catchUp: true } : {}) });
+    this.o.post({ kind: 'notification', id: this.newId(), text: headline(rows, catchUp), at: now, mails: rows, ...(catchUp ? { catchUp: true } : {}), ...(quiet ? { quiet: true } : {}) });
     this.o.state.markNotified(
       ready.map((e) => e.messageId),
       now,

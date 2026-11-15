@@ -61,12 +61,12 @@ export function groups(rows: InboxRow[]): { needs: InboxRow[]; others: InboxRow[
 /**
  * The urgent mail to peek for, if any: only from a notification posted after this page opened
  * (`since`; history loaded with the chat never peeks), not already peeked (`done`), not ignored,
- * and not while quiet.
+ * not marked quiet by core (quiet hours, the hourly limit), and not during the rail's quiet hour.
  */
 export function peekFor(items: ChatItem[], since: number, done: ReadonlySet<string>, quietUntil: number, now: number): InboxRow | null {
   if (now < quietUntil) return null;
   for (const n of items.filter(isNote)) {
-    if (n.at < since || done.has(n.id)) continue;
+    if (n.at < since || n.quiet || done.has(n.id)) continue;
     const m = (n.mails ?? []).find((r) => r.urgency === 'high' && !r.ignored);
     if (m) return { ...m, itemId: n.id, at: n.at };
   }

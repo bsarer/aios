@@ -151,6 +151,7 @@ describe('SG1 setup server', () => {
       installDesktop: async () => [],
       signal: linker,
       done: () => undefined,
+      exit: () => undefined,
     };
     const s = await startSetupServer(deps, { token: 'tok' });
     const u = new URL(s.url);

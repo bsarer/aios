@@ -59,7 +59,7 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <StatusStrip status={state.status} conn={conn} />
+      <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} />
       {/* S7: the chat keeps its own screen; this says where apps are and how to come back. */}
       {state.status?.appsAt && (
         <div data-testid="apps-hint" className="mx-auto mt-1 text-[13px] opacity-60">

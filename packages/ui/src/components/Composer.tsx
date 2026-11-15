@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { down, edited, emptyRecall, onFirstLine, onLastLine, type Recall, remember, seed, up } from '../history';
 import { useVoice } from '../useVoice';
 
@@ -37,10 +37,17 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
     if (!next) return;
     e.preventDefault();
     recall.current = next.recall;
+    caretToEnd.current = true;
     setText(next.text);
-    // The caret goes to the end, so Up again steps back once more on a one-line entry.
-    requestAnimationFrame(() => ref.current?.setSelectionRange(next.text.length, next.text.length));
   };
+  // The caret goes to the end of a recalled entry, so Up again steps back once more on a one-line
+  // entry. Done as the text renders, not later, so it can't land on whatever is typed next.
+  const caretToEnd = useRef(false);
+  useLayoutEffect(() => {
+    if (!caretToEnd.current) return;
+    caretToEnd.current = false;
+    ref.current?.setSelectionRange(text.length, text.length);
+  }, [text]);
   // V2: what was said goes into the text box, after anything already typed. It is never sent from here.
   const voice = useVoice({
     maxSeconds: disabled ? null : voiceMaxSeconds,
@@ -94,6 +101,24 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [text]);
 
+  // The lightbulb: a one-line idea box. Saving sends `/feedback <idea>`, the same as typing it, so
+  // ideas still reach feedback.jsonl only through Shell's /feedback command.
+  const [idea, setIdea] = useState<string | null>(null);
+  const ideaRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (idea !== null) ideaRef.current?.focus();
+  }, [idea !== null]);
+  const closeIdea = () => {
+    setIdea(null);
+    ref.current?.focus();
+  };
+  const saveIdea = () => {
+    const t = (idea ?? '').replace(/\s+/g, ' ').trim();
+    if (!t || disabled) return;
+    onSend(`/feedback ${t}`);
+    closeIdea();
+  };
+
   const submit = () => {
     const t = text.trim();
     if (!t || disabled) return;
@@ -104,6 +129,38 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
 
   return (
     <div data-testid="composer" className={`glass mx-auto ${tight ? 'mb-2' : 'mb-4'} w-[min(820px,calc(100%-24px))] rounded-2xl px-3 py-2`}>
+      {idea !== null && (
+        <div data-testid="idea-box" className="mb-2 flex items-center gap-2 border-b pb-2" style={{ borderColor: 'var(--panel)' }}>
+          <span aria-hidden>💡</span>
+          <input
+            ref={ideaRef}
+            data-testid="idea-input"
+            aria-label="Your idea"
+            value={idea}
+            maxLength={4000}
+            onChange={(e) => setIdea(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                saveIdea();
+              } else if (e.key === 'Escape') {
+                // Close the box only: don't also stop a reply.
+                e.preventDefault();
+                e.stopPropagation();
+                closeIdea();
+              }
+            }}
+            placeholder="Your idea for making Astra better"
+            className="flex-1 bg-transparent px-1 py-1 outline-none placeholder:opacity-50"
+          />
+          <button type="button" data-testid="idea-save" onClick={saveIdea} disabled={!idea.trim() || disabled} className="rounded-lg px-2.5 py-1 text-[14px] font-medium disabled:opacity-40" style={{ background: 'var(--accent)', color: 'var(--bg)' }}>
+            Save idea
+          </button>
+          <button type="button" onClick={closeIdea} className="rounded-lg px-2 py-1 text-[14px]" style={{ background: 'var(--panel)', color: 'var(--fg)' }}>
+            Cancel
+          </button>
+        </div>
+      )}
       <div className="flex items-end gap-2">
         <Disabled label="Attach" icon="📎" />
         <textarea
@@ -132,7 +189,18 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
           placeholder={disabled ? 'Reconnecting…' : 'Ask anything'}
           className="max-h-[220px] flex-1 resize-none bg-transparent px-1 py-1.5 outline-none placeholder:opacity-50"
         />
-        <Disabled label="Image" icon="🖼" />
+        <button
+          type="button"
+          data-testid="idea"
+          onClick={() => (idea === null ? setIdea('') : closeIdea())}
+          disabled={disabled}
+          title="Save an idea for making Astra better (/feedback; /feedback list shows them)"
+          aria-label="Save an idea"
+          aria-expanded={idea !== null}
+          className="rounded-lg px-1.5 text-lg disabled:opacity-50"
+        >
+          💡
+        </button>
         {voiceMaxSeconds === null ? (
           <Disabled label="Voice" icon="🎙" />
         ) : (

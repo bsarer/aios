@@ -27,7 +27,7 @@ function Pill({ children, tone = 'muted', title }: { children: React.ReactNode; 
   );
 }
 
-export function StatusStrip({ status, conn }: { status: Status | null; conn: Connection }) {
+export function StatusStrip({ status, conn, onSettings }: { status: Status | null; conn: Connection; onSettings?: () => void }) {
   const now = useNow();
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const date = now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
@@ -55,6 +55,20 @@ export function StatusStrip({ status, conn }: { status: Status | null; conn: Con
       <Pill tone={status && status.costTodayUsd >= status.costCapUsd ? 'danger' : 'muted'} title="Model cost today">
         <span data-testid="cost">{cost}</span>
       </Pill>
+      {onSettings && (
+        <button
+          type="button"
+          data-testid="settings"
+          onClick={onSettings}
+          disabled={conn !== 'open'}
+          title="Settings: opens the setup window on your current settings (/settings). /tone and /pin change tone and tiles in the chat."
+          aria-label="Settings"
+          className="-mx-1 rounded-lg px-1 text-lg leading-none disabled:opacity-40"
+          style={{ color: 'var(--muted)' }}
+        >
+          ⚙
+        </button>
+      )}
     </header>
   );
 }

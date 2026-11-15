@@ -49,12 +49,14 @@ const attr = (v: string) => v.replace(/[^A-Za-z0-9._:@-]/g, '_');
  * 'document' (D1): text, cells, sheet and file names from a Word or Excel file, which can come from anywhere.
  * 'system' (L1): window titles and process names, which web pages and downloaded programs choose.
  * 'chat' (K1): chat turns handed to a background job; replies can quote email.
+ * 'contacts' (C3): names, companies, addresses and numbers from Google Contacts; Gmail's "other
+ * contacts" are named by whoever sent the mail.
  * 'knowledge' (K1): the knowledge base, notes a model wrote from all of the above. The chat
  * counts both like email, the strictest.
  * 'music' (MU1): song titles, artists and albums, which whoever published the song chose. The
  * chat counts it like email too.
  */
-export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system' | 'chat' | 'knowledge' | 'music', id: string, sanitized: string): string {
+export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system' | 'chat' | 'knowledge' | 'contacts' | 'music', id: string, sanitized: string): string {
   return `<untrusted source="${source}" id="${attr(id)}">\n${sanitized}\n</untrusted>`;
 }
 

@@ -1117,12 +1117,34 @@ async function main(): Promise<void> {
     await input.press('ArrowDown');
     await input.press('ArrowDown');
     check('Down past the newest gives the half-typed text back', await waitFor(async () => (await input.inputValue()) === 'half typed'), await input.inputValue());
+    // Wait for the recalled text to settle before replacing it, so a late render can't put it back.
     await input.fill('');
-    await input.press('Shift+Enter');
-    await input.type('second line');
+    check('the box clears', await waitFor(async () => (await input.inputValue()) === ''));
+    await input.fill('first line\nsecond line');
+    await sleep(100);
     await input.press('ArrowUp');
-    check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === '\nsecond line', JSON.stringify(await input.inputValue()));
+    await sleep(100);
+    check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === 'first line\nsecond line', JSON.stringify(await input.inputValue()));
     await input.fill('');
+
+    // The lightbulb saves an idea through /feedback, the same as typing it; Esc closes the box.
+    const lastNotice = () => page.locator('[data-kind="notice"]').last().innerText();
+    await page.getByTestId('idea').click();
+    check('the lightbulb opens the idea box', await waitFor(async () => (await page.getByTestId('idea-box').count()) === 1));
+    await page.keyboard.press('Escape');
+    check('Esc closes the idea box', await waitFor(async () => (await page.getByTestId('idea-box').count()) === 0));
+    await page.getByTestId('idea').click();
+    await page.getByTestId('idea-input').fill('Show the weather on the brief');
+    await page.getByTestId('idea-input').press('Enter');
+    check('saving an idea says it was saved and closes the box', await waitFor(async () => /idea #1\b/.test(await lastNotice()) && (await page.getByTestId('idea-box').count()) === 0), await lastNotice());
+    await input.fill('/feedback list');
+    await input.press('Enter');
+    check('/feedback list shows the idea from the button', await waitFor(async () => (await lastNotice()).includes('Show the weather on the brief')), await lastNotice());
+
+    // The gear opens settings; this checkout has no /usr/bin/astra, so it says to use a terminal.
+    check('the Settings gear is in the status strip', (await page.getByTestId('settings').count()) === 1);
+    await page.getByTestId('settings').click();
+    check('the gear answers in the chat', await waitFor(async () => /settings/i.test(await lastNotice())), await lastNotice());
 
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();

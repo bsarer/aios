@@ -83,7 +83,7 @@ const TERMINALS: [string, string[]][] = [
 export class UpdateError extends Error {}
 
 /**
- * Opens a terminal running `astra update`. In its own systemd unit (uwsm-app, else systemd-run),
+ * Opens a terminal running `astra update`. In its own systemd service (systemd-run),
  * so it keeps running when the update restarts this service, and sudo works in it (this service
  * runs with NoNewPrivileges, which a child process would keep).
  */
@@ -96,12 +96,20 @@ export async function openUpdateTerminal(
   for (const t of TERMINALS) if (await has(t[0])) { term = t; break; }
   if (!term) throw new UpdateError('no terminal found. Open one and run astra update.');
   const inner = [term[0], ...term[1], 'bash', '-c', HOLD];
-  const [cmd, args] = (await has('uwsm-app')) ? ['uwsm-app', ['--', ...inner]] : ['systemd-run', ['--user', '--collect', '--quiet', '--', ...inner]];
-  await start(cmd, args);
+  // Not uwsm-app: it starts apps in a scope, a child of this service, which keeps NoNewPrivileges,
+  // so sudo refuses at once without asking for the password. systemd-run makes a service that the
+  // user's systemd starts, with nothing inherited from this one.
+  // The desktop's variables, in case the user's systemd doesn't have them (uwsm normally exports them).
+  const pass = ['WAYLAND_DISPLAY', 'DISPLAY', 'XDG_RUNTIME_DIR', 'HYPRLAND_INSTANCE_SIGNATURE'].flatMap((k) => {
+    const v = env[k];
+    return v && /^[A-Za-z0-9_.:/-]{1,200}$/.test(v) ? ['--setenv', `${k}=${v}`] : [];
+  });
+  await start('systemd-run', ['--user', '--collect', '--quiet', '--unit', `astra-update-${Date.now()}`, ...pass, '--', ...inner]);
   return term[0];
 }
 
-function startDetached(env: NodeJS.ProcessEnv) {
+/** Starts a command detached; resolves once it has run 1.5 s or exited 0. Also used by settings.ts. */
+export function startDetached(env: NodeJS.ProcessEnv) {
   return (cmd: string, args: string[]) =>
     new Promise<void>((resolve, reject) => {
       const child = spawn(cmd, args, { shell: false, detached: true, stdio: 'ignore', env });

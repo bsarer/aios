@@ -13,6 +13,7 @@ export type Command =
   | { name: 'checkup' }
   | { name: 'doctor' }
   | { name: 'update' }
+  | { name: 'settings' }
   | { name: 'brief' }
   | { name: 'play'; text: string }
   | { name: 'music'; text: string }
@@ -55,6 +56,9 @@ export function parseCommand(text: string): Command | null {
       return { name: 'doctor' };
     case 'update':
       return { name: 'update' };
+    case 'settings':
+    case 'setup':
+      return { name: 'settings' };
     case 'brief':
       return { name: 'brief' };
     case 'play':
@@ -103,6 +107,7 @@ export const HELP_TEXT = [
   '/knowledge  show the knowledge base Astra keeps about you from your mail, calendar, files and chat',
   '/knowledge update  update it now (it updates by itself every hour)',
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
+  '/settings  open the settings window (the gear at the top does the same); /tone and /pin change tone and tiles here',
   '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Up and Down bring back what you sent, Esc stops a reply.',

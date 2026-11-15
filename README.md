@@ -141,6 +141,15 @@ Google Calendar, through its REST API with plain `fetch` (no Google SDK), signed
 
 AI OS asks only for `calendar.events` (see and change events), not calendar settings or sharing. Google shows an "unverified app" warning for a personal project like this; that's expected. **While the consent screen is in "Testing", Google expires the sign-in after 7 days**, and the chat will then say to run `pnpm calendar:login`. To stop that, set the consent screen's publishing status to **In production**; for your own use it stays unverified. Settings: `[calendar]` `clientId`, `calendarId` (default `primary`), `defaultMinutes`, `workday`.
 
+### Contacts
+
+With the calendar signed in, Astra can also look people up in your **Google Contacts** (read only), so "email Sam" finds Sam's address and "what's Sara's number?" just answers. It uses the same Google sign-in: no second login and no new settings to fill in.
+
+- **How:** `contacts_find` searches your saved contacts and the people Gmail saved because you emailed them ("other contacts"), by name, address, number or company. Saved contacts come first. When several people could be meant, the chat asks which one before drafting. Drafts still show the usual card, and nothing is sent without your click.
+- **Read only:** Astra asks Google only for `contacts.readonly` and `contacts.other.readonly`. It can't add, change or delete a contact.
+- **Outside text:** Gmail names an "other contact" with whatever the sender put in their From line, so contact text reaches the model like an email does: sanitized and inside `<untrusted>` tags. Only plain addresses and phone numbers are kept. After a lookup, calendar, file and system changes aren't offered for that reply.
+- **Turning it on:** enable the **People API** in the same Google Cloud project as the calendar, then run `astra calendar-login` (or `pnpm calendar:login`) once and leave the contacts boxes ticked on Google's page. Untick them and the calendar works as before. `[calendar] contacts = false` stops Astra asking at all.
+
 ## Word and Excel files
 
 The chat reads, summarizes and shows `.docx` and `.xlsx` files from your document folders (D1), using the command-line tools of [WordCraft](https://github.com/storytold/wordcraft) and [GridCraft](https://github.com/storytold/gridcraft), open-source word processor and spreadsheet apps (MIT OR Apache-2.0). Since D2 it can also change them and create new ones, always through a card you click.
@@ -194,9 +203,11 @@ Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[br
 
 Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"friendly"` default, `"playful"`, `"neutral"`, `"concise"`). Type `/tone` in the chat to see it and `/tone playful` to change it; the change applies to the next reply and is kept.
 
+Settings: the ⚙ gear at the right of the status strip, or `/settings` in the chat, opens the setup window on your current settings (the same as `astra settings` in a terminal). Change what you like and press Finish; Astra restarts with the new settings and the chat reconnects by itself. `/tone` and `/pin` change the tone and the tiles right in the chat.
+
 Message history: in the message box, Up brings back what you sent before (messages and commands, newest first) and Down goes forward again, back to what you were typing. Up and Down only do this on the first and last line, so they still move the cursor within a long message. Nothing new is stored: the list is your messages in the chat plus what you sent since the page loaded.
 
-Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one.
+Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one. The lightbulb button in the message box does the same: type the idea and press Enter or Save idea, and it is saved through `/feedback` exactly as if you had typed it.
 
 ## Videos
 

@@ -107,6 +107,8 @@ export interface ShellOptions {
   memory?: Memory;
   /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
   personality?: Pick<Personality, 'voice' | 'tone' | 'setTone'>;
+  /** The Settings gear and /settings: opens the setup window. Without it, they say to run `astra settings`. */
+  settings?: { open: () => Promise<void> };
   /** /feedback: the user's improvement ideas. Without it, /feedback says it is off. */
   feedback?: Pick<FeedbackLog, 'add' | 'list' | 'path'>;
   /** Where /export writes. Default: the memory folder. */
@@ -259,6 +261,8 @@ export class Shell {
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
     // U1: the user's own click on Update; only the newest card that offered one opens the terminal. Works while paused.
     if (msg.type === 'update_start') return this.startUpdate(msg.id);
+    // The user's own click on the gear; it runs only the fixed `astra settings`. Works while paused.
+    if (msg.type === 'settings_open') return this.openSettings('click');
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -452,6 +456,19 @@ export class Shell {
     this.agent.post(card);
   }
 
+  private async openSettings(via: 'click' | 'command'): Promise<void> {
+    const say = (level: 'info' | 'warning', text: string) => this.agent.notice(level, text);
+    if (!this.o.settings) return say('info', 'Run `astra settings` in a terminal to change your settings.');
+    try {
+      await this.o.settings.open();
+      this.o.audit.append({ kind: 'settings', event: 'open', via });
+      say('info', 'Settings opened in their own window. When you press Finish there, Astra restarts with the new settings and this chat reconnects by itself. /tone and /pin change tone and tiles right here.');
+    } catch (err) {
+      this.o.audit.append({ kind: 'settings', event: 'failed', via });
+      say('warning', `Couldn’t open settings: ${(err as Error).message}`);
+    }
+  }
+
   private async startUpdate(id: string): Promise<void> {
     const card = this.updateCard;
     if (!card || card.id !== id || !this.o.updates) return;
@@ -598,6 +615,8 @@ export class Shell {
         if (!tone) return say(`I know these tones:\n${list}\nFor example /tone playful.`);
         return say(p.setTone(tone));
       }
+      case 'settings':
+        return this.openSettings('command');
       case 'feedback': {
         const f = this.o.feedback;
         if (!f) return say('Feedback is off here.');

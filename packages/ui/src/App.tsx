@@ -43,6 +43,7 @@ export function App() {
     onCleanup: (id, list, n, action, hash) => send({ type: 'cleanup_action', id, list, n, action, hash }),
     onTodo: (id, todoId, action, hash) => send({ type: 'todo_action', id, todoId, action, hash }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
+    onUpdate: (id) => send({ type: 'update_start', id }),
   };
 
   // Braced bodies: an effect may only return a cleanup function, and newer Chromium

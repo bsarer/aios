@@ -15,6 +15,7 @@ import { AppLink, linkKey, linkToken } from './apps/link.js';
 import { appTools, buildAppTool, buildStatusTool, builtAppOpener, offerBuild } from './apps/tools.js';
 import { UnseenFlag, unseenPath } from './apps/bar.js';
 import { formatChecks, realDoctorProbes, runDoctor } from './doctor.js';
+import { checkForUpdate, openUpdateTerminal, readBuildInfo, realGit } from './update.js';
 import { kioskPaths } from './kiosk-paths.js';
 import { ChatWindow } from './apps/window.js';
 import { desktopNotify } from './notify.js';
@@ -556,6 +557,14 @@ async function main(): Promise<void> {
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     doctor: async () => formatChecks(await runDoctor(realDoctorProbes(kioskPaths()))),
+    // U1: the package's root is three folders up from packages/core/src.
+    updates: {
+      check: () => {
+        const info = readBuildInfo(join(here, '..', '..', '..'));
+        return checkForUpdate(info, realGit(info?.source ?? '/nonexistent'));
+      },
+      open: () => openUpdateTerminal(),
+    },
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
     onResume: () => void pipeline.run(),
     onIgnoreMail: (id) => mailState.markIgnored(id),

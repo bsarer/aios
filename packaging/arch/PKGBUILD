@@ -57,4 +57,7 @@ package() {
   install -Dm644 packaging/arch/astra.desktop "$pkgdir/usr/share/applications/astra.desktop"
   install -Dm644 packaging/arch/astra.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/astra.svg"
   install -Dm644 CHANGELOG.md "$pkgdir/usr/share/doc/$pkgname/CHANGELOG.md"
+  # U1: which commit and checkout this was built from (build.sh), for astra update.
+  [[ -f BUILD_INFO.json ]] && install -Dm644 BUILD_INFO.json "$lib/BUILD_INFO.json"
+  true
 }

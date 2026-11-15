@@ -12,7 +12,11 @@ grep -q "^pkgver=$ver\$" "$here/PKGBUILD" || { echo "build.sh: package.json is $
 out="$here/out"
 rm -rf "$out" && mkdir -p "$out"
 cp "$here/PKGBUILD" "$out/"
-git -C "$root" archive --format=tar.gz --prefix="astra-$ver/" -o "$out/astra-$ver.tar.gz" HEAD
+# U1: the commit and this checkout, so `astra update` and /update know where to update from.
+commit=$(git -C "$root" rev-parse HEAD)
+info=$(node -e 'process.stdout.write(JSON.stringify({ commit: process.argv[1], source: process.argv[2] }))' "$commit" "$root")
+git -C "$root" archive --format=tar.gz --prefix="astra-$ver/" --add-virtual-file="astra-$ver/BUILD_INFO.json:$info" -o "$out/astra-$ver.tar.gz" HEAD
+tar -tzf "$out/astra-$ver.tar.gz" | grep -qx "astra-$ver/BUILD_INFO.json" || { echo "build.sh: git archive didn't add BUILD_INFO.json (git 2.38 or newer needed)" >&2; exit 1; }
 cd "$out"
 # The package runs on /usr/bin/node, so its database module must be built by that Node too, not
 # by one from mise or nvm earlier on PATH (a different Node can't load it).

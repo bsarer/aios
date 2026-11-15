@@ -28,6 +28,7 @@ import type { ToolRegistry } from './tools/registry.js';
 import { WIDGET_TITLES, type WidgetBoard, widgetByName } from './widgets/widgets.js';
 import { type FeedbackLog, feedbackListText } from './feedback.js';
 import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
+import type { UpdateCheck } from './update.js';
 
 export interface ShellOptions {
   store: Store;
@@ -83,6 +84,8 @@ export interface ShellOptions {
   resources?: () => Promise<string[]>;
   /** P1: the install checks for /doctor, written by code. Without it, /doctor says to run `pnpm doctor`. */
   doctor?: () => Promise<string[]>;
+  /** U1: /update and its Update button. Without it, /update says to run `astra update` in a terminal. */
+  updates?: { check: () => Promise<UpdateCheck>; open: () => Promise<string> };
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
@@ -237,6 +240,8 @@ export class Shell {
     }
     // The user's own click on a build they started, so it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
+    // U1: the user's own click on Update; only the newest card that offered one opens the terminal. Works while paused.
+    if (msg.type === 'update_start') return this.startUpdate(msg.id);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -411,6 +416,42 @@ export class Shell {
     return say(`Exported to ${path}`);
   }
 
+  /** U1: the newest /update card that offered Update, so an old card's button can't start one. */
+  private updateCard: Extract<ChatItem, { kind: 'update' }> | null = null;
+
+  private async offerUpdate(): Promise<void> {
+    const up = this.o.updates;
+    if (!up) return void this.agent.notice('info', 'Run `astra update` in a terminal to update Astra.');
+    const r = await up.check();
+    const base = { kind: 'update' as const, id: `update-${randomUUID()}`, changes: [] as string[], more: 0, at: this.clock().getTime() };
+    const card: Extract<ChatItem, { kind: 'update' }> =
+      r.state === 'available'
+        ? { ...base, state: 'available', headline: `A new version of Astra is ready: ${r.behind === 1 ? '1 change' : `${r.behind || 'new'} changes`} on ${r.branch}.`, changes: r.changes, more: Math.max(0, r.behind - r.changes.length), detail: 'Update opens a terminal that downloads, builds and installs it. It asks for your password to install, then restarts Astra. Your settings stay.' }
+        : r.state === 'current'
+          ? { ...base, state: 'current', headline: `Astra is up to date (${r.commit.slice(0, 7)} on ${r.branch}).` }
+          : { ...base, state: 'unavailable', headline: 'Astra can’t update itself from here.', detail: r.reason };
+    this.updateCard = card.state === 'available' ? card : null;
+    this.o.audit.append({ kind: 'update', event: 'check', state: r.state });
+    this.agent.post(card);
+  }
+
+  private async startUpdate(id: string): Promise<void> {
+    const card = this.updateCard;
+    if (!card || card.id !== id || !this.o.updates) return;
+    this.updateCard = null;
+    let next: Extract<ChatItem, { kind: 'update' }>;
+    try {
+      const term = await this.o.updates.open();
+      this.o.audit.append({ kind: 'update', event: 'start', terminal: term });
+      next = { ...card, state: 'started', detail: 'A terminal opened. Type your password there when it asks. Astra restarts when the update is done, and this window reconnects by itself.' };
+    } catch (err) {
+      this.o.audit.append({ kind: 'update', event: 'failed' });
+      next = { ...card, state: 'failed', detail: `Couldn’t open a terminal: ${(err as Error).message}` };
+    }
+    this.o.store.saveItem(next);
+    this.broadcast({ type: 'patch', id: next.id, item: next });
+  }
+
   /** P1: the warmer wording for code-written lines under the friendly and playful tones. */
   private warm(friendly: string, plain: string): string {
     return isWarm(this.o.personality?.tone() ?? 'friendly') ? friendly : plain;
@@ -463,6 +504,9 @@ export class Shell {
         if (!this.o.doctor) return say('Run `astra doctor` in a terminal to check the install.');
         return say((await this.o.doctor()).join('\n'));
       }
+      case 'update':
+        // Code only, like /doctor: no model call, so it works while paused too.
+        return this.offerUpdate();
       case 'brief': {
         if (!this.o.brief) return say('The morning brief is off. Turn it on with enabled = true under [brief] in your config.');
         if (this.paused) return say('I am paused, so the brief waits. Type /resume to continue.');

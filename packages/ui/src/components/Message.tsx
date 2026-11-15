@@ -69,6 +69,8 @@ export interface MessageActions {
   onCleanup: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => void;
   /** T1: a button on one row of a to-do card, echoing that row's hash. */
   onTodo: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void;
+  /** U1: Update on an /update card; opens a terminal running astra update. */
+  onUpdate: (id: string) => void;
 }
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
@@ -689,6 +691,38 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
   );
 }
 
+/** U1: /update's card. All text is written by code, except the changes: commit subjects, shown as plain text. */
+function UpdateCard({ item, actions }: { item: Extract<ChatItem, { kind: 'update' }>; actions: MessageActions }) {
+  const colour = item.state === 'failed' ? 'var(--danger)' : item.state === 'available' || item.state === 'started' ? 'var(--accent)' : 'var(--muted)';
+  return (
+    <div data-kind="update" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: `3px solid ${colour}` }}>
+      <div data-testid="update-headline" className="font-medium">
+        {item.headline}
+      </div>
+      {item.changes.length > 0 && (
+        <ul className="mt-2 list-disc pl-5 text-[15px]">
+          {item.changes.map((c, i) => (
+            <li key={i} className="break-words">
+              {c}
+            </li>
+          ))}
+          {item.more > 0 && <li style={{ color: 'var(--muted)' }}>and {item.more} more</li>}
+        </ul>
+      )}
+      {item.detail && (
+        <div data-testid="update-detail" className="mt-2 text-[15px]" style={{ color: item.state === 'failed' ? 'var(--danger)' : undefined }}>
+          {item.detail}
+        </div>
+      )}
+      {item.state === 'available' && (
+        <button type="button" data-testid="update-start" className="mt-3 rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onUpdate(item.id)}>
+          Update
+        </button>
+      )}
+    </div>
+  );
+}
+
 const RESOURCE_TITLE = { disk: 'Drive space', memory: 'Memory', cpu: 'Processor' } as const;
 
 /** L1: a resource alert. Headline and details are written by code; advice by the local model. Plain text only. */
@@ -1027,6 +1061,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <FileChangeCard item={item} actions={actions} />;
     case 'resource_alert':
       return <ResourceAlert item={item} />;
+    case 'update':
+      return <UpdateCard item={item} actions={actions} />;
     case 'cleanup':
       return <CleanupCard item={item} actions={actions} />;
     case 'todo':

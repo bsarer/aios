@@ -426,6 +426,12 @@ Setup moves from the terminal to a window. `astra` the first time, `astra setup`
 *Accept:* `astra uninstall --purge` on the test install, rebuild the package, `astra` opens the window; the Gmail sign-in test passes with an app password; Start Astra opens the chat on 7780; `astra settings` shows the answers and Save keeps the keys; AI OS stays paused and untouched.
 *Checked so far:* unit tests (`scripts/test/onboard.test.ts`: defaults, servers, the checks with pretend servers, the window server's token, Host, Origin and secret handling); `pnpm test:e2e` drives the window in Chromium with pretend checks (`scripts/src/e2e-setup.ts`). The provider key page addresses in `providers.json` were not checked against the providers' sites.
 
+**U1: Updates and stop** (2026-11-15, at the user's request while testing R2: "turn it into a single astra update command", "let's update with an /update button", and how to stop Astra and start it from the app menu)
+- `astra update [--check]` (`scripts/src/update.ts`): the package's `BUILD_INFO.json` (written by build.sh) names the commit and the checkout it was built from; update fetches, fast-forwards (stops on uncommitted changes or a diverged branch), runs build.sh, `sudo pacman -U`, then restarts the service. Settings, keys and data are untouched.
+- `/update` in the chat (`packages/core/src/update.ts`, Shell): looks with git fetch and posts a card written by code (the changes are commit subjects, plain text). Update opens a terminal (Omarchy's xdg-terminal-exec, else alacritty, ghostty, kitty or foot) running the fixed `/usr/bin/astra update`, in its own unit (uwsm-app, else systemd-run) so sudo works (the service has NoNewPrivileges) and the restart doesn't end it. Only the newest card's button works; no tool for it.
+- `astra stop` closes the chat and stops the service; the launcher starts a stopped service, so the app menu entry starts Astra again.
+*Checked:* unit tests with temporary git repos and pretend commands (`packages/core/test/update.test.ts`, `scripts/test/update.test.ts`, shell, kiosk, astra command); e2e `/update` on a checkout. The terminal and pacman steps were not run on Omarchy here.
+
 **R3: Sign in with Google** (after R2)
 OAuth for Gmail and Calendar in one consent screen, instead of an app password.
 

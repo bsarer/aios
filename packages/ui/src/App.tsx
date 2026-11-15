@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
@@ -8,6 +8,8 @@ import { useChat } from './useChat';
 
 export function App() {
   const { state, conn, send, outdated } = useChat();
+  // Up/Down in the message box: the user's own messages in the chat, oldest first.
+  const earlier = useMemo(() => state.items.flatMap((i) => (i.kind === 'user' ? [i.text] : [])), [state.items]);
   const bottom = useRef<HTMLDivElement>(null);
   const working = state.status?.agent === 'working';
   // A short blip while the service restarts shows nothing; a lasting outage says what to do.
@@ -85,7 +87,7 @@ export function App() {
           <div ref={bottom} />
         </div>
       </main>
-      <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} />
+      <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
       {/* W1: pinned system features along the bottom of the screen. */}
       <WidgetBar
         widgets={state.widgets}

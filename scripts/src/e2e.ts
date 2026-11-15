@@ -1103,6 +1103,27 @@ async function main(): Promise<void> {
     check('Ctrl+M stops and adds the words', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle' && (await input.inputValue()).length > kept.length));
     await input.fill('');
 
+    // Up/Down bring back what was sent, commands included, like a shell; the half-typed text comes back last.
+    await input.fill('/cost');
+    await input.press('Enter');
+    await input.fill('/help');
+    await input.press('Enter');
+    check('the box is empty after sending', await waitFor(async () => (await input.inputValue()) === ''));
+    await input.fill('half typed');
+    await input.press('ArrowUp');
+    check('Up brings back the last command', await waitFor(async () => (await input.inputValue()) === '/help'), await input.inputValue());
+    await input.press('ArrowUp');
+    check('Up again goes further back', await waitFor(async () => (await input.inputValue()) === '/cost'), await input.inputValue());
+    await input.press('ArrowDown');
+    await input.press('ArrowDown');
+    check('Down past the newest gives the half-typed text back', await waitFor(async () => (await input.inputValue()) === 'half typed'), await input.inputValue());
+    await input.fill('');
+    await input.press('Shift+Enter');
+    await input.type('second line');
+    await input.press('ArrowUp');
+    check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === '\nsecond line', JSON.stringify(await input.inputValue()));
+    await input.fill('');
+
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

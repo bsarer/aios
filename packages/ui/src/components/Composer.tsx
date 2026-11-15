@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { down, edited, emptyRecall, onFirstLine, onLastLine, type Recall, remember, seed, up } from '../history';
 import { useVoice } from '../useVoice';
 
 interface Props {
@@ -10,6 +11,8 @@ interface Props {
   tight?: boolean;
   /** V2: the microphone button, when aios-core has a speech model; null keeps it off. */
   voiceMaxSeconds?: number | null;
+  /** The user's own messages already in the chat, oldest first, for Up/Down. */
+  earlier?: string[];
 }
 
 const Disabled = ({ label, icon }: { label: string; icon: string }) => (
@@ -18,9 +21,26 @@ const Disabled = ({ label, icon }: { label: string; icon: string }) => (
   </button>
 );
 
-export function Composer({ working, disabled, onSend, onStop, tight = false, voiceMaxSeconds = null }: Props) {
+export function Composer({ working, disabled, onSend, onStop, tight = false, voiceMaxSeconds = null, earlier = [] }: Props) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
+  // Up/Down recall what was sent, like a shell (history.ts). Seeded once from the chat as loaded,
+  // unless something was already sent from this page (that list then has it all).
+  const recall = useRef<Recall>(emptyRecall());
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !earlier.length) return;
+    seeded.current = true;
+    if (!recall.current.entries.length) recall.current = seed(recall.current, earlier);
+  }, [earlier]);
+  const show = (next: { recall: Recall; text: string } | null, e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!next) return;
+    e.preventDefault();
+    recall.current = next.recall;
+    setText(next.text);
+    // The caret goes to the end, so Up again steps back once more on a one-line entry.
+    requestAnimationFrame(() => ref.current?.setSelectionRange(next.text.length, next.text.length));
+  };
   // V2: what was said goes into the text box, after anything already typed. It is never sent from here.
   const voice = useVoice({
     maxSeconds: disabled ? null : voiceMaxSeconds,
@@ -78,6 +98,7 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
     const t = text.trim();
     if (!t || disabled) return;
     onSend(t);
+    recall.current = remember(recall.current, t);
     setText('');
   };
 
@@ -90,13 +111,23 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
           data-testid="input"
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            recall.current = edited(recall.current);
+            setText(e.target.value);
+          }}
           readOnly={voiceBusy}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
+              return;
             }
+            const plain = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing && !voiceBusy;
+            const el = e.currentTarget;
+            const caret = el.selectionStart;
+            if (!plain || caret !== el.selectionEnd) return;
+            if (e.key === 'ArrowUp' && onFirstLine(text, caret)) show(up(recall.current, text), e);
+            else if (e.key === 'ArrowDown' && onLastLine(text, caret)) show(down(recall.current), e);
           }}
           placeholder={disabled ? 'Reconnecting…' : 'Ask anything'}
           className="max-h-[220px] flex-1 resize-none bg-transparent px-1 py-1.5 outline-none placeholder:opacity-50"

@@ -101,5 +101,5 @@ export const HELP_TEXT = [
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
   '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',
   '/help    this list',
-  'Keys: Enter sends, Shift+Enter adds a new line, Esc stops a reply.',
+  'Keys: Enter sends, Shift+Enter adds a new line, Up and Down bring back what you sent, Esc stops a reply.',
 ].join('\n');

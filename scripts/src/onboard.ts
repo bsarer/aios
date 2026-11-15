@@ -16,7 +16,9 @@ import providers from '../providers.json' with { type: 'json' };
 import { installKiosk, kioskPaths } from './kiosk.js';
 import { readPresets } from './onboard/answers.js';
 import { checkAiKey, checkMail } from './onboard/checks.js';
-import { accountFirstName, findApps, homeFolders, mailHosts, ollamaModels, realProbes, screens } from './onboard/probe.js';
+import { ADDON_IDS, type AddonId, installed, onPathIn, readCatalog } from './addons.js';
+import { accountFirstName, findApps, homeFolders, mailHosts, ollamaEmbedModels, ollamaModels, realProbes, screens } from './onboard/probe.js';
+import { openTerminal } from '@aios/core';
 import { type SetupDeps, startSetupServer } from './onboard/server.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -73,6 +75,7 @@ export async function runSetupWindow(): Promise<void> {
   const configPath = join(configDir(), 'config.toml');
   const presets = readPresets(providers as Record<string, unknown>);
   const probes = realProbes();
+  const catalog = readCatalog();
   let window: ChildProcess | null = null;
   let resolveDone: () => void = () => undefined;
   const finished = new Promise<void>((r) => (resolveDone = r));
@@ -87,7 +90,8 @@ export async function runSetupWindow(): Promise<void> {
       name: await accountFirstName(probes),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       folders: await homeFolders(probes),
-      apps: await findApps(probes),
+      apps: { ...(await findApps(probes)), embed: (await ollamaEmbedModels(probes))[0] ?? null },
+      addons: ADDON_IDS.map((id) => ({ id, label: catalog[id].label, blurb: catalog[id].blurb, installed: installed(id, catalog[id], onPathIn(), existsSync) })),
       ollama: await ollamaModels(probes),
       screens: await screens(probes),
     }),
@@ -95,6 +99,8 @@ export async function runSetupWindow(): Promise<void> {
     checkAi: (o) => checkAiKey(o),
     checkMail: (o) => checkMail(o),
     installDesktop,
+    // The package's astra; a checkout runs its own through pnpm.
+    installAddons: (ids: AddonId[]) => openTerminal(existsSync('/usr/bin/astra') ? ['/usr/bin/astra', 'addons', ...ids.map((i) => `--${i}`)] : ['pnpm', '-C', ROOT, 'astra', 'addons', ...ids.map((i) => `--${i}`)], 'astra-addons'),
     done: () => {
       const { launcher } = kioskPaths();
       if (existsSync(launcher)) spawn(launcher, ['open'], { stdio: 'ignore', detached: true }).unref();

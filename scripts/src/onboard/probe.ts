@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 import { parseMonitors } from '../kiosk.js';
+import { whisperPaths } from '../addons.js';
 import type { FoundApps } from './answers.js';
 
 /** The folders offered, in this order, when they exist. */
@@ -69,7 +70,8 @@ async function findUnpacked(p: Probes, app: string, bin: string): Promise<string
 }
 
 /** Where the README builds whisper.cpp's server; the package `whisper.cpp` puts it on PATH. */
-const WHISPER_PLACES = ['~/.local/src/whisper.cpp/build/bin/whisper-server', '~/.local/bin/whisper-server'];
+/** Where astra addons --voice builds it, then where the README builds it by hand. */
+const WHISPER_PLACES = [whisperPaths().server, '~/.local/src/whisper.cpp/build/bin/whisper-server', '~/.local/bin/whisper-server'];
 
 export async function findApps(p: Probes): Promise<FoundApps & { whisper: string | null }> {
   const home = ['~/.local/bin'];
@@ -103,6 +105,18 @@ export async function ollamaModels(p: Probes): Promise<string[]> {
     if (!res.ok) return [];
     const tags = OllamaTags.safeParse(await res.json());
     return tags.success ? tags.data.models.map((m) => m.name).filter((n) => !/embed/i.test(n)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Ollama's embedding models (for finding files by meaning), as Ollama lists them. */
+export async function ollamaEmbedModels(p: Probes): Promise<string[]> {
+  try {
+    const res = await p.fetch('http://127.0.0.1:11434/api/tags');
+    if (!res.ok) return [];
+    const tags = OllamaTags.safeParse(await res.json());
+    return tags.success ? tags.data.models.map((m) => m.name).filter((n) => /embed/i.test(n)) : [];
   } catch {
     return [];
   }

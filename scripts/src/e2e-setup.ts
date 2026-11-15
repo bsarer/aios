@@ -1,0 +1,189 @@
+/**
+ * R2: the setup window end to end in Chromium, with pretend checks, keyring and desktop install.
+ * `pnpm --filter @aios/scripts e2e:setup`. First run: every step, the failing and passing key and
+ * sign-in tests, Gmail's app password steps, an unknown provider's server fields, and what the
+ * finish call stores. Then Settings: answers come back prefilled and blank secrets are kept.
+ * Never touches real accounts, keys or the desktop.
+ *
+ * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
+ */
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { type Page, chromium } from 'playwright-core';
+import type { AiosConfig, SecretRef } from '@aios/shared';
+import { readPresets } from './onboard/answers.js';
+import { type SetupDeps, startSetupServer } from './onboard/server.js';
+import providers from '../providers.json' with { type: 'json' };
+
+const here = dirname(fileURLToPath(import.meta.url));
+const FAKE_KEY = 'sk-or-v1-e2e-fake-key';
+const FAKE_APP_PASSWORD = 'abcd efgh ijkl mnop';
+
+function check(ok: unknown, what: string): void {
+  if (!ok) throw new Error(`setup e2e: ${what}`);
+  console.log(`  ✓ ${what}`);
+}
+
+function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; installs: number; mailTests: { address: string; password: string; host: string }[] }): SetupDeps {
+  return {
+    page: () => readFile(join(here, '..', 'onboard', 'page.html'), 'utf8'),
+    presets: readPresets(providers as Record<string, unknown>),
+    readConfig: async () => state.config,
+    writeConfig: async (c) => void (state.config = c),
+    keyring: {
+      set: async (ref, v) => void state.secrets.set(ref, v),
+      get: async (ref) => (state.secrets.has(ref) ? { reveal: () => state.secrets.get(ref)! } : null),
+    },
+    look: async () => ({
+      name: 'John',
+      timezone: 'Europe/Istanbul',
+      folders: [{ path: '~/Documents' }, { path: '~/Downloads' }, { path: '~/Projects' }],
+      apps: { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: '/usr/bin/mpv', claude: null, whisper: null },
+      ollama: ['qwen3:8b'],
+      screens: [
+        { name: 'DP-1', width: 2560, height: 1440, focused: false },
+        { name: 'eDP-1', width: 1920, height: 1200, focused: true },
+      ],
+    }),
+    mx: async (address) => (address.endsWith('@example.org') ? ['aspmx.l.google.com.'] : []),
+    checkAi: async ({ key }) => (key === FAKE_KEY ? { ok: true, message: 'OpenRouter answered.' } : { ok: false, message: 'OpenRouter rejected this key.', fix: 'Make a new key.' }),
+    checkMail: async ({ address, password, servers }) => {
+      state.mailTests.push({ address, password, host: servers.imap.host });
+      return password === FAKE_APP_PASSWORD.replace(/\s/g, '') || password === 'other-pass'
+        ? { ok: true, message: 'Signed in. Found Sent and Drafts.' }
+        : { ok: false, message: 'Gmail did not accept this app password.', fix: 'Make a new app password.' };
+    },
+    installDesktop: async () => {
+      state.installs++;
+      return ['Started Astra in the background (astra.service).'];
+    },
+    done: () => void state.done++,
+  };
+}
+
+const next = (p: Page) => p.click('#next');
+const heading = (p: Page) => p.textContent('h1');
+
+async function main(): Promise<void> {
+  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[] };
+  const server = await startSetupServer(fakeDeps(state));
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
+  const errors: string[] = [];
+  try {
+    const page = await browser.newPage();
+    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    page.on('pageerror', (e) => errors.push(e.message));
+
+    console.log('First run');
+    await page.goto(server.url);
+    await page.waitForSelector('#name');
+    check((await page.inputValue('#name')) === 'John', 'the name comes from the account');
+    check((await page.inputValue('#tz')) === 'Europe/Istanbul', 'the timezone comes from the computer');
+    await page.fill('#name', '');
+    await next(page);
+    check((await page.textContent('#err'))?.includes('Type the name'), 'an empty name keeps you on the step');
+    await page.fill('#name', 'Johnny');
+    await next(page);
+
+    check((await heading(page))?.includes('Choose the AI'), 'the AI step');
+    check((await page.inputValue('#model')) === 'anthropic/claude-haiku-5.5', 'the model is filled in from the provider');
+    await next(page);
+    check((await page.textContent('#err'))?.includes('Test key'), 'Next waits for a passing key test');
+    await page.fill('#key', 'wrong');
+    await page.click('#test-ai');
+    await page.waitForSelector('.result.bad');
+    check((await page.textContent('.result'))?.includes('rejected this key'), 'a rejected key says so, with a fix');
+    await page.fill('#key', FAKE_KEY);
+    await page.click('#test-ai');
+    await page.waitForSelector('.result.ok');
+    await page.check('#local');
+    await next(page);
+
+    check((await heading(page))?.includes('Connect your mail'), 'the mail step');
+    await page.fill('#address', 'john@gmail.com');
+    await page.dispatchEvent('#address', 'change');
+    await page.waitForSelector('text=Gmail needs an app password');
+    check(!(await page.$('#imap')), 'Gmail shows the app password steps and no server fields');
+    await page.fill('#password', 'wrong');
+    await page.click('#test-mail');
+    await page.waitForSelector('.result.bad');
+    check((await page.textContent('.result'))?.includes('did not accept'), 'a rejected app password says so');
+    await page.fill('#address', 'john@mail.example.net');
+    await page.dispatchEvent('#address', 'change');
+    await page.waitForSelector('#imap');
+    check(true, 'an unknown provider asks for its servers');
+    await page.fill('#address', 'john@example.org');
+    await page.dispatchEvent('#address', 'change');
+    await page.waitForSelector('text=Gmail needs an app password');
+    check(!(await page.$('#imap')), 'a Google Workspace domain is found by its mail servers');
+    await page.fill('#password', FAKE_APP_PASSWORD);
+    await page.click('#test-mail');
+    await page.waitForSelector('.result.ok');
+    check(state.mailTests.at(-1)?.host === 'imap.gmail.com' && state.mailTests.at(-1)?.password === 'abcdefghijklmnop', 'the sign-in test used Gmail with the spaces removed');
+    await next(page);
+
+    check((await heading(page))?.includes('calendar'), 'the calendar step');
+    check((await page.textContent('#next')) === 'Skip for now', 'the calendar can be skipped');
+    await next(page);
+    check((await page.isChecked('[id="f-~/Documents"]')) && !(await page.isChecked('[id="f-~/Projects"]')), 'usual folders start ticked');
+    await page.check('[id="f-~/Projects"]');
+    await next(page);
+    check(await page.isDisabled('#app-docs'), 'apps that are not installed can’t be turned on');
+    check(await page.isChecked('#app-video'), 'found apps start on');
+    await next(page);
+    check((await page.textContent('main'))?.includes('You have 2 screens'), 'two screens ask which is Astra’s');
+    check((await page.getAttribute('button.card[aria-pressed="true"]', 'aria-pressed')) === 'true' && (await page.textContent('button.card[aria-pressed="true"] b')) === 'eDP-1', 'the focused screen is picked');
+    await page.uncheck('#d-bar');
+    await next(page);
+    check((await page.textContent('main'))?.includes('Mail: john@example.org'), 'the last step sums up the answers');
+    await next(page);
+    await page.waitForSelector('text=Astra is ready');
+    const c = state.config!;
+    check(c.user.name === 'Johnny' && c.user.timezone === 'Europe/Istanbul', 'the name and timezone are saved');
+    check(c.mail.username === 'john@example.org' && c.mail.imap.host === 'imap.gmail.com' && c.mail.smtp.port === 465, 'mail uses the address and Gmail’s servers');
+    check(c.models.triage.model === c.models.chat.model && c.models.local?.model === 'qwen3:8b', 'triage shares the chat model; the local model is on');
+    check(c.files.roots.includes('~/Projects') && c.video.enabled && !c.docs.enabled, 'folders and apps are saved');
+    check(c.screen.monitor === 'eDP-1', 'the screen is saved');
+    check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'the key and app password went to the keyring');
+    check(!JSON.stringify(c).includes(FAKE_KEY) && !JSON.stringify(c).includes('abcdefghijklmnop'), 'no secret is in the config');
+    check(state.installs === 1, 'the desktop parts were installed once');
+    check((await page.inputValue('#key').catch(() => '')) === '', 'the page forgets the key');
+    await next(page);
+    await page.waitForSelector('#next:text-is("Opening…")');
+    await new Promise((r) => setTimeout(r, 150));
+    check(state.done === 1, 'Open Astra opens the chat');
+
+    console.log('Settings');
+    const before = state.mailTests.length;
+    const again = await browser.newPage();
+    again.on('pageerror', (e) => errors.push(e.message));
+    await again.goto(server.url);
+    await again.waitForSelector('#name');
+    check((await heading(again)) === 'Astra settings', 'opening it again is Settings');
+    check((await again.inputValue('#name')) === 'Johnny', 'answers come back');
+    await next(again);
+    check((await again.inputValue('#key')) === '' && (await again.inputValue('#model')) === 'anthropic/claude-haiku-5.5', 'no key is sent back to the page');
+    await next(again);
+    check((await again.inputValue('#address')) === 'john@example.org', 'the mail address comes back');
+    await next(again);
+    await again.click('nav button:has-text("Folders")');
+    check(await again.isChecked('[id="f-~/Projects"]'), 'ticked folders come back');
+    await again.click('nav button:has-text("Finish")');
+    check((await again.textContent('#next')) === 'Save', 'the last button is Save');
+    await next(again);
+    await again.waitForSelector('text=Astra is ready');
+    check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'blank fields keep the stored key and password');
+    check(state.mailTests.length === before, 'Settings did not sign in again for an unchanged address');
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join('; ')}` : ''}`);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+  console.log('setup e2e passed');
+}
+
+main().catch((err: unknown) => {
+  console.error((err as Error).message);
+  process.exit(1);
+});

@@ -11,7 +11,10 @@ describe('astra', () => {
   it('opens the chat with no arguments, and routes each subcommand to its script', () => {
     expect(route([])).toEqual({ kind: 'open' });
     expect(route(['open'])).toEqual({ kind: 'open' });
-    expect(route(['setup'])).toEqual({ kind: 'script', file: script('setup.ts'), args: [] });
+    expect(route(['setup'])).toEqual({ kind: 'script', file: script('onboard.ts'), args: [] });
+    expect(route(['settings'])).toEqual({ kind: 'script', file: script('onboard.ts'), args: [] });
+    expect(route(['setup', '--terminal'])).toEqual({ kind: 'script', file: script('setup.ts'), args: [] });
+    expect(route(['setup', '--terminal', '--dry-run'])).toEqual({ kind: 'script', file: script('setup.ts'), args: ['--dry-run'] });
     expect(route(['setup', '--kiosk'])).toEqual({ kind: 'script', file: script('setup.ts'), args: ['--kiosk'] });
     expect(route(['doctor'])).toMatchObject({ kind: 'script', file: script('doctor.ts') });
     expect(route(['backup'])).toMatchObject({ kind: 'script', file: script('backup.ts') });
@@ -29,6 +32,7 @@ describe('astra', () => {
     expect(route(['restore', '--force'])).toMatchObject({ kind: 'error' });
     expect(route(['restore', 'a', 'b'])).toMatchObject({ kind: 'error' });
     expect(route(['open', 'x'])).toMatchObject({ kind: 'error' });
+    expect(route(['settings', '--terminal'])).toMatchObject({ kind: 'error' });
   });
 
   it('prints help and its version, read from package.json', () => {

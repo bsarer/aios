@@ -12,6 +12,7 @@ export type Command =
   | { name: 'reindex' }
   | { name: 'checkup' }
   | { name: 'doctor' }
+  | { name: 'update' }
   | { name: 'brief' }
   | { name: 'play'; text: string }
   | { name: 'todos' }
@@ -49,6 +50,8 @@ export function parseCommand(text: string): Command | null {
       return { name: 'checkup' };
     case 'doctor':
       return { name: 'doctor' };
+    case 'update':
+      return { name: 'update' };
     case 'brief':
       return { name: 'brief' };
     case 'play':
@@ -82,6 +85,7 @@ export const HELP_TEXT = [
   '/play [name or link]  play your newest video, one whose name contains the words, or an https link, in mpv',
   '/checkup show disk, memory and processor now, and suggest files and windows to tidy up',
   '/doctor  check the install: service, kiosk, Omarchy commands, top bar button, keyring',
+  '/update  look for a new version of Astra; Update installs it in a terminal',
   '/brief   show the morning brief now: urgent mail, today\'s events and what is due',
   '/todos   show your open to-dos',
   '/pin <checkup | brief | todos>  pin it as a tile at the bottom of the screen; /unpin takes it off',

@@ -667,6 +667,10 @@ async function main(): Promise<void> {
     await input.fill('/cost');
     await input.press('Enter');
     check('/cost reports spend', await waitFor(async () => /Today: \$0\.\d{4} across \d+ model calls/.test(await page.locator('[data-kind="notice"]').last().innerText())));
+    // U1: a checkout isn't a package, so /update says how to update instead of offering a button.
+    await input.fill('/update');
+    await input.press('Enter');
+    check('/update explains why it can’t update a checkout, with no Update button', await waitFor(async () => (await page.locator('[data-kind="update"][data-state="unavailable"]').count()) === 1 && (await page.locator('[data-testid="update-start"]').count()) === 0));
     await shot(page, '5-commands');
     await input.fill('/resume');
     await input.press('Enter');

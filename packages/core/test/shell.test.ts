@@ -202,6 +202,45 @@ describe('slash commands', () => {
     expect(withDoctor.items().at(-1)).toMatchObject({ text: '✓ Config: config.toml loads\n✗ Kiosk: aios.lua is missing' });
     expect(withDoctor.model.requests).toHaveLength(0);
   });
+
+  it('/update shows what is new, and only the newest card’s Update click opens the terminal, even while paused (U1)', async () => {
+    const plain = setup();
+    await plain.shell.handle({ type: 'send', text: '/update' });
+    expect(plain.items().at(-1)).toMatchObject({ text: expect.stringContaining('astra update') });
+
+    let opened = 0;
+    let check: () => Promise<import('../src/update.js').UpdateCheck> = async () => ({ state: 'available', from: 'a'.repeat(40), to: 'b'.repeat(40), branch: 'origin/main', behind: 12, changes: ['Setup in a window', 'Voice in setup'] });
+    const t = setup([], { updates: { check: () => check(), open: async () => { opened++; return 'xdg-terminal-exec'; } } });
+    await t.shell.handle({ type: 'send', text: '/pause' });
+    await t.shell.handle({ type: 'send', text: '/update' });
+    const first = t.items().at(-1) as Extract<ChatItem, { kind: 'update' }>;
+    expect(first).toMatchObject({ kind: 'update', state: 'available', changes: ['Setup in a window', 'Voice in setup'], more: 10 });
+    expect(first.headline).toContain('12 changes on origin/main');
+    await t.shell.handle({ type: 'send', text: '/update' });
+    const second = t.items().at(-1) as Extract<ChatItem, { kind: 'update' }>;
+    // An older card, or a made-up id, opens nothing.
+    await t.shell.handle({ type: 'update_start', id: first.id });
+    await t.shell.handle({ type: 'update_start', id: 'update-nope' });
+    expect(opened).toBe(0);
+    await t.shell.handle({ type: 'update_start', id: second.id });
+    expect(opened).toBe(1);
+    expect(t.store.recentItems().find((i) => i.id === second.id)).toMatchObject({ state: 'started' });
+    // Once started, the same card can't start another.
+    await t.shell.handle({ type: 'update_start', id: second.id });
+    expect(opened).toBe(1);
+    expect(t.model.requests).toHaveLength(0);
+    expect(t.audits().filter((a) => a.kind === 'update').map((a) => a.event)).toEqual(['check', 'check', 'start']);
+
+    check = async () => ({ state: 'current', commit: 'c'.repeat(40), branch: 'origin/main' });
+    await t.shell.handle({ type: 'send', text: '/update' });
+    expect(t.items().at(-1)).toMatchObject({ state: 'current', headline: expect.stringContaining('up to date (ccccccc') });
+  });
+
+  it('the model has no tool that updates Astra (U1)', () => {
+    const names = ALPHA_TOOLS.map((t) => t.name);
+    expect(names.filter((n) => /^(update|self_update)$|upgrade|install|astra/i.test(n))).toEqual([]);
+    expect(JSON.stringify(ALPHA_TOOLS)).not.toMatch(/astra update|update_start|pacman/i);
+  });
 });
 
 describe('store', () => {

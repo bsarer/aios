@@ -223,7 +223,7 @@ function pipelineSetup(over: { quietHours?: { start: string; end: string }; maxP
     isPaused: () => paused,
     timeZone: 'Europe/Istanbul',
     batchWindowMs: 20,
-    maxPerHour: over.maxPerHour ?? 6,
+    maxPerHour: over.maxPerHour,
     quietHours: over.quietHours,
     now: () => now,
   });
@@ -316,6 +316,17 @@ describe('triage pipeline', () => {
     await p.run();
     await until(() => notes().length === 2);
     expect(notes()[1]!.quiet).toBeUndefined();
+  });
+
+  it('has no hourly limit unless one is set', async () => {
+    const { p, arrive, notes, advance } = pipelineSetup();
+    for (let i = 0; i < 10; i++) {
+      arrive(1);
+      await p.run();
+      advance(60_000);
+    }
+    await until(() => notes().length === 10);
+    expect(notes().some((n) => n.quiet)).toBe(false);
   });
 
   it('over the hourly limit, still posts every email to the inbox, marked quiet', async () => {

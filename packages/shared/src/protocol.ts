@@ -129,7 +129,7 @@ export const ChatItem = z.discriminatedUnion('kind', [
     mails: z.array(MailRow).optional(),
     /** Mail held a while (away, quiet hours, the hourly limit): the chat shows one line for it. */
     catchUp: z.boolean().optional(),
-    /** Posted in quiet hours or over `[notifications] maxPerHour`: shown in the inbox, never peeks out. */
+    /** Posted in quiet hours or over `[notifications] maxPerHour` (off unless set): shown in the inbox, never peeks out. */
     quiet: z.boolean().optional(),
   }),
   z.strictObject({

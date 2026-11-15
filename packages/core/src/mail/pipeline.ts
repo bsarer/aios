@@ -27,7 +27,8 @@ export interface PipelineOptions {
   isPaused: () => boolean;
   timeZone: string;
   batchWindowMs: number;
-  maxPerHour: number;
+  /** Off when unset: no hourly limit. */
+  maxPerHour?: number | undefined;
   quietHours?: { start: string; end: string } | undefined;
   /** L1: 'local' when mail triage runs on the local model. Default 'triage'. */
   role?: ModelRole;
@@ -138,7 +139,7 @@ export class MailPipeline {
     const now = this.now();
     // Calm mail alerts: new mail always goes to the side rail's inbox, which never interrupts.
     // Quiet hours and the hourly limit only keep urgent mail from peeking out (`quiet`).
-    const quiet = inQuietHours(now, this.o.timeZone, this.o.quietHours) || this.o.state.notificationsSince(now - HOUR) >= this.o.maxPerHour;
+    const quiet = inQuietHours(now, this.o.timeZone, this.o.quietHours) || (this.o.maxPerHour !== undefined && this.o.state.notificationsSince(now - HOUR) >= this.o.maxPerHour);
     const rows = ready.map(toRow);
     const oldest = Math.min(...ready.map((e) => e.date ?? e.receivedAt));
     const order = { high: 0, normal: 1, low: 2 } as const;

@@ -51,8 +51,10 @@ const attr = (v: string) => v.replace(/[^A-Za-z0-9._:@-]/g, '_');
  * 'chat' (K1): chat turns handed to a background job; replies can quote email.
  * 'knowledge' (K1): the knowledge base, notes a model wrote from all of the above. The chat
  * counts both like email, the strictest.
+ * 'music' (MU1): song titles, artists and albums, which whoever published the song chose. The
+ * chat counts it like email too.
  */
-export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system' | 'chat' | 'knowledge', id: string, sanitized: string): string {
+export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system' | 'chat' | 'knowledge' | 'music', id: string, sanitized: string): string {
   return `<untrusted source="${source}" id="${attr(id)}">\n${sanitized}\n</untrusted>`;
 }
 

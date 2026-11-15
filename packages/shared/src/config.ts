@@ -283,6 +283,21 @@ export const VideoConfig = z.strictObject({
 export type VideoConfig = z.infer<typeof VideoConfig>;
 
 /**
+ * MU1: the music that is playing (Spotify, or any MPRIS player) through playerctl. `players`
+ * is playerctl's --player list, tried in order; `%any` means any other player.
+ */
+export const MusicConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  players: z
+    .array(z.string().regex(/^(%any|[A-Za-z0-9][A-Za-z0-9._-]{0,63})$/, 'a player name such as spotify, or %any'))
+    .min(1)
+    .max(8)
+    .refine((a) => a.filter((p) => p === '%any').length <= 1, '%any at most once')
+    .default(['spotify', '%any']),
+});
+export type MusicConfig = z.infer<typeof MusicConfig>;
+
+/**
  * W1: tiles along the bottom of the chat screen. `pinned` is where a fresh install starts;
  * after the user pins or unpins one (/pin, /unpin or a click), their choice is kept instead.
  */
@@ -464,6 +479,8 @@ export const AiosConfig = z.strictObject({
   brief: BriefConfig.prefault({}),
   /** V1: watching videos in mpv. */
   video: VideoConfig.prefault({}),
+  /** MU1: pausing, skipping and naming the music that is playing. */
+  music: MusicConfig.prefault({}),
   /** W1: tiles along the bottom of the chat screen. */
   widgets: WidgetsConfig.prefault({}),
   /** K1: the hourly knowledge base about the user. */

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_CHANGES, SheetChange, WordChange } from '../docs/changes.js';
+import { MUSIC_ACTIONS } from '../music/player.js';
 
 /**
  * Risk tiers are enforced in code (registry and approval brokers), not by prompts.
@@ -290,6 +291,19 @@ export const ALPHA_TOOLS = [
         url: z.string().min(1).max(2000).optional().describe('e.g. "https://www.youtube.com/watch?v=…"'),
       })
       .refine((a) => (a.path === undefined) !== (a.url === undefined), 'give either path or url, not both'),
+  }),
+  // ── Music (MU1) ──
+  def({
+    name: 'music_now',
+    tier: 'read',
+    description: "What music is playing (Spotify, or another player): playing or paused, the song, artist and album, and which app. Use for \"what's playing?\" or \"what song is this?\".",
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'music_control',
+    tier: 'device',
+    description: 'Play, pause or skip the music in Spotify (or the player that is open). toggle switches between playing and paused; previous goes back one song.',
+    input: z.strictObject({ action: z.enum(MUSIC_ACTIONS) }),
   }),
   // ── Files (F1) ──
   def({

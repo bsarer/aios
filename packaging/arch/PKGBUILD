@@ -21,6 +21,7 @@ makedepends=('pnpm' 'node-gyp' 'python' 'gcc' 'make')
 optdepends=(
   'claude-code: build small apps from the chat'
   'mpv: play videos'
+  'playerctl: pause, play and skip Spotify and other music players'
   'ollama: the local model, finding files by meaning and the system assistant'
   'whisper.cpp: speaking to the chat'
 )

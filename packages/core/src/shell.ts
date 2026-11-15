@@ -29,6 +29,21 @@ import { WIDGET_TITLES, type WidgetBoard, widgetByName } from './widgets/widgets
 import { type FeedbackLog, feedbackListText } from './feedback.js';
 import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
 import type { UpdateCheck } from './update.js';
+import type { MusicAction } from './music/player.js';
+
+/** MU1: /music's words, mapped by code to music_control's actions. */
+const MUSIC_WORDS: Record<string, MusicAction> = {
+  play: 'play',
+  resume: 'play',
+  pause: 'pause',
+  stop: 'pause',
+  toggle: 'toggle',
+  next: 'next',
+  skip: 'next',
+  previous: 'previous',
+  prev: 'previous',
+  back: 'previous',
+};
 
 export interface ShellOptions {
   store: Store;
@@ -78,6 +93,8 @@ export interface ShellOptions {
   brief?: { runIfDue: () => Promise<unknown>; run: () => Promise<unknown> };
   /** V1: /play. Picks the video from the user's words; the play itself goes through the registry's video_play. */
   video?: { pick: (text: string) => Promise<{ args: { path: string } | { url: string } } | { error: string }> };
+  /** MU1: /music says what is playing, in a line written by code; its changes go through the registry's music_control. */
+  music?: { now: () => Promise<string> };
   /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
   knowledge?: { view: () => string; run: () => Promise<{ by: 'model' | 'code'; error?: string } | null> };
   /** L1: the system numbers, written by code, for /checkup. */
@@ -525,6 +542,21 @@ export class Shell {
         // Refusals (not a video, a bad link) come back as text starting with "Error:".
         if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
         return say('path' in picked.args ? `Playing ${picked.args.path.split('/').pop()} in mpv.` : 'Playing the link in mpv. It can take a few seconds to load.');
+      }
+      case 'music': {
+        if (!this.o.music || !this.o.tools.has('music_control')) return say('Music is off. Turn it on with enabled = true under [music] in your config.');
+        const word = cmd.text.trim().toLowerCase();
+        // Shown to the user as a notice only; song names never reach the model this way.
+        if (!word) return say(await this.o.music.now());
+        const action = Object.hasOwn(MUSIC_WORDS, word) ? MUSIC_WORDS[word] : undefined;
+        if (!action) return say('Try /music, /music pause, /music play, /music next or /music previous.');
+        // The user's own typed command: audited and rate limited like any device change.
+        const r = await this.o.tools.execute(
+          { id: `music-${Date.now()}`, name: 'music_control', arguments: JSON.stringify({ action }) },
+          { signal: AbortSignal.timeout(10_000), untrustedInContext: false, userText: `/music ${cmd.text}` },
+        );
+        if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+        return say(r.content.replace(/ Say it in one short line\.$/, ''));
       }
       case 'todos': {
         if (!this.o.todos?.listCard) return say('To-dos are off. Turn them on with enabled = true under [todos] in your config.');

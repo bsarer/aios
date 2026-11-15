@@ -196,7 +196,7 @@ Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"fri
 
 Message history: in the message box, Up brings back what you sent before (messages and commands, newest first) and Down goes forward again, back to what you were typing. Up and Down only do this on the first and last line, so they still move the cursor within a long message. Nothing new is stored: the list is your messages in the chat plus what you sent since the page loaded.
 
-Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one.
+Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one. The lightbulb button in the message box does the same: type the idea and press Enter or Save idea, and it is saved through `/feedback` exactly as if you had typed it.
 
 ## Videos
 

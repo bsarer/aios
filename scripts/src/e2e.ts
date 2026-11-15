@@ -1124,6 +1124,20 @@ async function main(): Promise<void> {
     check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === '\nsecond line', JSON.stringify(await input.inputValue()));
     await input.fill('');
 
+    // The lightbulb saves an idea through /feedback, the same as typing it; Esc closes the box.
+    const lastNotice = () => page.locator('[data-kind="notice"]').last().innerText();
+    await page.getByTestId('idea').click();
+    check('the lightbulb opens the idea box', await waitFor(async () => (await page.getByTestId('idea-box').count()) === 1));
+    await page.keyboard.press('Escape');
+    check('Esc closes the idea box', await waitFor(async () => (await page.getByTestId('idea-box').count()) === 0));
+    await page.getByTestId('idea').click();
+    await page.getByTestId('idea-input').fill('Show the weather on the brief');
+    await page.getByTestId('idea-input').press('Enter');
+    check('saving an idea says it was saved and closes the box', await waitFor(async () => /idea #1\b/.test(await lastNotice()) && (await page.getByTestId('idea-box').count()) === 0), await lastNotice());
+    await input.fill('/feedback list');
+    await input.press('Enter');
+    check('/feedback list shows the idea from the button', await waitFor(async () => (await lastNotice()).includes('Show the weather on the brief')), await lastNotice());
+
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

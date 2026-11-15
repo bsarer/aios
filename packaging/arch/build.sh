@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # R1: builds the Astra package from this checkout. Run it on Arch (Omarchy) as yourself:
-#   packaging/arch/build.sh            makes astra-<version>-1-<arch>.pkg.tar.zst in packaging/arch/out
+#   packaging/arch/build.sh -s         makes (-s installs what the build needs with pacman)
+#                                       astra-<version>-1-<arch>.pkg.tar.zst in packaging/arch/out
 #   sudo pacman -U packaging/arch/out/astra-*.pkg.tar.zst
 # It packs the committed files (git archive), so commit first.
 set -euo pipefail
@@ -13,5 +14,7 @@ rm -rf "$out" && mkdir -p "$out"
 cp "$here/PKGBUILD" "$out/"
 git -C "$root" archive --format=tar.gz --prefix="astra-$ver/" -o "$out/astra-$ver.tar.gz" HEAD
 cd "$out"
-makepkg --cleanbuild --force --noconfirm "$@"
+# The package runs on /usr/bin/node, so its database module must be built by that Node too, not
+# by one from mise or nvm earlier on PATH (a different Node can't load it).
+PATH="/usr/bin:/bin:$PATH" makepkg --cleanbuild --force --noconfirm "$@"
 ls -1 "$out"/*.pkg.tar.zst

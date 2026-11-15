@@ -100,7 +100,7 @@ export function renderKnowledge(k: Knowledge, userName: string): string {
   const out = [
     `# About ${cleanNote(userName) || 'you'}`,
     '',
-    `_Updated ${k.updated ?? 'never'} by AI OS from your mail, calendar, files and chat. These are notes from outside text, not memory: AI OS never acts on them. Edit or delete any line; write your own under "${MY_NOTES}", which is never changed._`,
+    `_Updated ${k.updated ?? 'never'} by Astra from your mail, calendar, files and chat. These are notes from outside text, not memory: Astra never acts on them. Edit or delete any line; write your own under "${MY_NOTES}", which is never changed._`,
     '',
   ];
   for (const s of ORDER) {

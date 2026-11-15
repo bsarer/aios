@@ -1,0 +1,60 @@
+# R1: the Astra package for Arch Linux (Omarchy 4). Build it with packaging/arch/build.sh, which
+# makes the source tarball from this checkout with `git archive`; R4 points `source` at the
+# GitHub release instead, for the AUR.
+#
+# It installs the program only: /usr/lib/astra, the `astra` command, a launcher and an icon.
+# Nothing in your home folder changes until you run `astra setup` (or open Astra from the app
+# launcher), which asks before it adds the service, the kiosk and the top bar button.
+pkgname=astra
+pkgver=0.2.0
+pkgrel=1
+pkgdesc='A chat that works with your mail, calendar, files and apps, for Omarchy'
+arch=('x86_64' 'aarch64')
+url='https://github.com/bsarer/aios'
+license=('LicenseRef-unreleased')
+# nodejs runs it; libsecret (secret-tool) keeps the keys; chromium shows the chat; jq, curl and
+# hyprland are what the kiosk launcher and window rules use.
+depends=('nodejs>=22.13' 'libsecret' 'chromium' 'jq' 'curl' 'bash' 'hyprland')
+# better-sqlite3 is a native module: pnpm builds it against this nodejs with node-gyp (Arch's
+# nodejs has no npm, which usually brings it), python and a compiler.
+makedepends=('pnpm' 'node-gyp' 'python' 'gcc' 'make')
+optdepends=(
+  'claude-code: build small apps from the chat'
+  'mpv: play videos'
+  'ollama: the local model, finding files by meaning and the system assistant'
+  'whisper.cpp: speaking to the chat'
+)
+# Built JavaScript and a native module with its own build ids; stripping only saves a little.
+options=('!strip' '!debug')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  # All dependencies: core and the scripts run TypeScript through tsx at runtime.
+  pnpm install --frozen-lockfile --config.confirmModulesPurge=false
+  pnpm --filter @aios/ui build
+}
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver"
+  pnpm typecheck
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  local lib="$pkgdir/usr/lib/$pkgname"
+  install -d "$lib"
+  cp -a package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json install.sh node_modules "$lib/"
+  install -d "$lib/packages"
+  cp -a packages/core packages/shared "$lib/packages/"
+  install -d "$lib/packages/ui"
+  cp -a packages/ui/package.json packages/ui/dist "$lib/packages/ui/"
+  cp -a scripts "$lib/"
+  rm -rf "$lib/scripts/test" "$lib/packages/core/test" "$lib/packages/shared/test"
+
+  install -Dm755 packaging/arch/astra "$pkgdir/usr/bin/astra"
+  install -Dm644 packaging/arch/astra.desktop "$pkgdir/usr/share/applications/astra.desktop"
+  install -Dm644 packaging/arch/astra.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/astra.svg"
+  install -Dm644 CHANGELOG.md "$pkgdir/usr/share/doc/$pkgname/CHANGELOG.md"
+}

@@ -1,0 +1,4 @@
+#!/bin/sh
+# R1: /usr/bin/astra. Runs scripts/src/astra.ts from the package; see `astra help`.
+export ASTRA_PACKAGED=1
+exec /usr/bin/node --import file:///usr/lib/astra/scripts/node_modules/tsx/dist/loader.mjs /usr/lib/astra/scripts/src/astra.ts "$@"

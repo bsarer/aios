@@ -91,7 +91,7 @@ describe('personality config (P1)', () => {
 describe('the chat prompt (P1)', () => {
   it('names the assistant and adds the tone\'s voice block after the rules', () => {
     const p = chatSystemPrompt({ ...ctx, assistantName: 'Nova', tone: 'playful' });
-    expect(p.startsWith('You are Nova, the assistant of AI OS')).toBe(true);
+    expect(p.startsWith("You are Nova, the assistant that is John's whole desktop")).toBe(true);
     expect(p).toContain('Voice: playful.');
     // Near the top, before the long rules, so it isn't buried at the end of a long prompt.
     expect(p.indexOf('Voice: playful.')).toBeLessThan(p.indexOf('Current time:'));
@@ -173,7 +173,7 @@ describe('hidden exchanges are not denied (P1)', () => {
       expect(note.startsWith('(Answering this, I read')).toBe(true);
     }
     const p = chatSystemPrompt(ctx);
-    expect(p).toContain('starts "(Answering this, I read…" was written by AI OS');
+    expect(p).toContain('starts "(Answering this, I read…" was written by Astra');
     expect(p).toContain("never tell John that you didn't read, open, save or send something just because you can't see it");
     expect(p).toContain('Only if John asks about that earlier work');
   });

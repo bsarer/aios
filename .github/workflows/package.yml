@@ -1,0 +1,70 @@
+# R1: builds the Astra Arch package. On a pull request that touches packaging it only checks the
+# package builds; on a v* tag it also attaches the package to that tag's GitHub release.
+name: Package
+
+on:
+  pull_request:
+    paths: ['packaging/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/package.yml']
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  arch:
+    name: Arch package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container: archlinux:base-devel
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm --needed git nodejs pnpm node-gyp python libsecret jq curl
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # makepkg refuses to run as root.
+      - name: Build
+        run: |
+          useradd -m builder
+          git config --system --add safe.directory '*'
+          chown -R builder: "$GITHUB_WORKSPACE"
+          # --nodeps: chromium and hyprland are runtime needs only; the build needs what is installed above.
+          sudo -u builder packaging/arch/build.sh --nodeps
+      - name: Check the package
+        run: |
+          pkg=$(ls packaging/arch/out/astra-*.pkg.tar.zst)
+          pacman -Qip "$pkg"
+          files=$(pacman -Qlp "$pkg")
+          for f in /usr/bin/astra /usr/lib/astra/scripts/src/astra.ts /usr/lib/astra/packages/ui/dist/index.html /usr/share/applications/astra.desktop; do
+            grep -q " $f\$" <<<"$files" || { echo "missing $f"; exit 1; }
+          done
+          ! grep -E ' /usr/lib/astra/(scripts|packages/[^/]+)/test/' <<<"$files"
+          pacman -U --noconfirm --nodeps "$pkg"
+          astra version
+          astra help
+      - uses: actions/upload-artifact@v7
+        with:
+          name: astra-arch
+          path: packaging/arch/out/astra-*.pkg.tar.zst
+          if-no-files-found: error
+
+  release:
+    name: Attach to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: arch
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: astra-arch
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --prerelease --title "Astra $TAG" --notes "See CHANGELOG.md."
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber astra-*.pkg.tar.zst

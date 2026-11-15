@@ -31,7 +31,7 @@ export function describeCalendarError(err: unknown): string {
   if (err instanceof CalendarError) {
     switch (err.kind) {
       case 'not_signed_in':
-        return 'AI OS is not signed in to Google Calendar yet. Run `pnpm calendar:login`';
+        return 'Astra is not signed in to Google Calendar yet. Run `pnpm calendar:login`';
       case 'auth':
         return 'the Google Calendar sign-in has expired or was revoked. Run `pnpm calendar:login` again';
       case 'not_found':

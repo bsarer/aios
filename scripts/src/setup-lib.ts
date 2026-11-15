@@ -1,5 +1,8 @@
-import { AiosConfig, LocalModelConfig, MODEL_ROLES, type CloudModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
+import { AiosConfig, DEFAULT_PORT, LocalModelConfig, MODEL_ROLES, type CloudModelRole, ModelRoleConfig, type SecretRef } from '@aios/shared';
 import { TEST_MAILBOX } from './mailbox.js';
+
+// P1: the doctor checks the same references, so the list lives in core.
+export { secretRefs } from '@aios/core';
 
 /** Asks the user something. `secret` answers must not be echoed. */
 export interface Prompter {
@@ -13,11 +16,6 @@ export const CALENDAR_SECRET_REF: SecretRef = 'keyring:calendar-client-secret';
 export const CALENDAR_TOKEN_REF: SecretRef = 'keyring:calendar-google';
 
 /** Every keyring reference a config points at, deduplicated. */
-export function secretRefs(config: AiosConfig): SecretRef[] {
-  const calendar = config.calendar ? [...(config.calendar.clientSecretRef ? [config.calendar.clientSecretRef] : []), config.calendar.tokenRef] : [];
-  return [...new Set([config.mail.passwordRef, ...MODEL_ROLES.map((r) => config.models[r].apiKeyRef), ...calendar])];
-}
-
 export interface CollectedSetup {
   config: AiosConfig;
   /** Secrets to store, keyed by reference. Only entries the user typed. */
@@ -139,15 +137,17 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
     } as AiosConfig['calendar'];
   }
 
+  // Everything setup doesn't ask about ([files], [screen], [personality], [knowledge] and the rest)
+  // is kept as it was; only a calendar the user said no to is dropped.
+  const { calendar: _oldCalendar, ...kept } = existing ?? {};
   const config = AiosConfig.parse({
-    user: { name, timezone },
-    models,
+    ...kept,
+    user: { ...existing?.user, name, timezone },
+    // Embeddings (F3) and speech (V2) aren't asked about, so they stay; a local model the user said no to goes.
+    models: { ...(existing?.models.embeddings ? { embeddings: existing.models.embeddings } : {}), ...(existing?.models.speech ? { speech: existing.models.speech } : {}), ...models },
     mail,
     ...(calendar ? { calendar } : {}),
-    notifications: existing?.notifications,
-    cost: existing?.cost,
-    ui: existing?.ui,
-    assistant: existing?.assistant,
+    ui: existing?.ui ?? { port: DEFAULT_PORT },
   });
   return { config, secrets };
 }

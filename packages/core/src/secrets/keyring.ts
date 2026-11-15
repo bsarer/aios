@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
 import { inspect } from 'node:util';
-import type { SecretRef } from '@aios/shared';
+import { APP_NAME, type SecretRef, appIds } from '@aios/shared';
 
-const SERVICE = 'aios';
 const REDACTED = '[redacted]';
 
 /**
@@ -63,11 +62,14 @@ export function refName(ref: SecretRef): string {
 
 /**
  * Thin wrapper over libsecret's `secret-tool`. Secrets are stored under
- * attributes service=aios, account=<name>. Values travel only via stdin/stdout,
+ * attributes service=astra (aios for an install made before R1), account=<name>. Values travel only via stdin/stdout,
  * never argv, and are never included in error messages.
  */
 export class Keyring {
-  constructor(private readonly run: CommandRunner = spawnRunner) {}
+  constructor(
+    private readonly run: CommandRunner = spawnRunner,
+    private readonly service: string = appIds().keyring,
+  ) {}
 
   async available(): Promise<boolean> {
     try {
@@ -82,25 +84,25 @@ export class Keyring {
   async set(ref: SecretRef, value: string): Promise<void> {
     if (value.length === 0) throw new KeyringError(`refusing to store an empty secret for ${ref}`);
     const name = refName(ref);
-    const res = await this.exec(['store', `--label=AI OS: ${name}`, 'service', SERVICE, 'account', name], value);
+    const res = await this.exec(['store', `--label=${APP_NAME}: ${name}`, 'service', this.service, 'account', name], value);
     if (res.code !== 0) throw new KeyringError(`could not store ${ref} in the keyring (${res.stderr.trim() || `exit ${res.code}`})`);
   }
 
   /** Returns null when the secret is not stored. */
   async get(ref: SecretRef): Promise<Secret | null> {
-    const res = await this.exec(['lookup', 'service', SERVICE, 'account', refName(ref)]);
+    const res = await this.exec(['lookup', 'service', this.service, 'account', refName(ref)]);
     if (res.code !== 0 || res.stdout.length === 0) return null;
     return new Secret(res.stdout.replace(/\n$/, ''));
   }
 
   async require(ref: SecretRef): Promise<Secret> {
     const s = await this.get(ref);
-    if (!s) throw new KeyringError(`${ref} is not in the keyring; run \`pnpm run setup\``);
+    if (!s) throw new KeyringError(`${ref} is not in the keyring; run \`astra setup\``);
     return s;
   }
 
   async delete(ref: SecretRef): Promise<void> {
-    await this.exec(['clear', 'service', SERVICE, 'account', refName(ref)]);
+    await this.exec(['clear', 'service', this.service, 'account', refName(ref)]);
   }
 
   private async exec(args: string[], stdin?: string): Promise<RunResult> {

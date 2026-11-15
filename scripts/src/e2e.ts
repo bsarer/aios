@@ -794,7 +794,7 @@ async function main(): Promise<void> {
     check('the card says what it made', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'done' && (await buildCard.innerText()).includes('Built “Pomodoro” in less than a minute. A 25-minute focus timer. About $0.31 at API prices.')), await buildCard.innerText());
     const builtMsg = page.locator('[data-kind="build_result"]').last();
     check('a message says it is ready, with Open', (await builtMsg.getAttribute('data-ok')) === 'true' && (await builtMsg.innerText()).includes('“Pomodoro” is ready. A 25-minute focus timer.') && (await builtMsg.getByTestId('build-open').count()) === 1);
-    check('a desktop notification says it is ready', notified().includes('--app-name=AI OS|Pomodoro is ready|'), notified());
+    check('a desktop notification says it is ready', notified().includes('--app-name=Astra|Pomodoro is ready|'), notified());
     const appDir = join(tmp, 'data', 'aios', 'apps', 'pomodoro');
     check('Claude Code ran in the app folder, restricted, with the request on stdin', fakeState('claude-cwd') === appDir && fakeState('claude-args').includes('--restricted') && fakeState('claude-stdin') === 'a pomodoro timer', fakeState('claude-cwd'));
     await shot(page, 's4-built');

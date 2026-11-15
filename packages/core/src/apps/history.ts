@@ -100,6 +100,6 @@ export class BuildLog {
 
   /** At startup: a build left running by a crash or restart is recorded as failed. */
   recover(at: number): void {
-    this.db.prepare(`UPDATE app_builds SET state = 'failed', error = 'AI OS stopped while it was building', finished_at = ? WHERE state = 'running'`).run(at);
+    this.db.prepare(`UPDATE app_builds SET state = 'failed', error = 'Astra stopped while it was building', finished_at = ? WHERE state = 'running'`).run(at);
   }
 }

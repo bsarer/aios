@@ -223,6 +223,14 @@ Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links
 
 Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
 
+## Signal
+
+"Any Signal messages?", "what did Sam say on Signal?" and "tell Sam I'm running late on Signal" work once Astra is linked to your phone, the way Signal Desktop is: your phone stays the main device, and you can unlink Astra from it at any time (Signal → Settings → Linked devices). Link it in the **Signal** step of `astra setup` (or `astra settings`): press **Link your phone** and scan the QR code with Signal on your phone.
+
+Astra talks to Signal through [signal-cli](https://github.com/AsamK/signal-cli), which comes as the package's Signal add-on (`signal-cli`, an optional dependency; it brings its own Java runtime). Astra keeps the messages that arrive while it runs for `keepDays` on this computer and puts a line in the chat (and a desktop notification) when one arrives, held in quiet hours and while paused. A reply is a card with **Send** and **Discard**: nothing goes out until you press Send, and the card warns when you didn't name the person or a message or email was in view. Names and messages are outside text (anyone can message you or call themselves anything), so they reach the model only inside `<untrusted>` tags and count like an email: while one is in view, Astra can't change settings, write memory or send anything. `/signal` says whether Signal is connected and how many messages are unread.
+
+Settings: `[signal]` `enabled` and `account` (set by setup when you link), `command` (default `signal-cli`), `notify` (default true), `keepDays` (default 30). Attachments, reactions, calls and stories aren't shown yet.
+
 ## Voice
 
 Click the 🎙 button next to the message box, or press **Ctrl+M**, and talk (V2). The button turns red while it listens. Your words appear as you talk: the sentence you're saying shows in grey under the box, and each time you pause it joins the message box, after anything you'd already typed. Click 🎙 or press Ctrl+M again when you're done. Read it, fix it if needed, and press Enter: voice never sends anything by itself. **Esc** cancels and puts the box back as it was. A recording stops by itself after 60 seconds. The words trail your voice by a second or two, more on a slow computer.
@@ -359,6 +367,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in SG1
+
+`qrcode-generator` 2.0.4 (MIT, by Kazuhiko Arase, no dependencies, last release 2025-08) draws the QR code the setup window shows for linking Signal; it runs only in the setup scripts. signal-cli itself is a separate program (GPL-3.0, actively maintained by AsamK; v0.14.9 needs Java 25), started by Astra without a shell and reached over its JSON-RPC mode on stdin and stdout; checked against signal-cli's man pages and wiki on 2026-11-15. It ships as the Arch package's optional `signal-cli` dependency.
 
 ## Dependencies added in R1
 

@@ -196,6 +196,26 @@ export const ChatItem = z.discriminatedUnion('kind', [
     at: z.number(),
   }),
   z.strictObject({
+    kind: z.literal('signal'),
+    /** SG1: a Signal message that waits for a Send click. Also the id the model sees. */
+    id: z.string(),
+    /** Who it goes to. A contact's or group's name can be chosen by them: show as plain text only. */
+    to: z.string(),
+    /** Written by code: the phone number, or "group" for a group. */
+    toDetail: z.string(),
+    /** The message, as it will be sent. */
+    text: z.string(),
+    /** Written by code: a recipient the user didn't name, a message or email in view... */
+    warnings: z.array(z.string()),
+    /** sha256 of exactly what the card shows and who it goes to; Send echoes it back. */
+    hash: z.string(),
+    /** Only a Send click moves 'pending' (or 'failed', to retry) to 'sending'. */
+    state: z.enum(['pending', 'sending', 'sent', 'discarded', 'failed']),
+    /** Outcome written by code after it ran. */
+    result: z.string().optional(),
+    at: z.number(),
+  }),
+  z.strictObject({
     kind: z.literal('build_result'),
     /** S4: posted when an app build finishes or fails. */
     id: z.string(),
@@ -441,6 +461,9 @@ export const ClientMessage = z.discriminatedUnion('type', [
   /** C1: the confirm button on a calendar card, echoing the card's hash. */
   z.strictObject({ type: z.literal('event_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('event_discard'), id: z.string().max(100) }),
+  /** SG1: Send on a Signal message card, echoing the card's hash. */
+  z.strictObject({ type: z.literal('signal_send'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('signal_discard'), id: z.string().max(100) }),
   /** D2: Save on a document change card, echoing the card's hash. */
   z.strictObject({ type: z.literal('doc_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('doc_change_discard'), id: z.string().max(100) }),

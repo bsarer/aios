@@ -51,6 +51,10 @@ import { createVideoPlayer } from './video/play.js';
 import { pickVideo, videoTools } from './video/tools.js';
 import { createMusicPlayer, describeNowPlaying } from './music/player.js';
 import { musicTools } from './music/tools.js';
+import { SignalActions } from './signal/actions.js';
+import { SignalInbox } from './signal/inbox.js';
+import { SignalService } from './signal/service.js';
+import { signalTools } from './signal/tools.js';
 import { runCommand } from './system/run.js';
 import { DocumentFiles } from './docs/viewer.js';
 import { modelGate } from './gate.js';
@@ -276,6 +280,28 @@ async function main(): Promise<void> {
   // MU1: Spotify (or any MPRIS player) through playerctl. music_control is device tier, so it shares open_app's confirm card.
   const musicPlayer = config.music.enabled ? createMusicPlayer(runCommand, config.music.players) : undefined;
   if (musicPlayer) apps.push(...musicTools({ player: musicPlayer }));
+  // SG1: Signal through signal-cli, once setup has linked the phone. Sending is a card and a Send click.
+  let signal: { service: SignalService; actions: SignalActions } | undefined;
+  const sg = config.signal;
+  if (sg.enabled && sg.account) {
+    const inbox = new SignalInbox(store);
+    const service = new SignalService({
+      command: sg.command,
+      account: sg.account,
+      inbox,
+      audit,
+      keepDays: sg.keepDays,
+      notify: sg.notify,
+      timeZone: config.user.timezone,
+      quietHours: config.notifications.quietHours,
+      isPaused,
+      notice: (text) => shell?.agent.notice('info', text),
+      desktop: (title, body) => desktopNotify(title, body),
+    });
+    const actions = new SignalActions({ store, rpc: service.rpc, inbox, audit, show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)) });
+    for (const t of signalTools({ inbox, actions, timeZone: config.user.timezone, userName: config.user.name })) tools.register(t);
+    signal = { service, actions };
+  }
   // F1: managing files. Changes go on a card; the click renames, copies or creates, never replacing anything.
   let fileActions: FileActions | undefined;
   let fileCatalog: FileCatalog | undefined;
@@ -566,6 +592,7 @@ async function main(): Promise<void> {
     ...(widgets ? { widgets } : {}),
     ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile, progressText(knowledge.progress(), kc.backfillModel === 'cloud')), run: () => knowledge.run() } } : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
+    ...(signal ? { signal: { actions: signal.actions, status: () => signal.service.status() } } : {}),
     ...(musicPlayer ? { music: { now: async () => describeNowPlaying(await musicPlayer.nowPlaying().catch(() => null)) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     doctor: async () => formatChecks(await runDoctor(realDoctorProbes(kioskPaths()))),
@@ -635,6 +662,8 @@ async function main(): Promise<void> {
   calendarActions?.recover();
   docActions?.recover();
   fileActions?.recover();
+  signal?.actions.recover();
+  signal?.service.start();
   // F2: the first scan runs in the background; search works on what it has found so far.
   void fileIndexer?.start().catch((err: unknown) => audit.append({ kind: 'files', event: 'index_error', error: (err as Error).message }));
   shell.greet();
@@ -676,6 +705,7 @@ async function main(): Promise<void> {
     todos?.stop();
     widgets?.stop();
     windowTracker?.stop();
+    signal?.service.stop();
     chatWindow.stop();
     await watcher.stop();
     await mailClient.close();

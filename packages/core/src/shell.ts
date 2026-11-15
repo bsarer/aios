@@ -30,6 +30,7 @@ import { type FeedbackLog, feedbackListText } from './feedback.js';
 import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
 import type { UpdateCheck } from './update.js';
 import type { MusicAction } from './music/player.js';
+import type { SignalActions } from './signal/actions.js';
 
 /** MU1: /music's words, mapped by code to music_control's actions. */
 const MUSIC_WORDS: Record<string, MusicAction> = {
@@ -95,6 +96,8 @@ export interface ShellOptions {
   video?: { pick: (text: string) => Promise<{ args: { path: string } | { url: string } } | { error: string }> };
   /** MU1: /music says what is playing, in a line written by code; its changes go through the registry's music_control. */
   music?: { now: () => Promise<string> };
+  /** SG1: Signal message cards' Send and Discard, and /signal's status line. Without it, signal messages are ignored and /signal says Signal is off. */
+  signal?: { actions: Pick<SignalActions, 'send' | 'discard'>; status: () => string };
   /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
   knowledge?: { view: () => string; run: () => Promise<{ by: 'model' | 'code'; error?: string } | null> };
   /** L1: the system numbers, written by code, for /checkup. */
@@ -237,6 +240,8 @@ export class Shell {
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
     if (msg.type === 'event_confirm' || msg.type === 'event_discard') return this.calendarAction(msg);
     if (msg.type === 'doc_change_confirm' || msg.type === 'doc_change_discard') return this.docChangeAction(msg);
+    // SG1: the user's own click on a Signal card; the broker checks its hash and state before anything is sent. Works while paused, like Send on a draft.
+    if (msg.type === 'signal_send' || msg.type === 'signal_discard') return this.signalAction(msg);
     if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
     // The user's own click on Save, so like Send on a draft it works while paused.
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
@@ -349,6 +354,17 @@ export class Shell {
       return;
     }
     await actions.confirm(msg.id, msg.hash);
+  }
+
+  /** Clicks on a Signal message card (SG1): the user's own action; the broker checks the hash and state. */
+  private async signalAction(msg: Extract<ClientMessage, { type: 'signal_send' | 'signal_discard' }>): Promise<void> {
+    const actions = this.o.signal?.actions;
+    if (!actions) return;
+    if (msg.type === 'signal_discard') {
+      actions.discard(msg.id);
+      return;
+    }
+    await actions.send(msg.id, msg.hash);
   }
 
   /** Clicks on a file change card (F1): the user's own action; the broker checks hash, state and the file. */
@@ -574,6 +590,11 @@ export class Shell {
         );
         if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
         return say(r.content.replace(/ Say it in one short line\.$/, ''));
+      }
+      case 'signal': {
+        if (!this.o.signal) return say('Signal is off. Link your phone in the Signal step of astra settings.');
+        // Written by code; no message text or names.
+        return say(this.o.signal.status());
       }
       case 'todos': {
         if (!this.o.todos?.listCard) return say('To-dos are off. Turn them on with enabled = true under [todos] in your config.');

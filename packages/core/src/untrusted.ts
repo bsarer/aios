@@ -55,8 +55,10 @@ const attr = (v: string) => v.replace(/[^A-Za-z0-9._:@-]/g, '_');
  * counts both like email, the strictest.
  * 'music' (MU1): song titles, artists and albums, which whoever published the song chose. The
  * chat counts it like email too.
+ * 'signal' (SG1): Signal messages, and the names of the people and groups that wrote them. The
+ * chat counts them like email.
  */
-export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system' | 'chat' | 'knowledge' | 'contacts' | 'music', id: string, sanitized: string): string {
+export function wrapUntrusted(source: 'email' | 'calendar' | 'document' | 'system' | 'chat' | 'knowledge' | 'contacts' | 'music' | 'signal', id: string, sanitized: string): string {
   return `<untrusted source="${source}" id="${attr(id)}">\n${sanitized}\n</untrusted>`;
 }
 

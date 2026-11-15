@@ -71,7 +71,7 @@ async function findUnpacked(p: Probes, app: string, bin: string): Promise<string
 /** Where the README builds whisper.cpp's server; the package `whisper.cpp` puts it on PATH. */
 const WHISPER_PLACES = ['~/.local/src/whisper.cpp/build/bin/whisper-server', '~/.local/bin/whisper-server'];
 
-export async function findApps(p: Probes): Promise<FoundApps & { whisper: string | null }> {
+export async function findApps(p: Probes): Promise<FoundApps & { whisper: string | null; signal: string | null }> {
   const home = ['~/.local/bin'];
   return {
     wordcraft: (await find(p, ['wordcraft'], home)) ?? (await findUnpacked(p, 'wordcraft', 'wordcraft')),
@@ -82,6 +82,8 @@ export async function findApps(p: Probes): Promise<FoundApps & { whisper: string
     claude: await find(p, ['claude'], ['~/.local/bin/claude', '~/.claude/local/claude']),
     whisper: await find(p, ['whisper-server', 'whisper-cpp-server'], WHISPER_PLACES),
     speech: await whisperRunning(p),
+    // SG1: the Signal add-on; the AUR and upstream's tarball put it in /usr/bin or /opt.
+    signal: await find(p, ['signal-cli'], ['/opt/signal-cli/bin/signal-cli']),
   };
 }
 

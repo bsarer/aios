@@ -161,9 +161,10 @@ describe('whole-text search', () => {
       INSERT INTO file_index (path, name, folder, kind, bytes, mtime_ms, birthtime_ms, facts, facts_state, summary, keywords, summary_state, tags, seen_at)
         VALUES ('/x/lease.pdf', 'lease.pdf', '~/Documents', 'pdf', 10, 1, 1, '{"title":"Flat lease"}', 'done', 'A lease.', 'rental', 'done', 'home', 1);`);
     // Before F3's migration; K2's (knowledge_items, after it) runs again harmlessly, and K3's
-    // (after that) runs again once its column, index and table are gone.
+    // (after that) runs again once its column, index and table are gone; SG1's (Signal, after K3)
+    // runs again harmlessly too.
     s1.db.exec('DROP INDEX knowledge_items_pending; ALTER TABLE knowledge_items DROP COLUMN priority; DROP TABLE knowledge_signals;');
-    s1.db.pragma(`user_version = ${version - 3}`);
+    s1.db.pragma(`user_version = ${version - 4}`);
     s1.db.close();
     const s2 = new Store(path);
     const c = new FileCatalog(s2);

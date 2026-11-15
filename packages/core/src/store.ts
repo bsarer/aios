@@ -87,6 +87,15 @@ const MIGRATIONS = [
    UPDATE knowledge_items SET priority = CASE kind WHEN 'sent' THEN 0 WHEN 'mail' THEN 3 WHEN 'file' THEN 4 WHEN 'chat' THEN 5 ELSE 6 END;
    CREATE INDEX IF NOT EXISTS knowledge_items_pending ON knowledge_items(state, phase, priority, at);
    CREATE TABLE IF NOT EXISTS knowledge_signals (kind TEXT NOT NULL, value TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (kind, value));`,
+  // SG1: Signal chats and messages kept on this computer (pruned after [signal] keepDays), and
+  // messages waiting for a Send click. The hash is what the click must match.
+  `CREATE TABLE IF NOT EXISTS signal_chats (chat TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, last_at INTEGER NOT NULL, unread INTEGER NOT NULL DEFAULT 0);
+   CREATE TABLE IF NOT EXISTS signal_messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, chat TEXT NOT NULL, sender TEXT NOT NULL, sender_name TEXT NOT NULL, body TEXT NOT NULL,
+                                 ts INTEGER NOT NULL, attachments INTEGER NOT NULL, mine INTEGER NOT NULL, UNIQUE (chat, sender, ts));
+   CREATE INDEX IF NOT EXISTS signal_messages_chat ON signal_messages(chat, ts);
+   CREATE TABLE IF NOT EXISTS signal_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
+                               result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX IF NOT EXISTS signal_actions_state ON signal_actions(state);`,
 ];
 
 export interface UsageRow {

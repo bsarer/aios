@@ -17,6 +17,7 @@ export type Command =
   | { name: 'brief' }
   | { name: 'play'; text: string }
   | { name: 'music'; text: string }
+  | { name: 'signal' }
   | { name: 'todos' }
   | { name: 'pin'; text: string }
   | { name: 'unpin'; text: string }
@@ -65,6 +66,8 @@ export function parseCommand(text: string): Command | null {
       return { name: 'play', text: rest.join(' ') };
     case 'music':
       return { name: 'music', text: rest.join(' ') };
+    case 'signal':
+      return { name: 'signal' };
     case 'todos':
     case 'todo':
       return { name: 'todos' };
@@ -98,6 +101,7 @@ export const HELP_TEXT = [
   '/reindex read your files again for file search, and show how far the index is',
   '/play [name or link]  play your newest video, one whose name contains the words, or an https link, in mpv',
   '/music [pause | play | next | previous]  say what is playing in Spotify (or another player), or pause, play or skip it',
+  '/signal  whether Signal is connected, and how many messages are unread',
   '/checkup show disk, memory and processor now, and suggest files and windows to tidy up',
   '/doctor  check the install: service, kiosk, Omarchy commands, top bar button, keyring',
   '/update  look for a new version of Astra; Update installs it in a terminal',

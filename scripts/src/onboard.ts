@@ -18,6 +18,7 @@ import { readPresets } from './onboard/answers.js';
 import { checkAiKey, checkMail } from './onboard/checks.js';
 import { accountFirstName, findApps, homeFolders, mailHosts, ollamaModels, realProbes, screens } from './onboard/probe.js';
 import { type SetupDeps, startSetupServer } from './onboard/server.js';
+import { SignalLinker } from './onboard/signal.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..', '..');
@@ -77,6 +78,9 @@ export async function runSetupWindow(): Promise<void> {
   let resolveDone: () => void = () => undefined;
   const finished = new Promise<void>((r) => (resolveDone = r));
 
+  // SG1: signal-cli as the window's scan found it (the scan runs again each time the window loads).
+  let signalCli: string | null = null;
+  const linker = new SignalLinker(() => signalCli);
   const deps: SetupDeps = {
     page: () => readFile(join(ROOT, 'scripts', 'onboard', 'page.html'), 'utf8'),
     presets,
@@ -87,7 +91,7 @@ export async function runSetupWindow(): Promise<void> {
       name: await accountFirstName(probes),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       folders: await homeFolders(probes),
-      apps: await findApps(probes),
+      apps: await findApps(probes).then((a) => ((signalCli = a.signal), a)),
       ollama: await ollamaModels(probes),
       screens: await screens(probes),
     }),
@@ -95,6 +99,7 @@ export async function runSetupWindow(): Promise<void> {
     checkAi: (o) => checkAiKey(o),
     checkMail: (o) => checkMail(o),
     installDesktop,
+    signal: linker,
     done: () => {
       const { launcher } = kioskPaths();
       if (existsSync(launcher)) spawn(launcher, ['open'], { stdio: 'ignore', detached: true }).unref();
@@ -110,6 +115,7 @@ export async function runSetupWindow(): Promise<void> {
   window?.on('exit', () => resolveDone());
   await finished;
   window?.kill();
+  linker.cancel();
   await server.close();
 }
 

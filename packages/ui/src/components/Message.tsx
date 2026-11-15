@@ -51,6 +51,9 @@ export interface MessageActions {
   /** A calendar change (C1) happens only on this click, which echoes the card's hash. */
   onEventConfirm: (id: string, hash: string) => void;
   onEventDiscard: (id: string) => void;
+  /** SG1: a Signal message goes out only on this click, which echoes the card's hash. */
+  onSignalSend: (id: string, hash: string) => void;
+  onSignalDiscard: (id: string) => void;
   /** A document change (D2) is saved only on this click, which echoes the card's hash. */
   onDocChangeConfirm: (id: string, hash: string) => void;
   onDocChangeDiscard: (id: string) => void;
@@ -463,6 +466,65 @@ function EventCard({ item, actions }: { item: EventItem; actions: MessageActions
       ) : (
         <div data-testid="event-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
           {item.result ?? EVENT_STATE_TEXT[item.state]}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type SignalItem = Extract<ChatItem, { kind: 'signal' }>;
+
+const SIGNAL_STATE_TEXT: Record<SignalItem['state'], string> = {
+  pending: '',
+  sending: 'Sending…',
+  sent: '✓ Sent on Signal.',
+  discarded: 'Discarded. Nothing was sent.',
+  failed: '',
+};
+
+/** A Signal message waiting for a Send click (SG1). Names can be chosen by the people themselves: plain text only. */
+function SignalCard({ item, actions }: { item: SignalItem; actions: MessageActions }) {
+  const open = item.state === 'pending' || item.state === 'failed';
+  return (
+    <div data-kind="signal" data-state={item.state} className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        Send on Signal?
+      </div>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
+        <span data-testid="signal-to" className="font-medium break-words">
+          {item.to}
+        </span>
+        {item.toDetail !== item.to && (
+          <span data-testid="signal-to-detail" className="text-sm" style={{ color: 'var(--muted)' }}>
+            {item.toDetail}
+          </span>
+        )}
+      </div>
+      <div data-testid="signal-text" className="mt-2 whitespace-pre-wrap break-words rounded-md px-2 py-1 text-[15px]" style={{ background: 'var(--panel)' }}>
+        {item.text}
+      </div>
+      {item.warnings.map((w) => (
+        <div key={w} data-testid="signal-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          {w}
+        </div>
+      ))}
+      {item.state === 'failed' && item.result && (
+        <div data-testid="signal-state" className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.result}
+        </div>
+      )}
+      {open ? (
+        <div className="mt-3 flex gap-2">
+          <button type="button" data-testid="signal-send" className="rounded-lg px-3 py-1" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => actions.onSignalSend(item.id, item.hash)}>
+            {item.state === 'failed' ? 'Try again: Send' : 'Send'}
+          </button>
+          <button type="button" data-testid="signal-discard" className="glass rounded-lg px-3 py-1" onClick={() => actions.onSignalDiscard(item.id)}>
+            Discard
+          </button>
+        </div>
+      ) : (
+        <div data-testid="signal-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.result ?? SIGNAL_STATE_TEXT[item.state]}
         </div>
       )}
     </div>
@@ -1055,6 +1117,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <ActionCard item={item} actions={actions} />;
     case 'event':
       return <EventCard item={item} actions={actions} />;
+    case 'signal':
+      return <SignalCard item={item} actions={actions} />;
     case 'doc_change':
       return <DocChangeCard item={item} actions={actions} />;
     case 'file_change':

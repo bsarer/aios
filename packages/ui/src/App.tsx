@@ -34,6 +34,8 @@ export function App() {
     onActionCancel: (id) => send({ type: 'action_cancel', id }),
     onEventConfirm: (id, hash) => send({ type: 'event_confirm', id, hash }),
     onEventDiscard: (id) => send({ type: 'event_discard', id }),
+    onSignalSend: (id, hash) => send({ type: 'signal_send', id, hash }),
+    onSignalDiscard: (id) => send({ type: 'signal_discard', id }),
     onDocChangeConfirm: (id, hash) => send({ type: 'doc_change_confirm', id, hash }),
     onDocChangeDiscard: (id) => send({ type: 'doc_change_discard', id }),
     onFileChangeConfirm: (id, hash) => send({ type: 'file_change_confirm', id, hash }),

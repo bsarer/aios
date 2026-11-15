@@ -5,7 +5,7 @@
  * the nightly job use the chat's model and key, and every section setup doesn't show is kept
  * from the existing config. Pure, so it is unit-tested (scripts/test/onboard.test.ts).
  */
-import { AiosConfig, DEFAULT_PORT, LocalModelConfig, ModelRoleConfig, type SecretRef, SpeechConfig } from '@aios/shared';
+import { AiosConfig, DEFAULT_PORT, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
@@ -105,6 +105,8 @@ export const SetupAnswers = z.strictObject({
   apps: z.strictObject({ docs: z.boolean(), video: z.boolean(), builder: z.boolean(), voice: z.boolean().default(false) }),
   /** The service always runs; these are the parts of the desktop it may change. */
   desktop: z.strictObject({ autostart: z.boolean(), hyprland: z.boolean(), bar: z.boolean() }),
+  /** SG1: Signal on or off. The number comes from linking in this window, never from the page. */
+  signal: z.strictObject({ enabled: z.boolean() }).default({ enabled: false }),
   /** The screen Astra keeps; empty when there is only one. */
   monitor: z.union([z.literal(''), z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/)]).default(''),
 });
@@ -120,6 +122,8 @@ export interface FoundApps {
   claude: string | null;
   /** A whisper.cpp server answers on [models.speech]'s default address. */
   speech?: boolean;
+  /** SG1: signal-cli, from the Signal add-on. */
+  signal?: string | null;
 }
 
 export interface BuiltSetup {
@@ -128,7 +132,15 @@ export interface BuiltSetup {
 }
 
 /** The answers as a config, on top of the existing one. Throws a SetupError the window can show. */
-export function buildConfig(a: SetupAnswers, existing: AiosConfig | null, presets: Record<string, ProviderPreset>, found: FoundApps, servers: MailServers | null): BuiltSetup {
+export function buildConfig(
+  a: SetupAnswers,
+  existing: AiosConfig | null,
+  presets: Record<string, ProviderPreset>,
+  found: FoundApps,
+  servers: MailServers | null,
+  /** SG1: the number this window just linked, if it did. */
+  signalLinked: string | null = null,
+): BuiltSetup {
   const secrets = new Map<SecretRef, string>();
 
   // AI: one provider and key for chat, triage and the nightly job.
@@ -201,15 +213,29 @@ export function buildConfig(a: SetupAnswers, existing: AiosConfig | null, preset
     builder: { ...(base?.builder ?? {}), enabled: a.apps.builder && !!found.claude, ...(found.claude ? { command: found.claude } : {}) },
     ui: { ...(base?.ui ?? { port: DEFAULT_PORT }), kiosk: a.desktop.autostart },
     screen: { ...(base?.screen ?? {}), monitor: a.monitor },
+    signal: signalSection(a, base, found, signalLinked),
   });
   return { config, secrets };
+}
+
+/** SG1: on only with a linked number: the one just linked, or the one linked before. */
+function signalSection(a: SetupAnswers, base: AiosConfig | null, found: FoundApps, linked: string | null): Partial<AiosConfig['signal']> {
+  const prev = base?.signal;
+  const account = linked && SIGNAL_NUMBER.test(linked) ? linked : prev?.account;
+  if (a.signal.enabled && !account) throw new SetupError('signal', 'Link your phone first, or untick Signal');
+  return {
+    ...(prev ?? {}),
+    enabled: a.signal.enabled && !!account,
+    ...(account ? { account } : {}),
+    ...(found.signal ? { command: found.signal } : {}),
+  };
 }
 
 /** A problem with one step's answers, in words for the window. */
 export class SetupError extends Error {
   override readonly name = 'SetupError';
   constructor(
-    readonly step: 'welcome' | 'ai' | 'mail' | 'folders' | 'desktop',
+    readonly step: 'welcome' | 'ai' | 'mail' | 'signal' | 'folders' | 'desktop',
     message: string,
   ) {
     super(message);
@@ -230,6 +256,7 @@ export function summarize(c: AiosConfig | null, presets: Record<string, Provider
     apps: { docs: c.docs.enabled, video: c.video.enabled, builder: c.builder.enabled, voice: !!c.models.speech },
     autostart: c.ui.kiosk,
     calendar: !!c.calendar,
+    signal: { enabled: c.signal.enabled, account: c.signal.account ?? null },
     monitor: c.screen.monitor,
   };
 }

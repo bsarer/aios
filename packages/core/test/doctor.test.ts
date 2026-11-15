@@ -46,6 +46,7 @@ function healthy() {
     [paths.aiosLua, '-- aios'],
     [paths.shellJson, JSON.stringify({ bar: { layout: { right: [{ id: BAR_ID }] } } })],
     ['/usr/bin/node', ''],
+    ['/usr/bin/playerctl', ''],
     ['/home/john/.local/share/aios/app/packages/core', ''],
     ...OMARCHY_COMMANDS.map((c) => [`/home/john/.local/share/omarchy/bin/${c}`, ''] as [string, string]),
   ]);
@@ -135,6 +136,12 @@ describe('doctor', () => {
     const c = await byName(h.probes);
     expect(c['Claude Code']).toMatchObject({ status: 'warn' });
     expect(c['Word and Excel']).toMatchObject({ status: 'warn' });
+  });
+
+  it('warns when playerctl is missing, so the chat could not pause or skip music', async () => {
+    const h = healthy();
+    h.files.delete('/usr/bin/playerctl');
+    expect((await byName(h.probes)).Music).toMatchObject({ status: 'warn', fix: expect.stringContaining('sudo pacman -S playerctl') });
   });
 
   it('formats one line per check and reads the unit setup wrote', () => {

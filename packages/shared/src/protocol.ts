@@ -478,6 +478,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('app_open'), actionId: z.string().max(100) }),
   /** U1: Update on an /update card; opens a terminal running astra update, nothing else. */
   z.strictObject({ type: z.literal('update_start'), id: z.string().max(100) }),
+  /** The gear in the status strip: opens the setup window on the current settings, nothing else. */
+  z.strictObject({ type: z.literal('settings_open') }),
   z.strictObject({
     type: z.literal('draft_edit'),
     id: z.string().max(100),

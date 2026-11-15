@@ -67,6 +67,7 @@ import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
 import { Dictation } from './speech/dictation.js';
 import { Personality } from './personality.js';
+import { FeedbackLog } from './feedback.js';
 import { Shell } from './shell.js';
 import { readBattery, readWifi } from './status/system.js';
 import { SystemActions } from './system/actions.js';
@@ -526,6 +527,7 @@ async function main(): Promise<void> {
   shell = new Shell({
     store,
     personality,
+    feedback: new FeedbackLog(join(configDir(), 'feedback.jsonl')),
     model,
     tools,
     audit,

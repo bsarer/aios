@@ -26,6 +26,7 @@ import type { Battery, Wifi } from './status/system.js';
 import type { SystemActions } from './system/actions.js';
 import type { ToolRegistry } from './tools/registry.js';
 import { WIDGET_TITLES, type WidgetBoard, widgetByName } from './widgets/widgets.js';
+import { type FeedbackLog, feedbackListText } from './feedback.js';
 import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
 import type { UpdateCheck } from './update.js';
 
@@ -89,6 +90,8 @@ export interface ShellOptions {
   memory?: Memory;
   /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
   personality?: Pick<Personality, 'voice' | 'tone' | 'setTone'>;
+  /** /feedback: the user's improvement ideas. Without it, /feedback says it is off. */
+  feedback?: Pick<FeedbackLog, 'add' | 'list' | 'path'>;
   /** Where /export writes. Default: the memory folder. */
   exportDir?: string;
   clock?: () => Date;
@@ -562,6 +565,19 @@ export class Shell {
         const tone = toneByName(cmd.text);
         if (!tone) return say(`I know these tones:\n${list}\nFor example /tone playful.`);
         return say(p.setTone(tone));
+      }
+      case 'feedback': {
+        const f = this.o.feedback;
+        if (!f) return say('Feedback is off here.');
+        if (cmd.list) return say(feedbackListText(f.list(), f.path));
+        if (!cmd.text) {
+          const n = f.list().length;
+          return say(`Type /feedback followed by your idea, for example /feedback show the weather on the brief. ${n ? `${n} saved so far; /feedback list shows them.` : 'Nothing saved yet.'}`);
+        }
+        const r = f.add(cmd.text, this.clock());
+        if ('error' in r) return say(r.error);
+        this.o.audit.append({ kind: 'feedback', event: 'add', chars: r.text.length });
+        return say(this.warm(`Thanks, saved idea #${f.list().length}. /feedback list shows them all.`, `Saved as idea #${f.list().length}. /feedback list shows them all.`));
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

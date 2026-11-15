@@ -9,6 +9,7 @@ export * from './secrets/keyring.js';
 export * from './secrets/refs.js';
 export * from './kiosk-paths.js';
 export * from './doctor.js';
+export * from './update.js';
 export * from './server.js';
 export * from './shell.js';
 export * from './store.js';

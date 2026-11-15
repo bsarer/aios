@@ -14,6 +14,7 @@ import { type Page, chromium } from 'playwright-core';
 import type { AiosConfig, SecretRef } from '@aios/shared';
 import { readPresets } from './onboard/answers.js';
 import { type SetupDeps, startSetupServer } from './onboard/server.js';
+import { type LinkRunner, SignalLinker } from './onboard/signal.js';
 import providers from '../providers.json' with { type: 'json' };
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,17 @@ function check(ok: unknown, what: string): void {
   if (!ok) throw new Error(`setup e2e: ${what}`);
   console.log(`  ✓ ${what}`);
 }
+
+/** SG1: a pretend signal-cli whose phone "scans" the code when the test says so. */
+const signalPhone = { scan: () => undefined as void };
+const pretendSignal: LinkRunner = {
+  link(_command, onLine, onExit) {
+    setTimeout(() => onLine('sgnl://linkdevice?uuid=e2e&pub_key=e2e'), 50);
+    signalPhone.scan = () => onExit(0);
+    return { kill: () => undefined };
+  },
+  listAccounts: async () => 'Number: +905550000001\n',
+};
 
 function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; installs: number; mailTests: { address: string; password: string; host: string }[]; addons: string[][] }): SetupDeps {
   return {
@@ -39,7 +51,7 @@ function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, st
       name: 'John',
       timezone: 'Europe/Istanbul',
       folders: [{ path: '~/Documents' }, { path: '~/Downloads' }, { path: '~/Projects' }],
-      apps: { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: '/usr/bin/mpv', claude: null, whisper: '/home/john/.local/src/whisper.cpp/build/bin/whisper-server', speech: true, embed: 'embeddinggemma' },
+      apps: { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: '/usr/bin/mpv', claude: null, whisper: '/home/john/.local/src/whisper.cpp/build/bin/whisper-server', speech: true, embed: 'embeddinggemma', signal: '/usr/bin/signal-cli' },
       ollama: ['qwen3:8b'],
       screens: [
         { name: 'DP-1', width: 2560, height: 1440, focused: false },
@@ -68,6 +80,7 @@ function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, st
       state.installs++;
       return ['Started Astra in the background (astra.service).'];
     },
+    signal: new SignalLinker(() => '/usr/bin/signal-cli', pretendSignal),
     done: () => void state.done++,
   };
 }
@@ -150,6 +163,15 @@ async function main(): Promise<void> {
     await page.waitForSelector('#addon-music:disabled');
     check(await page.isChecked('#addon-music'), 'Check again shows what the terminal installed');
     await next(page);
+    check((await heading(page))?.includes('Signal'), 'the Signal step');
+    check((await page.textContent('#next')) === 'Skip for now', 'Signal can be skipped until a phone is linked');
+    await page.click('#signal-link');
+    await page.waitForSelector('img.qr');
+    check((await page.getAttribute('img.qr', 'src'))?.startsWith('data:image/svg+xml;base64,') && !(await page.textContent('main'))?.includes('sgnl://'), 'the window shows a QR code, not the link');
+    signalPhone.scan();
+    await page.waitForSelector('#signal-on', { timeout: 10_000 });
+    check((await page.isChecked('#signal-on')) && (await page.textContent('main'))?.includes('+905550000001'), 'scanning it links Signal and turns it on');
+    await next(page);
     check(await page.isDisabled('#app-docs'), 'apps that are not installed can’t be turned on');
     check(await page.isChecked('#app-video'), 'found apps start on');
     check((await page.isChecked('#app-voice')) && (await page.textContent('main'))?.includes('Running'), 'a running whisper.cpp server turns voice on');
@@ -167,6 +189,7 @@ async function main(): Promise<void> {
     check(c.models.triage.model === c.models.chat.model && c.models.local?.model === 'qwen3:8b', 'triage shares the chat model; the local model is on');
     check(c.files.roots.includes('~/Projects') && c.video.enabled && !c.docs.enabled, 'folders and apps are saved');
     check(c.screen.monitor === 'eDP-1', 'the screen is saved');
+    check(c.signal.enabled && c.signal.account === '+905550000001' && c.signal.command === '/usr/bin/signal-cli', 'Signal is saved with the linked number');
     check(c.models.embeddings?.model === 'embeddinggemma', 'finding files by meaning uses the local embedding model');
     check(c.models.speech?.baseUrl === 'http://127.0.0.1:8178', 'voice is set up for the running whisper.cpp server');
     check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'the key and app password went to the keyring');

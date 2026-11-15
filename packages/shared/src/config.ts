@@ -329,6 +329,25 @@ export const MusicConfig = z.strictObject({
 });
 export type MusicConfig = z.infer<typeof MusicConfig>;
 
+/** A phone number in international form, as Signal names an account: + and 7 to 15 digits. */
+export const SIGNAL_NUMBER = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * SG1: Signal messages through signal-cli, linked to the user's phone as a secondary device
+ * (setup's Signal step shows the QR code). `account` is the phone number setup links; until
+ * then Signal stays off. Messages are kept on this computer for `keepDays`.
+ */
+export const SignalConfig = z.strictObject({
+  enabled: z.boolean().default(false),
+  account: z.string().regex(SIGNAL_NUMBER, 'a phone number such as +905551234567').optional(),
+  /** signal-cli's command. An absolute path when the service doesn't see it on PATH. */
+  command: z.string().min(1).max(500).default('signal-cli'),
+  /** A line in the chat (and a desktop notification) when a message arrives. */
+  notify: z.boolean().default(true),
+  keepDays: z.int().min(1).max(365).default(30),
+});
+export type SignalConfig = z.infer<typeof SignalConfig>;
+
 /**
  * W1: tiles along the bottom of the chat screen. `pinned` is where a fresh install starts;
  * after the user pins or unpins one (/pin, /unpin or a click), their choice is kept instead.
@@ -515,6 +534,8 @@ export const AiosConfig = z.strictObject({
   web: WebConfig.prefault({}),
   /** MU1: pausing, skipping and naming the music that is playing. */
   music: MusicConfig.prefault({}),
+  /** SG1: Signal messages through signal-cli. */
+  signal: SignalConfig.prefault({}),
   /** W1: tiles along the bottom of the chat screen. */
   widgets: WidgetsConfig.prefault({}),
   /** K1: the hourly knowledge base about the user. */

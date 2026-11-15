@@ -159,6 +159,12 @@ export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
     for (const c of clis) if (!(await onPath(p, c))) lost.push(c);
     if (lost.length) add({ name: 'Word and Excel', status: 'warn', detail: `${lost.join(' and ')} not found`, fix: 'see "Word and Excel files" in the README, or set [docs] enabled = false' });
   }
+  // SG1: Signal, once it is turned on.
+  if (config?.signal.enabled) {
+    if (!(await onPath(p, config.signal.command))) add({ name: 'Signal', status: 'warn', detail: `${config.signal.command} not found, so Signal is off`, fix: "install the Signal add-on: `astra addons --signal`" });
+    else if (!config.signal.account) add({ name: 'Signal', status: 'warn', detail: 'no phone linked yet', fix: 'link it in the Signal step of `astra settings`' });
+    else add({ name: 'Signal', status: 'ok', detail: `linked, ${config.signal.command} found` });
+  }
   return out;
 }
 

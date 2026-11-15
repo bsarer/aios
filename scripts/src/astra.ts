@@ -9,7 +9,7 @@
  *   astra stop               close the chat and stop Astra until you open it again (or log in)
  *   astra update [--check]   pull, build and install the newest version; settings stay (asks for
  *                            your password to install); --check only says whether there is one
- *   astra addons [--video] [--music] [--local] [--voice]
+ *   astra addons [--video] [--music] [--local] [--voice] [--signal]
  *                            list the add-ons, or install them (videos, music controls, the
  *                            local AI and voice); asks for your password once
  *   astra doctor             check the install; one line per check, each with a fix
@@ -45,7 +45,7 @@ const SCRIPTS: Record<string, { file: string; flags: string[] }> = {
   settings: { file: 'onboard.ts', flags: [] },
   doctor: { file: 'doctor.ts', flags: [] },
   update: { file: 'update.ts', flags: ['--check'] },
-  addons: { file: 'addons.ts', flags: ['--video', '--music', '--local', '--voice'] },
+  addons: { file: 'addons.ts', flags: ['--video', '--music', '--local', '--voice', '--signal'] },
   backup: { file: 'backup.ts', flags: [] },
   'calendar-login': { file: 'calendar-login.ts', flags: [] },
   uninstall: { file: 'uninstall.ts', flags: ['--purge', '--yes'] },

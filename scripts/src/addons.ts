@@ -1,5 +1,5 @@
 /**
- * `astra addons [--video] [--music] [--local] [--voice]`: installs what Astra's features need,
+ * `astra addons [--video] [--music] [--local] [--voice] [--signal]`: installs what Astra's features need,
  * so nobody has to find and install pieces by hand. With no flag it lists each add-on and whether
  * it is installed. The catalog is `scripts/addons.json`: Arch packages (one `sudo pacman -S`
  * for all of them, one password), Ollama's service and models, and whisper.cpp built from its
@@ -17,7 +17,7 @@ import { z } from 'zod';
 import raw from '../addons.json' with { type: 'json' };
 import { noNewPrivileges } from './update.js';
 
-export const ADDON_IDS = ['video', 'music', 'local', 'voice'] as const;
+export const ADDON_IDS = ['video', 'music', 'local', 'voice', 'signal'] as const;
 export type AddonId = (typeof ADDON_IDS)[number];
 
 const Pkg = z.string().regex(/^[a-z0-9][a-z0-9+._-]{0,80}$/);

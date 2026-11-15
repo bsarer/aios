@@ -32,5 +32,11 @@
       "model": "ggml-base.en.bin",
       "port": 8178
     }
+  },
+  "signal": {
+    "label": "Signal",
+    "blurb": "Read your Signal messages and reply from Astra, linked to your phone like Signal Desktop. Brings its own Java.",
+    "packages": ["signal-cli"],
+    "bins": ["signal-cli"]
   }
 }

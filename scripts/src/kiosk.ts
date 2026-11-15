@@ -90,6 +90,8 @@ case "\${1:-open}" in
         hyprctl dispatch focuswindow "class:$PATTERN" >/dev/null 2>&1
       exit 0
     fi
+    # Started from the app menu after \`astra stop\`: start the service again first.
+    curl -fsS -o /dev/null "\${URL}healthz" 2>/dev/null || systemctl --user start ${unit}.service 2>/dev/null
     # Give the core up to 30 s to come up; the page reconnects by itself after that.
     UP=0
     for _ in $(seq "\${AIOS_KIOSK_WAIT:-150}"); do

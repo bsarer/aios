@@ -20,7 +20,7 @@
     "doctor": "pnpm --filter @aios/scripts run doctor",
     "backup": "pnpm --filter @aios/scripts run backup",
     "bakeoff": "pnpm --filter @aios/evals run bakeoff",
-    "test:e2e": "pnpm --filter @aios/ui build && pnpm --filter @aios/scripts run e2e",
+    "test:e2e": "pnpm --filter @aios/ui build && pnpm --filter @aios/scripts run e2e:setup && pnpm --filter @aios/scripts run e2e",
     "start": "pnpm --filter @aios/ui build && pnpm --filter @aios/core start",
     "kiosk:restart": "pnpm --filter @aios/ui build && (systemctl --user restart astra.service 2>/dev/null || systemctl --user restart aios-core.service)",
     "astra": "pnpm --filter @aios/scripts run astra"

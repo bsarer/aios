@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astra setup</title>
+<link rel="icon" href="data:,">
+<style nonce="{{NONCE}}">
+  :root { --bg:#16161e; --panel:#1f2335; --line:#3b4261; --text:#e0e6ff; --dim:#a9b1d6; --mute:#7f88b0; --accent:#7aa2f7; --ok:#9ece6a; --warn:#e0af68; --bad:#f7768e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 Inter, system-ui, sans-serif; }
+  a { color:var(--accent); }
+  .wrap { display:flex; min-height:100vh; }
+  nav { width:240px; flex:none; padding:28px 16px; border-right:1px solid var(--line); }
+  nav .brand { font-weight:700; font-size:20px; margin:0 0 20px 12px; }
+  nav button { display:flex; gap:12px; align-items:center; width:100%; text-align:left; font:inherit; color:var(--dim); background:transparent; border:0; border-radius:10px; padding:9px 12px; cursor:pointer; }
+  nav button[aria-current="step"] { background:#283457; color:var(--text); font-weight:600; }
+  nav button:disabled { color:var(--mute); cursor:default; }
+  nav .dot { width:24px; height:24px; border-radius:999px; display:flex; align-items:center; justify-content:center; font-size:12px; border:1px solid var(--line); flex:none; }
+  nav button.done .dot { background:var(--ok); color:var(--bg); border:0; }
+  nav button[aria-current="step"] .dot { background:var(--accent); color:var(--bg); border:0; }
+  main { flex:1; padding:40px 48px 120px; max-width:760px; }
+  h1 { font-size:28px; margin:0 0 6px; }
+  .lead { color:var(--dim); margin:0 0 24px; }
+  label { display:block; font-weight:600; margin:18px 0 6px; }
+  .hint { color:var(--mute); font-size:13px; margin-top:4px; }
+  input[type=text], input[type=email], input[type=password], input[type=url], select { width:100%; font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  input:focus-visible, button:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .row { display:flex; gap:12px; align-items:center; }
+  .row > * { flex:1; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px; }
+  .card { text-align:left; font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; cursor:pointer; }
+  .card[aria-pressed="true"] { border-color:var(--accent); background:#283457; }
+  .card small { display:block; color:var(--mute); }
+  .btn { font:inherit; font-weight:600; border-radius:10px; padding:10px 18px; border:1px solid var(--line); background:var(--panel); color:var(--text); cursor:pointer; }
+  .btn.primary { background:var(--accent); color:var(--bg); border:0; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .result { margin-top:10px; padding:10px 12px; border-radius:10px; }
+  .result.ok { background:#24361f; color:var(--ok); }
+  .result.bad { background:#3a1f28; color:#ffc2cc; }
+  .result .fix { color:var(--text); margin-top:4px; }
+  .toggle { display:flex; gap:14px; align-items:flex-start; padding:12px 0; border-bottom:1px solid var(--line); }
+  .toggle input { width:20px; height:20px; margin-top:3px; accent-color:var(--accent); flex:none; }
+  .toggle b { display:block; }
+  .toggle span { color:var(--mute); font-size:13px; }
+  .badge { font-size:12px; font-weight:600; padding:2px 10px; border-radius:999px; background:#24361f; color:var(--ok); margin-left:8px; }
+  .badge.missing { background:#33291a; color:var(--warn); }
+  .note { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-top:16px; color:var(--dim); }
+  footer { position:fixed; left:240px; right:0; bottom:0; display:flex; justify-content:space-between; gap:12px; padding:16px 48px; background:var(--bg); border-top:1px solid var(--line); }
+  .err { color:var(--bad); margin-top:8px; min-height:1.5em; }
+  ol { padding-left:20px; }
+  .gap { margin-top:14px; }
+  .port { flex:0 0 110px; }
+  .flat { margin:0; }
+  .row.fixed { flex:none; }
+  .row.fixed > * { flex:none; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav aria-label="Setup steps"><div class="brand">✦ Astra</div><div id="rail"></div></nav>
+  <main id="main" aria-live="polite"></main>
+</div>
+<footer>
+  <button class="btn" id="back" type="button">Back</button>
+  <div class="row fixed"><span class="err" id="err" role="alert"></span><button class="btn primary" id="next" type="button">Next</button></div>
+</footer>
+<script nonce="{{NONCE}}">
+(() => {
+  'use strict';
+  const base = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
+  const call = async (name, body) => {
+    const res = await fetch(base + 'api/' + name, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const json = await res.json().catch(() => ({ ok: false, message: 'Astra stopped answering. Close this window and run astra setup again.' }));
+    return json;
+  };
+  const $ = (sel) => document.querySelector(sel);
+  const el = (tag, attrs = {}, ...kids) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'text') e.textContent = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else if (v === true) e.setAttribute(k, '');
+      else if (v !== false && v != null) e.setAttribute(k, v);
+    }
+    for (const k of kids.flat()) if (k != null) e.append(k);
+    return e;
+  };
+
+  const STEPS = [
+    ['welcome', 'Welcome'], ['ai', 'AI'], ['mail', 'Mail'], ['calendar', 'Calendar'],
+    ['folders', 'Folders'], ['apps', 'Apps'], ['desktop', 'Desktop'], ['done', 'Finish'],
+  ];
+  let step = 0, seen = 0, S = null, editing = false;
+  const A = { name: '', timezone: '', ai: { provider: 'openrouter', baseUrl: '', model: '', key: '' }, local: null,
+    mail: { address: '', password: '', imap: { host: '', port: 993 }, smtp: { host: '', port: 465 } },
+    folders: [], apps: { docs: true, video: true, builder: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '' };
+  const T = { ai: null, mail: null, mailProvider: undefined, finished: null };
+
+  function okToLeave() {
+    const s = STEPS[step][0];
+    if (s === 'welcome') return A.name.trim() ? '' : 'Type the name Astra should call you.';
+    if (s === 'ai') {
+      if (!A.ai.model.trim()) return 'Choose a model.';
+      if (T.ai && T.ai.ok) return '';
+      if (editing && !A.ai.key && S.existing.ai.provider === A.ai.provider && S.existing.ai.model === A.ai.model) return '';
+      return 'Press Test key first.';
+    }
+    if (s === 'mail') {
+      if (T.mail && T.mail.ok) return '';
+      if (editing && !A.mail.password && S.existing.mail.address.toLowerCase() === A.mail.address.toLowerCase()) return '';
+      return 'Press Test sign-in first.';
+    }
+    if (s === 'folders') return A.folders.length ? '' : 'Tick at least one folder.';
+    return '';
+  }
+
+  function rail() {
+    const r = $('#rail'); r.replaceChildren();
+    STEPS.forEach(([, label], i) => {
+      const b = el('button', { type: 'button', class: i < step || i <= seen && i !== step ? 'done' : '', disabled: i > seen, onclick: () => go(i) }, el('span', { class: 'dot', text: i < seen || i < step ? '✓' : String(i + 1) }), label);
+      if (i === step) b.setAttribute('aria-current', 'step');
+      r.append(b);
+    });
+  }
+
+  function go(i) {
+    if (i > step) { const why = okToLeave(); if (why) { $('#err').textContent = why; return; } }
+    step = i; seen = Math.max(seen, i); $('#err').textContent = '';
+    render();
+  }
+
+  function result(r) {
+    if (!r) return null;
+    return el('div', { class: 'result ' + (r.ok ? 'ok' : 'bad'), role: 'status' }, (r.ok ? '✓ ' : '✗ ') + r.message, r.fix ? el('div', { class: 'fix', text: r.fix }) : null);
+  }
+  const field = (label, input, hint) => [el('label', { for: input.id, text: label }), input, hint ? el('div', { class: 'hint' }, hint) : null];
+  const bind = (obj, key, attrs, after) => el('input', { ...attrs, value: obj[key] ?? '', oninput: (e) => { obj[key] = e.target.value; if (after) after(); } });
+
+  const views = {
+    welcome: () => [
+      el('h1', { text: editing ? 'Astra settings' : 'Welcome to Astra' }),
+      el('p', { class: 'lead', text: editing ? 'Change any answer, then press Save on the last step. Keys you leave empty stay as they are.' : 'Astra is a chat that runs your computer. Setup takes about five minutes. You choose what it can reach, and you can change every answer later with astra settings.' }),
+      ...field('What should Astra call you?', bind(A, 'name', { id: 'name', type: 'text', autocomplete: 'given-name', maxlength: 60 })),
+      ...field('Timezone', bind(A, 'timezone', { id: 'tz', type: 'text', maxlength: 64 }), 'From this computer. Change it only if it is wrong.'),
+      el('div', { class: 'note', text: "Passwords and keys go into this computer's keyring, never into a file. Astra only works on this computer." }),
+    ],
+    ai: () => {
+      const preset = S.presets.find((p) => p.id === A.ai.provider);
+      const reset = () => { T.ai = null; render(); };
+      const cards = el('div', { class: 'cards', role: 'group', 'aria-label': 'AI provider' },
+        [...S.presets, { id: 'other', label: 'Other', blurb: 'Any OpenAI-compatible address.' }].map((p) => el('button', {
+          type: 'button', class: 'card', 'aria-pressed': String(A.ai.provider === p.id),
+          onclick: () => { A.ai.provider = p.id; if (p.defaultModel !== undefined) A.ai.model = p.defaultModel || A.ai.model; reset(); },
+        }, el('b', { text: p.label }), el('small', { text: p.blurb }))));
+      const testBtn = el('button', { type: 'button', class: 'btn', id: 'test-ai', onclick: async () => {
+        testBtn.disabled = true; testBtn.textContent = 'Testing…';
+        T.ai = await call('test-ai', { provider: A.ai.provider, ...(A.ai.provider === 'other' ? { baseUrl: A.ai.baseUrl } : {}), model: A.ai.model, key: A.ai.key });
+        render();
+      } }, 'Test key');
+      return [
+        el('h1', { text: 'Choose the AI that powers Astra' }),
+        el('p', { class: 'lead', text: 'Astra needs one AI provider. You pay the provider directly, and a daily limit ($2 to start) stops spending.' }),
+        cards,
+        A.ai.provider === 'other' ? field('Provider address', bind(A.ai, 'baseUrl', { id: 'baseurl', type: 'url', placeholder: 'https://…/v1' }, () => { T.ai = null; })) : null,
+        ...field('API key', bind(A.ai, 'key', { id: 'key', type: 'password', autocomplete: 'off', placeholder: editing ? 'Leave empty to keep the stored key' : '' }, () => { T.ai = null; }),
+          preset ? el('span', {}, 'Make one at ', el('a', { href: preset.keyUrl, target: '_blank', rel: 'noreferrer', text: preset.keyUrl.replace('https://', '') }), '.') : null),
+        ...field('Model', bind(A.ai, 'model', { id: 'model', type: 'text', maxlength: 200 }, () => { T.ai = null; }), 'Astra uses it for the chat, for sorting mail and for its nightly tidy-up.'),
+        el('div', { class: 'gap' }, testBtn),
+        result(T.ai),
+        S.ollama.length ? el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'local', checked: !!A.local, onchange: (e) => { A.local = e.target.checked ? (A.local || S.ollama[0]) : null; render(); } }),
+          el('div', {}, el('label', { for: 'local', class: 'flat', text: 'Also use the local model on this computer' }),
+            el('span', { text: 'Ollama is running. Astra uses it for system checks and the morning brief, so those never leave the computer.' }),
+            A.local ? el('select', { 'aria-label': 'Local model', onchange: (e) => { A.local = e.target.value; } }, S.ollama.map((m) => el('option', { value: m, selected: m === A.local, text: m }))) : null)) : null,
+      ];
+    },
+    mail: () => {
+      const gmail = T.mailProvider === 'gmail';
+      const other = T.mailProvider === null;
+      const testBtn = el('button', { type: 'button', class: 'btn', id: 'test-mail', onclick: async () => {
+        testBtn.disabled = true; testBtn.textContent = 'Signing in…';
+        if (T.mailProvider === undefined) await lookUp();
+        T.mail = await call('test-mail', { address: A.mail.address, password: A.mail.password, ...(T.mailProvider === null ? { imap: num(A.mail.imap), smtp: num(A.mail.smtp) } : {}) });
+        render();
+      } }, 'Test sign-in');
+      const lookUp = async () => {
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(A.mail.address)) return;
+        const r = await call('mail-servers', { address: A.mail.address });
+        T.mailProvider = r.provider === undefined ? null : r.provider;
+      };
+      const address = bind(A.mail, 'address', { id: 'address', type: 'email', autocomplete: 'email' }, () => { T.mail = null; T.mailProvider = undefined; });
+      address.addEventListener('change', async () => { await lookUp(); render(); $('#password')?.focus(); });
+      return [
+        el('h1', { text: 'Connect your mail' }),
+        el('p', { class: 'lead', text: 'Astra reads new mail and sorts it. It never sends anything until you press Send on a draft.' }),
+        ...field('Email address', address),
+        gmail ? el('div', { class: 'note' }, el('b', { text: 'Gmail needs an app password. ' }), 'It works only when your Google account has 2-Step Verification on.',
+          el('ol', {}, el('li', {}, 'Open ', el('a', { href: 'https://myaccount.google.com/apppasswords', target: '_blank', rel: 'noreferrer', text: "Google's app password page" }), ' and make one called “Astra”.'),
+            el('li', { text: 'Copy the 16 letters and paste them below. Spaces don’t matter.' }))) : null,
+        other ? el('div', { class: 'note' }, 'Astra doesn’t know this provider’s servers. Type them from its help pages.',
+          el('div', { class: 'row' }, el('div', {}, ...field('IMAP server', bind(A.mail.imap, 'host', { id: 'imap', type: 'text', placeholder: 'imap.example.com' }))), el('div', { class: 'port' }, ...field('Port', bind(A.mail.imap, 'port', { id: 'imap-port', type: 'text', inputmode: 'numeric' })))),
+          el('div', { class: 'row' }, el('div', {}, ...field('SMTP server', bind(A.mail.smtp, 'host', { id: 'smtp', type: 'text', placeholder: 'smtp.example.com' }))), el('div', { class: 'port' }, ...field('Port', bind(A.mail.smtp, 'port', { id: 'smtp-port', type: 'text', inputmode: 'numeric' }))))) : null,
+        ...field(gmail ? 'App password (16 letters)' : 'Password', bind(A.mail, 'password', { id: 'password', type: 'password', autocomplete: 'off', placeholder: editing ? 'Leave empty to keep the stored one' : '' }, () => { T.mail = null; })),
+        el('div', { class: 'gap' }, testBtn),
+        result(T.mail),
+      ];
+    },
+    calendar: () => [
+      el('h1', { text: 'Connect your calendar' }),
+      el('p', { class: 'lead', text: 'Astra can tell you what’s on and find free time. Changes, like moving a meeting, wait for your click on a card.' }),
+      el('div', { class: 'note' }, S.existing && S.existing.calendar ? 'Your Google Calendar is already connected.' : 'One-click Sign in with Google is coming next. For now, press Next and connect it after setup with: ', S.existing && S.existing.calendar ? null : el('code', { text: 'astra calendar-login' })),
+      el('p', { class: 'hint', text: 'Not using Google Calendar? Astra works without one.' }),
+    ],
+    folders: () => [
+      el('h1', { text: 'Which folders can Astra use?' }),
+      el('p', { class: 'lead', text: 'Astra can find, open, copy and rename files only in the folders you tick. It never deletes or replaces a file.' }),
+      S.folders.map((f) => el('div', { class: 'toggle' },
+        el('input', { type: 'checkbox', id: 'f-' + f.path, checked: A.folders.includes(f.path), onchange: (e) => { A.folders = e.target.checked ? [...A.folders, f.path] : A.folders.filter((x) => x !== f.path); } }),
+        el('label', { for: 'f-' + f.path, class: 'flat', text: f.path }))),
+      el('p', { class: 'hint', text: 'Up to eight folders. Others can be added later in ~/.config/astra/config.toml.' }),
+    ],
+    apps: () => {
+      const rows = [
+        ['docs', 'WordCraft and GridCraft', 'Reading and editing Word and Excel files', S.apps.wordcraftCli && S.apps.gridcraftCli, 'Install WordCraft and GridCraft, then open astra settings.'],
+        ['video', 'mpv', 'Watching videos', S.apps.mpv, 'sudo pacman -S mpv'],
+        ['builder', 'Claude Code', 'Building small apps from the chat', S.apps.claude, 'Install Claude Code, then open astra settings.'],
+      ];
+      return [
+        el('h1', { text: 'Apps Astra found on this computer' }),
+        el('p', { class: 'lead', text: 'These turn features on. Astra only looked; it didn’t install or run anything.' }),
+        rows.map(([id, name, feature, path, how]) => el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'app-' + id, disabled: !path, checked: !!path && A.apps[id], onchange: (e) => { A.apps[id] = e.target.checked; } }),
+          el('div', {}, el('label', { for: 'app-' + id, class: 'flat' }, name, el('span', { class: 'badge' + (path ? '' : ' missing'), text: path ? 'Found' : 'Not found' })), el('span', { text: path ? feature + ' · ' + path : feature + '. ' + how })))),
+        el('div', { class: 'toggle' }, el('input', { type: 'checkbox', disabled: true, checked: !!S.ollama.length }),
+          el('div', {}, el('b', {}, 'Ollama', el('span', { class: 'badge' + (S.ollama.length ? '' : ' missing'), text: S.ollama.length ? 'Running' : 'Not running' })), el('span', { text: S.ollama.length ? 'The local model. Chosen on the AI step.' : 'Optional: the local model for private system checks.' }))),
+        el('div', { class: 'toggle' }, el('input', { type: 'checkbox', disabled: true, checked: !!S.apps.whisper }),
+          el('div', {}, el('b', {}, 'whisper.cpp', el('span', { class: 'badge' + (S.apps.whisper ? '' : ' missing'), text: S.apps.whisper ? 'Found' : 'Not found' })), el('span', { text: 'Optional: speaking to the chat. See the README to set it up.' }))),
+      ];
+    },
+    desktop: () => {
+      const rows = [
+        ['autostart', 'Open Astra full screen when you log in', 'Astra always runs in the background; this opens the chat too.'],
+        ['hyprland', 'Keep Astra on its own workspace, with Super+Shift+H', 'Adds one line to hyprland.lua (a backup is kept). Apps you open go to another screen or the next workspace.'],
+        ['bar', 'Add the AI button to the top bar', 'One click brings Astra back. A dot means something new arrived. A backup is kept.'],
+      ];
+      return [
+        el('h1', { text: 'Make Astra part of your desktop' }),
+        el('p', { class: 'lead', text: 'Each one changes a setting on this computer. Astra keeps a backup, and astra uninstall undoes each one.' }),
+        rows.map(([id, name, detail]) => el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'd-' + id, checked: A.desktop[id], onchange: (e) => { A.desktop[id] = e.target.checked; } }),
+          el('div', {}, el('label', { for: 'd-' + id, class: 'flat', text: name }), el('span', { text: detail })))),
+        S.screens.length > 1 ? [el('label', { text: `You have ${S.screens.length} screens. Which one is Astra's?` }),
+          el('div', { class: 'cards' }, S.screens.map((s) => el('button', { type: 'button', class: 'card', 'aria-pressed': String(A.monitor === s.name), onclick: () => { A.monitor = s.name; render(); } },
+            el('b', { text: s.name }), el('small', { text: `${s.width} × ${s.height}${s.focused ? ' · this one' : ''}` })))),
+          el('p', { class: 'hint', text: 'Apps you open go to the other screen.' })] : null,
+      ];
+    },
+    done: () => {
+      if (T.finished && T.finished.ok) return [
+        el('h1', { text: `Hi ${A.name.trim() || 'there'}, Astra is ready.` }),
+        el('ul', {}, T.finished.did.map((d) => el('li', { text: d }))),
+        el('p', { class: 'lead', text: 'Try “what’s in Downloads?”, “anything from Sara this week?” or “remind me at 4 to call Ana”. Super+Shift+H, or the AI button in the top bar, always brings Astra back. Change any answer later with astra settings.' }),
+      ];
+      return [
+        el('h1', { text: editing ? 'Save your changes' : 'Ready to start Astra' }),
+        el('ul', {},
+          el('li', { text: `Astra calls you ${A.name.trim()} (${A.timezone}).` }),
+          el('li', { text: `AI: ${(S.presets.find((p) => p.id === A.ai.provider) || { label: 'your provider' }).label}, ${A.ai.model}${A.local ? `, and ${A.local} on this computer` : ''}.` }),
+          el('li', { text: `Mail: ${A.mail.address}.` }),
+          el('li', { text: `Folders: ${A.folders.join(', ')}.` })),
+        T.finished && !T.finished.ok ? result(T.finished) : null,
+      ];
+    },
+  };
+
+  function num(s) { return { host: String(s.host).trim(), port: Number.parseInt(String(s.port), 10) }; }
+
+  function render() {
+    rail();
+    $('#main').replaceChildren(...views[STEPS[step][0]]().flat(2).filter(Boolean));
+    const last = step === STEPS.length - 1;
+    $('#back').hidden = step === 0 || (last && T.finished && T.finished.ok);
+    const next = $('#next');
+    next.disabled = false;
+    if (!last) { next.textContent = STEPS[step][0] === 'calendar' ? 'Skip for now' : 'Next'; next.onclick = () => go(step + 1); return; }
+    if (T.finished && T.finished.ok) { next.textContent = 'Open Astra'; next.onclick = async () => { next.disabled = true; await call('open', {}); next.textContent = 'Opening…'; }; return; }
+    next.textContent = editing ? 'Save' : 'Start Astra';
+    next.onclick = async () => {
+      next.disabled = true; next.textContent = 'Setting up…';
+      const body = { ...A, ai: { provider: A.ai.provider, model: A.ai.model, key: A.ai.key, ...(A.ai.provider === 'other' ? { baseUrl: A.ai.baseUrl } : {}) },
+        mail: { address: A.mail.address, password: A.mail.password, ...(T.mailProvider === null ? { imap: num(A.mail.imap), smtp: num(A.mail.smtp) } : {}) } };
+      T.finished = await call('finish', body);
+      if (T.finished.ok) { A.ai.key = ''; A.mail.password = ''; }
+      else if (T.finished.step) { const i = STEPS.findIndex(([id]) => id === T.finished.step); if (i >= 0) { step = i; $('#err').textContent = T.finished.message; } }
+      render();
+    };
+  }
+  $('#back').onclick = () => go(Math.max(0, step - 1));
+
+  (async () => {
+    S = await call('state');
+    const e = S.existing;
+    editing = !!e;
+    A.name = e ? e.name : S.name; A.timezone = e ? e.timezone : S.timezone;
+    const def = S.presets[0] || { id: 'other', defaultModel: '' };
+    A.ai = e ? { provider: e.ai.provider, baseUrl: e.ai.baseUrl || '', model: e.ai.model, key: '' } : { provider: def.id, baseUrl: '', model: def.defaultModel, key: '' };
+    A.local = e ? e.local : null;
+    if (e) { A.mail.address = e.mail.address; A.mail.imap = e.mail.imap; A.mail.smtp = e.mail.smtp; }
+    const offered = S.folders.map((f) => f.path);
+    A.folders = e ? [...e.folders] : offered.filter((f) => ['~/Documents', '~/Downloads', '~/Pictures', '~/Music', '~/Videos'].includes(f));
+    if (e) for (const f of e.folders) if (!offered.includes(f)) S.folders.push({ path: f });
+    if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; }
+    if (!A.monitor && S.screens.length > 1) A.monitor = (S.screens.find((s) => s.focused) || S.screens[0]).name;
+    if (e) { seen = STEPS.length - 1; T.mailProvider = undefined; }
+    render();
+    if (A.mail.address) { const r = await call('mail-servers', { address: A.mail.address }); T.mailProvider = r.provider === undefined ? null : r.provider; render(); }
+  })();
+})();
+</script>
+</body>
+</html>

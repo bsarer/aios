@@ -8,7 +8,7 @@ A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claud
 
 ## Install, upgrade and restore
 
-AI OS is becoming **Astra** (R1, in review): the same program as an Arch package with an `astra`
+AI OS is becoming **Astra**: the same program as an Arch package with an `astra`
 command. An existing AI OS install (only `~/.config/aios`) keeps its names, service and port 7777;
 a new install is Astra, in `~/.config/astra` and `~/.local/share/astra`, on port 7780.
 
@@ -18,8 +18,14 @@ a new install is Astra, in `~/.config/astra` and `~/.local/share/astra`, on port
 git clone https://github.com/bsarer/aios.git && cd aios
 packaging/arch/build.sh                         # makes packaging/arch/out/astra-<version>-1-<arch>.pkg.tar.zst
 sudo pacman -U packaging/arch/out/astra-*.pkg.tar.zst
-astra setup                                     # asks its questions, keeps keys in the keyring, then offers the service and kiosk
+astra                                           # the first time, opens setup in a window
 ```
+
+Setup asks only what it can't find out: your name, an AI key (tested before you go on), your
+email and its password (Gmail and Google Workspace need no servers; make an app password at
+myaccount.google.com/apppasswords), the folders Astra may use and the desktop parts it may
+change. `astra settings` opens the same window to change any answer; an empty key field keeps
+the stored key. `astra setup --terminal` asks the same questions in the terminal.
 
 The package only puts the program in `/usr/lib/astra`, `/usr/bin/astra` and a launcher entry;
 nothing in your home folder changes until `astra setup`. Tagged releases also carry the package

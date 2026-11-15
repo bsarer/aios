@@ -103,6 +103,17 @@ export const ALPHA_TOOLS = [
       "The knowledge base about the user: notes on people, work, commitments, upcoming events, interests and recent activity, written in the background from their mail, calendar, files and chat. Notes from outside text, not confirmed facts.",
     input: z.strictObject({}),
   }),
+  // ── Contacts (C3) ──
+  def({
+    name: 'contacts_find',
+    tier: 'read',
+    description:
+      "Look people up in the user's Google Contacts by name, address, phone number or company: their email addresses and phone numbers. Use it to find the address for \"email Sam\" or to answer \"what's Sara's number?\". Read only.",
+    input: z.strictObject({
+      query: z.string().min(1).max(100).describe('A name or the start of one, e.g. "Sam", or an address, number or company'),
+      limit: z.int().min(1).max(10).optional(),
+    }),
+  }),
   // ── Calendar (C1) ──
   def({
     name: 'calendar_list',

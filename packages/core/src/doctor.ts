@@ -160,7 +160,7 @@ export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
   }
   // SG1: Signal, once it is turned on.
   if (config?.signal.enabled) {
-    if (!(await onPath(p, config.signal.command))) add({ name: 'Signal', status: 'warn', detail: `${config.signal.command} not found, so Signal is off`, fix: "install Astra's Signal add-on (`sudo pacman -S signal-cli`)" });
+    if (!(await onPath(p, config.signal.command))) add({ name: 'Signal', status: 'warn', detail: `${config.signal.command} not found, so Signal is off`, fix: "install the Signal add-on: `astra addons --signal`" });
     else if (!config.signal.account) add({ name: 'Signal', status: 'warn', detail: 'no phone linked yet', fix: 'link it in the Signal step of `astra settings`' });
     else add({ name: 'Signal', status: 'ok', detail: `linked, ${config.signal.command} found` });
   }

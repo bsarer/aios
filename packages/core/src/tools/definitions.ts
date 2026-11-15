@@ -340,6 +340,26 @@ export const ALPHA_TOOLS = [
       })
       .refine((a) => (a.path === undefined) !== (a.url === undefined), 'give either path or url, not both'),
   }),
+  // ── Links and web searches (T8) ──
+  def({
+    name: 'web_open',
+    tier: 'device',
+    description:
+      'Open a link or a web search in a new Chromium window, away from the chat; the screen goes to it. Give `url` for a link or a site (the user\'s own, or a site\'s well-known address), or `search` for words to search the web for. Nothing from the page comes back.',
+    input: z
+      .strictObject({
+        url: z.string().min(1).max(2000).optional().describe('e.g. "https://www.bbc.com/news" or "github.com"'),
+        search: z.string().min(1).max(300).optional().describe('e.g. "weather in Istanbul tomorrow"'),
+      })
+      .refine((a) => (a.url === undefined) !== (a.search === undefined), 'give either url or search, not both'),
+  }),
+  def({
+    name: 'web_read',
+    tier: 'read',
+    description:
+      "Read the text of one web page, to summarize it or answer about it. Give the link from the user's own message, or of a page opened with web_open. Pages that need a sign-in or JavaScript can't be read. The text comes back inside <untrusted> tags.",
+    input: z.strictObject({ url: z.string().min(1).max(2000).describe('e.g. "https://www.bbc.com/news/articles/…"') }),
+  }),
   // ── Music (MU1) ──
   def({
     name: 'music_now',

@@ -154,17 +154,22 @@ async function serve(over: Partial<SetupDeps> = {}) {
   const written: AiosConfig[] = [];
   const seen: { ai: string[]; mail: string[] } = { ai: [], mail: [] };
   let done = 0;
+  const addonCalls: string[][] = [];
   const deps: SetupDeps = {
     page: async () => '<script nonce="{{NONCE}}"></script>',
     presets,
     readConfig: async () => written.at(-1) ?? null,
     writeConfig: async (c) => void written.push(c),
     keyring: { set: async (r, v) => void stored.set(r, v), get: async (r) => (stored.has(r) ? { reveal: () => stored.get(r)! } : null) },
-    look: async () => ({ name: 'Baris', timezone: 'Europe/Istanbul', folders: [{ path: '~/Documents' }], apps: { ...all, whisper: null }, ollama: [], screens: [] }),
+    look: async () => ({ name: 'Baris', timezone: 'Europe/Istanbul', folders: [{ path: '~/Documents' }], apps: { ...all, whisper: null }, ollama: [], screens: [], addons: [{ id: 'voice', label: 'Speak to Astra', blurb: 'b', installed: false }] }),
     mx: async () => [],
     checkAi: async (o) => (seen.ai.push(o.key), { ok: o.key === KEY, message: 'm' }),
     checkMail: async (o) => (seen.mail.push(o.password), { ok: true, message: 'm' }),
     installDesktop: async () => ['installed'],
+    installAddons: async (ids) => {
+      addonCalls.push(ids);
+      return 'xdg-terminal-exec';
+    },
     done: () => void done++,
     ...over,
   };
@@ -184,7 +189,7 @@ async function serve(over: Partial<SetupDeps> = {}) {
       req.on('error', reject);
       req.end(data);
     });
-  return { s, send, stored, written, seen, done: () => done };
+  return { s, send, stored, written, seen, addonCalls, done: () => done };
 }
 
 describe('R2 setup server: only its own page can drive it', () => {
@@ -242,6 +247,22 @@ describe('R2 setup server: only its own page can drive it', () => {
       const bad = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), name: '', ai: { provider: 'openrouter', model: 'm', key: 'sk-leak-me' } } });
       expect(bad.status).toBe(400);
       expect(bad.body).not.toContain('sk-leak-me');
+    } finally {
+      await t.s.close();
+    }
+  });
+});
+
+describe('Add-ons from the setup window', () => {
+  it('opens the add-ons terminal only for known add-ons', async () => {
+    const t = await serve();
+    try {
+      const ok = JSON.parse((await t.send('/s/tok/api/addons', { method: 'POST', body: { ids: ['voice', 'video', 'voice'] } })).body);
+      expect(ok).toMatchObject({ ok: true, message: expect.stringContaining('password') });
+      expect(t.addonCalls).toEqual([['voice', 'video']]);
+      for (const ids of [['rm -rf ~'], [], ['voice', '--evil']]) expect((await t.send('/s/tok/api/addons', { method: 'POST', body: { ids } })).status).toBe(400);
+      expect(t.addonCalls).toHaveLength(1);
+      expect(JSON.parse((await t.send('/s/tok/api/state')).body).addons).toEqual([{ id: 'voice', label: 'Speak to Astra', blurb: 'b', installed: false }]);
     } finally {
       await t.s.close();
     }

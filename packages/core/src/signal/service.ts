@@ -124,7 +124,7 @@ export class SignalService {
       s === 'running'
         ? 'Signal is connected.'
         : s === 'missing'
-          ? `Signal is set up, but ${this.o.command} isn't installed. Install the package's Signal add-on: sudo pacman -S signal-cli`
+          ? `Signal is set up, but ${this.o.command} isn't installed. Install the Signal add-on: astra addons --signal`
           : s === 'starting'
             ? 'Signal is starting…'
             : `Signal isn't connected right now${this.rpc.detail ? ` (${this.rpc.detail})` : ''}. I'll keep trying.`;

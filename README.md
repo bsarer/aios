@@ -32,6 +32,8 @@ nothing in your home folder changes until `astra setup`. Tagged releases also ca
 (CI builds it on every `v*` tag). After a `nodejs` major update, reinstall the package so its
 database module matches.
 
+**Add-ons:** setup's Add-ons step installs what features need, or run `astra addons` to see them and `astra addons --voice --video --music --local` to install (one password). Voice builds whisper.cpp for you and runs it on this computer only.
+
 **Update:** type `/update` in the chat and press Update, or run `astra update` (`--check` only looks). It pulls the checkout the package was built in, builds, installs (sudo asks for your password) and restarts Astra; your settings, keys and data stay. **Stop:** `astra stop` closes the chat and stops Astra until you open it from the app menu, run `astra`, or log in again.
 
 **From source** (for development): `./install.sh --check`, then `./install.sh`, which installs
@@ -217,6 +219,16 @@ Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it
 
 Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
 
+## Links and web searches
+
+"Open bbc.com", "go to github.com" or "search the web for cheap flights to Ankara" opens a new Chromium window, on another screen or the next workspace like any app, and the screen goes with it. Chromium comes with the Astra package. Links must be `http://` or `https://` (a site's name alone gets `https://`); nothing on this computer (`localhost`, `127.x`) and no user names or passwords in links. Opening a page sends nothing from it back to the chat. A link or search that comes from an email, invite or document never opens by itself: a card names the site and asks you first.
+
+Summaries: "summarize https://www.bbc.com/news/…" or, after opening a page, "summarize that page" reads it. Astra fetches the page itself, not through your browser, so pages behind a sign-in can't be read, and it can't see tabs you opened yourself: send their link. It reads only a link from your own message (or a page it opened for you), never one an email, document or page gives. It reads only public sites, never this computer or your local network, at most 2 MB of each. Page text is outside text like an email: while it is in view, changes wait for a click on a card.
+
+`/web bbc.com` opens a link and `/web cheap flights to Ankara` searches, without asking the model.
+
+Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `search` (default `"https://www.google.com/search?q=%s"`; any https address with `%s` where the words go, such as `"https://duckduckgo.com/?q=%s"`), `read` (default true; false turns summaries off), `maxBytes` (default 2000000), `maxChars` (default 16000, the most of a page's text the AI gets).
+
 ## Music
 
 "Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which Omarchy installs. `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
@@ -227,7 +239,7 @@ Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%
 
 "Any Signal messages?", "what did Sam say on Signal?" and "tell Sam I'm running late on Signal" work once Astra is linked to your phone, the way Signal Desktop is: your phone stays the main device, and you can unlink Astra from it at any time (Signal → Settings → Linked devices). Link it in the **Signal** step of `astra setup` (or `astra settings`): press **Link your phone** and scan the QR code with Signal on your phone.
 
-Astra talks to Signal through [signal-cli](https://github.com/AsamK/signal-cli), which comes as the package's Signal add-on (`signal-cli`, an optional dependency; it brings its own Java runtime). Astra keeps the messages that arrive while it runs for `keepDays` on this computer and puts a line in the chat (and a desktop notification) when one arrives, held in quiet hours and while paused. A reply is a card with **Send** and **Discard**: nothing goes out until you press Send, and the card warns when you didn't name the person or a message or email was in view. Names and messages are outside text (anyone can message you or call themselves anything), so they reach the model only inside `<untrusted>` tags and count like an email: while one is in view, Astra can't change settings, write memory or send anything. `/signal` says whether Signal is connected and how many messages are unread.
+Astra talks to Signal through [signal-cli](https://github.com/AsamK/signal-cli), which comes as Astra's Signal add-on (setup's Add-ons step, or `astra addons --signal`; it brings its own Java runtime). Astra keeps the messages that arrive while it runs for `keepDays` on this computer and puts a line in the chat (and a desktop notification) when one arrives, held in quiet hours and while paused. A reply is a card with **Send** and **Discard**: nothing goes out until you press Send, and the card warns when you didn't name the person or a message or email was in view. Names and messages are outside text (anyone can message you or call themselves anything), so they reach the model only inside `<untrusted>` tags and count like an email: while one is in view, Astra can't change settings, write memory or send anything. `/signal` says whether Signal is connected and how many messages are unread.
 
 Settings: `[signal]` `enabled` and `account` (set by setup when you link), `command` (default `signal-cli`), `notify` (default true), `keepDays` (default 30). Attachments, reactions, calls and stories aren't shown yet.
 
@@ -370,7 +382,7 @@ evals             model bake-off: tasks, runner, report
 
 ## Dependencies added in SG1
 
-`qrcode-generator` 2.0.4 (MIT, by Kazuhiko Arase, no dependencies, last release 2025-08) draws the QR code the setup window shows for linking Signal; it runs only in the setup scripts. signal-cli itself is a separate program (GPL-3.0, actively maintained by AsamK; v0.14.9 needs Java 25), started by Astra without a shell and reached over its JSON-RPC mode on stdin and stdout; checked against signal-cli's man pages and wiki on 2026-11-15. It ships as the Arch package's optional `signal-cli` dependency.
+`qrcode-generator` 2.0.4 (MIT, by Kazuhiko Arase, no dependencies, last release 2025-08) draws the QR code the setup window shows for linking Signal; it runs only in the setup scripts. signal-cli itself is a separate program (GPL-3.0, actively maintained by AsamK; v0.14.9 needs Java 25), started by Astra without a shell and reached over its JSON-RPC mode on stdin and stdout; checked against signal-cli's man pages and wiki on 2026-11-15. It ships as Astra's Signal add-on (`scripts/addons.json`, `astra addons --signal`) and the Arch package's optdepends.
 
 ## Dependencies added in R1
 

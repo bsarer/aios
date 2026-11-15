@@ -100,7 +100,7 @@ export class SignalLinker {
   /** Starts linking (again). Only one link runs at a time. */
   async start(): Promise<LinkState> {
     const command = this.command();
-    if (!command) return (this.current = { state: 'failed', message: "signal-cli isn't installed. Install Astra's Signal add-on (the signal-cli package), then open this step again." });
+    if (!command) return (this.current = { state: 'failed', message: "signal-cli isn't installed. Install the Signal add-on (Add-ons step, or astra addons --signal), then open this step again." });
     this.cancel();
     const before = numbersIn(await this.runner.listAccounts(command));
     let printed = '';

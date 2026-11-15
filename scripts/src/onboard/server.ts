@@ -24,6 +24,7 @@ import {
 } from './answers.js';
 import type { CheckResult } from './checks.js';
 import type { LinkState } from './signal.js';
+import { ADDON_IDS, type AddonId } from '../addons.js';
 
 export interface SetupDeps {
   page: () => Promise<string>;
@@ -38,7 +39,10 @@ export interface SetupDeps {
     apps: FoundApps & { whisper: string | null; signal?: string | null };
     ollama: string[];
     screens: { name: string; width: number; height: number; focused: boolean }[];
+    addons: { id: AddonId; label: string; blurb: string; installed: boolean }[];
   }>;
+  /** Opens a terminal running astra addons for these; returns the terminal's name. */
+  installAddons: (ids: AddonId[]) => Promise<string>;
   mx: (address: string) => Promise<string[]>;
   checkAi: (o: { preset: ProviderPreset | undefined; baseUrl: string; model: string; key: string }) => Promise<CheckResult>;
   checkMail: (o: { address: string; password: string; servers: MailServers }) => Promise<CheckResult>;
@@ -55,6 +59,7 @@ const ServerInput = z.strictObject({ host: z.string().trim().min(1).max(253).reg
 const TestAi = z.strictObject({ provider: z.string().min(1).max(40), baseUrl: z.url({ protocol: /^https$/ }).optional(), model: z.string().trim().min(1).max(200), key: z.string().trim().max(500) });
 const TestMail = z.strictObject({ address: z.email(), password: z.string().max(500), imap: ServerInput.optional(), smtp: ServerInput.optional() });
 const Address = z.strictObject({ address: z.email() });
+const Addons = z.strictObject({ ids: z.array(z.enum(ADDON_IDS)).min(1).max(ADDON_IDS.length) });
 
 export interface SetupServer {
   url: string;
@@ -108,6 +113,15 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
     'POST signal-cancel': async () => {
       deps.signal?.cancel();
       return { ok: true };
+    },
+    'POST addons': async (body) => {
+      const { ids } = Addons.parse(body);
+      try {
+        const term = await deps.installAddons([...new Set(ids)]);
+        return { ok: true, message: `A terminal opened (${term}). Type your password there when it asks. When it says Done, press Check again.` };
+      } catch (err) {
+        return { ok: false, message: `Couldn’t open a terminal: ${(err as Error).message}` };
+      }
     },
     'POST finish': async (body) => {
       const answers = SetupAnswers.parse(body);

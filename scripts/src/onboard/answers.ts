@@ -5,7 +5,7 @@
  * the nightly job use the chat's model and key, and every section setup doesn't show is kept
  * from the existing config. Pure, so it is unit-tested (scripts/test/onboard.test.ts).
  */
-import { AiosConfig, DEFAULT_PORT, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig } from '@aios/shared';
+import { AiosConfig, DEFAULT_PORT, EmbeddingsConfig, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
@@ -124,6 +124,8 @@ export interface FoundApps {
   speech?: boolean;
   /** SG1: signal-cli, from the Signal add-on. */
   signal?: string | null;
+  /** An Ollama embedding model, for finding files by meaning (F3). */
+  embed?: string | null;
 }
 
 export interface BuiltSetup {
@@ -158,7 +160,8 @@ export function buildConfig(
     apiKeyRef: CHAT_KEY_REF,
   });
   const models: AiosConfig['models'] = {
-    ...(existing?.models.embeddings ? { embeddings: existing.models.embeddings } : {}),
+    // F3: kept when set; turned on with the local model when Ollama has an embedding model.
+    ...(existing?.models.embeddings ? { embeddings: existing.models.embeddings } : a.local && found.embed ? { embeddings: EmbeddingsConfig.parse({ model: found.embed }) } : {}),
     // Voice: kept when it was set up by hand, turned on with defaults when the server is running.
     ...(a.apps.voice && (existing?.models.speech || found.speech) ? { speech: existing?.models.speech ?? SpeechConfig.parse({}) } : {}),
     chat,

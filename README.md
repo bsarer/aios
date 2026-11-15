@@ -219,7 +219,7 @@ Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links
 
 ## Music
 
-"Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which Omarchy installs. `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
+"Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which the Astra package installs (from source: `sudo pacman -S playerctl`; `astra doctor` says when it is missing). `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
 
 Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
 

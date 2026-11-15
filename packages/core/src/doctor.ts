@@ -151,6 +151,7 @@ export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
   }
 
   // Optional programs, only for what the config turns on.
+  if (config?.music.enabled && !(await onPath(p, 'playerctl'))) add({ name: 'Music', status: 'warn', detail: "playerctl is not installed, so the chat can't pause or skip music", fix: 'install it (`sudo pacman -S playerctl`), or set [music] enabled = false' });
   if (config?.builder.enabled && !(await onPath(p, config.builder.command))) add({ name: 'Claude Code', status: 'warn', detail: `${config.builder.command} not found, so apps can't be built`, fix: 'install Claude Code and run `claude` once to sign in, or set [builder] enabled = false' });
   if (config?.docs.enabled) {
     const clis = [config.docs.wordCli, config.docs.sheetCli];

@@ -48,7 +48,7 @@ export async function collectSetup(p: Prompter, existing: AiosConfig | null, pro
   const timezone = await p.ask('Timezone', { default: existing?.user.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
 
   // Mail
-  const useTestStack = await p.confirm('Use the local GreenMail test mailbox (docker compose)?', existing ? existing.mail.imap.host === TEST_MAILBOX.host : true);
+  const useTestStack = await p.confirm('Use the local GreenMail test mailbox (docker compose)?', existing ? existing.mail.imap.host === TEST_MAILBOX.host : process.env.ASTRA_PACKAGED !== '1');
   let mail: AiosConfig['mail'];
   if (useTestStack) {
     mail = {

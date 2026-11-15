@@ -1,13 +1,38 @@
 {
-  "_note": "Suggestions shown by `pnpm run setup`. Verify URLs and fields against each provider's current docs. OpenRouter fields checked against openrouter.ai/docs on 2026-10-19.",
+  "_note": "Presets for setup (`astra setup`). Verify URLs and fields against each provider's current docs. OpenRouter fields checked against openrouter.ai/docs on 2026-10-19. defaultModel is what the setup window suggests (the A1 bake-off's pick for OpenRouter); the user can change it.",
   "openrouter": {
+    "label": "OpenRouter",
+    "blurb": "Many models with one key. Good default.",
+    "keyUrl": "https://openrouter.ai/settings/keys",
+    "defaultModel": "anthropic/claude-haiku-5.5",
     "baseUrl": "https://openrouter.ai/api/v1",
     "extraBody": {
-      "provider": { "data_collection": "deny", "require_parameters": true },
-      "usage": { "include": true }
+      "provider": {
+        "data_collection": "deny",
+        "require_parameters": true
+      },
+      "usage": {
+        "include": true
+      }
     },
-    "extraHeaders": { "X-Title": "AI OS" }
+    "extraHeaders": {
+      "X-Title": "Astra"
+    }
   },
-  "cerebras": { "baseUrl": "https://api.cerebras.ai/v1", "extraBody": {}, "extraHeaders": {} },
-  "groq": { "baseUrl": "https://api.groq.com/openai/v1", "extraBody": {}, "extraHeaders": {} }
+  "cerebras": {
+    "label": "Cerebras",
+    "blurb": "Very fast open models.",
+    "keyUrl": "https://cloud.cerebras.ai",
+    "baseUrl": "https://api.cerebras.ai/v1",
+    "extraBody": {},
+    "extraHeaders": {}
+  },
+  "groq": {
+    "label": "Groq",
+    "blurb": "Very fast open models.",
+    "keyUrl": "https://console.groq.com/keys",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "extraBody": {},
+    "extraHeaders": {}
+  }
 }

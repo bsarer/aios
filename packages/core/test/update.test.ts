@@ -56,12 +56,18 @@ describe('U1 updates', () => {
   it('opens a terminal running astra update in its own unit, with fixed words only', async () => {
     const started: [string, string[]][] = [];
     const start = async (cmd: string, args: string[]) => void started.push([cmd, args]);
-    expect(await openUpdateTerminal({}, start, async (c) => ['xdg-terminal-exec', 'uwsm-app'].includes(c))).toBe('xdg-terminal-exec');
-    expect(started[0]![0]).toBe('uwsm-app');
-    expect(started[0]![1].slice(0, 4)).toEqual(['--', 'xdg-terminal-exec', 'bash', '-c']);
-    expect(started[0]![1][4]).toMatch(new RegExp(`^${UPDATE_COMMAND.join(' ')}; `));
+    expect(await openUpdateTerminal({ WAYLAND_DISPLAY: 'wayland-1', DISPLAY: ':0; rm -rf ~' }, start, async (c) => ['xdg-terminal-exec', 'uwsm-app'].includes(c))).toBe('xdg-terminal-exec');
+    expect(started[0]![1]).toContain('WAYLAND_DISPLAY=wayland-1');
+    expect(started[0]![1].join(' ')).not.toContain('rm -rf');
+    // Never uwsm-app: its scope would keep this service's NoNewPrivileges, and sudo would refuse without asking.
+    expect(started[0]![0]).toBe('systemd-run');
+    expect(started[0]![1].slice(0, 3)).toEqual(['--user', '--collect', '--quiet']);
+    expect(started[0]![1]).not.toContain('--scope');
+    const inner = started[0]![1].slice(started[0]![1].indexOf('--') + 1);
+    expect(inner.slice(0, 3)).toEqual(['xdg-terminal-exec', 'bash', '-c']);
+    expect(inner[3]).toMatch(new RegExp(`^${UPDATE_COMMAND.join(' ')}; `));
     await openUpdateTerminal({}, start, async (c) => c === 'alacritty');
-    expect(started[1]).toEqual(['systemd-run', ['--user', '--collect', '--quiet', '--', 'alacritty', '-e', 'bash', '-c', expect.stringContaining('/usr/bin/astra update')]]);
+    expect(started[1]![1].slice(started[1]![1].indexOf('--') + 1)).toEqual(['alacritty', '-e', 'bash', '-c', expect.stringContaining('/usr/bin/astra update')]);
     await expect(openUpdateTerminal({}, start, async () => false)).rejects.toThrow(/no terminal/);
   });
 });

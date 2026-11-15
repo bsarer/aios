@@ -1,7 +1,7 @@
 /** U1: `astra update` runs its steps in order, stops at the first that fails, and --check changes nothing. Pretend commands only. */
 import { describe, expect, it } from 'vitest';
 import type { UpdateCheck } from '@aios/core';
-import { type UpdateSteps, update } from '../src/update.js';
+import { type UpdateSteps, noNewPrivileges, update } from '../src/update.js';
 
 const available: UpdateCheck = { state: 'available', from: 'a'.repeat(40), to: 'b'.repeat(40), branch: 'origin/main', behind: 2, changes: ['Setup in a window', 'Voice'] };
 
@@ -54,5 +54,11 @@ describe('astra update', () => {
       expect(t.ran.some((l) => l.startsWith('systemctl'))).toBe(false);
       if (fail !== 'pacman') expect(t.ran.some((l) => l.startsWith('sudo'))).toBe(false);
     }
+  });
+
+  it('notices a terminal where sudo can’t ask for the password', () => {
+    expect(noNewPrivileges('Name:\tnode\nNoNewPrivs:\t1\nSeccomp:\t0\n')).toBe(true);
+    expect(noNewPrivileges('Name:\tnode\nNoNewPrivs:\t0\n')).toBe(false);
+    expect(noNewPrivileges('')).toBe(false);
   });
 });

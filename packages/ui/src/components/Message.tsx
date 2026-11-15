@@ -1,4 +1,4 @@
-import type { ChatItem, MailRow } from '@aios/shared/protocol';
+import type { ChatItem } from '@aios/shared/protocol';
 import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import { AttachmentViewer } from './AttachmentViewer';
@@ -41,6 +41,8 @@ export interface MessageActions {
   /** Sends a chat message as if typed; only ever with text the UI wrote, never mail content. */
   onSend: (text: string) => void;
   onIgnoreMail: (itemId: string, mailId: string) => void;
+  /** Opens the side rail's inbox panel. */
+  onOpenInbox: () => void;
   /** Send echoes the hash of what the card shows; the server sends only that. */
   onDraftSend: (id: string, hash: string) => void;
   onDraftDiscard: (id: string) => void;
@@ -893,44 +895,20 @@ function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageAct
 const URGENCY_COLOR = { high: 'var(--danger)', normal: 'var(--accent)', low: 'var(--muted)' } as const;
 
 /** Mail-derived text (from, subject, summary) is rendered as plain text, never Markdown or HTML. */
+/**
+ * New mail waits in the side rail's inbox (MailRail.tsx), not in the chat. Only mail that was held
+ * a while (away, quiet hours, the hourly limit) leaves one line here, written by code, that opens
+ * the inbox. Ordinary new mail shows nothing in the chat.
+ */
 function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: 'notification' }>; actions: MessageActions }) {
-  const rows = item.mails ?? [];
-  const main = rows.filter((r) => r.urgency !== 'low');
-  const low = rows.filter((r) => r.urgency === 'low');
-  const row = (r: MailRow) => (
-    <li key={r.id} data-testid="mail-row" data-urgency={r.urgency} className={`py-2 ${r.ignored ? 'opacity-40' : ''}`}>
-      <div className="flex items-baseline gap-2">
-        <span style={{ color: URGENCY_COLOR[r.urgency] }}>●</span>
-        <span className="font-medium">{r.from.replace(/\s*<[^>]*>$/, '')}</span>
-        <span style={{ color: 'var(--muted)' }}>· {r.subject}</span>
-      </div>
-      <div className="ml-5 text-[15px]">{r.summary}</div>
-      {!r.ignored && (
-        <div className="ml-5 mt-1 flex gap-2 text-sm">
-          <button type="button" data-testid="mail-read" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onSend(`Read email ${r.id}`)}>
-            Read
-          </button>
-          <button type="button" data-testid="mail-draft-reply" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onSend(`Draft a reply to email ${r.id}`)}>
-            Draft reply
-          </button>
-          <button type="button" data-testid="mail-ignore" className="glass rounded-lg px-2.5 py-0.5" onClick={() => actions.onIgnoreMail(item.id, r.id)}>
-            Ignore
-          </button>
-        </div>
-      )}
-    </li>
-  );
+  if (!item.catchUp) return null;
   return (
-    <div data-kind="notification" className="glass rounded-xl px-4 py-3" style={{ borderLeft: '3px solid var(--accent)' }}>
-      <div className="font-medium">{item.text}</div>
-      {main.length > 0 && <ul className="mt-1">{main.map(row)}</ul>}
-      {low.length > 0 && (
-        // Low priority mail keeps its buttons, so each one can still be read, answered or opened.
-        <div data-testid="mail-digest" className="mt-2 text-sm">
-          <div style={{ color: 'var(--muted)' }}>Low priority</div>
-          <ul>{low.map(row)}</ul>
-        </div>
-      )}
+    <div data-kind="notification" className="flex items-center gap-3 text-sm" style={{ color: 'var(--muted)' }}>
+      <span className="h-px flex-1" style={{ background: 'var(--border)' }} />
+      <button type="button" data-testid="mail-catch-up" className="glass rounded-full px-3 py-0.5" style={{ color: 'var(--fg)' }} onClick={actions.onOpenInbox}>
+        ✉ {item.text} <span style={{ color: 'var(--accent)' }}>· Open inbox</span>
+      </button>
+      <span className="h-px flex-1" style={{ background: 'var(--border)' }} />
     </div>
   );
 }

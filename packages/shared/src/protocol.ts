@@ -127,6 +127,8 @@ export const ChatItem = z.discriminatedUnion('kind', [
     text: z.string(),
     at: z.number(),
     mails: z.array(MailRow).optional(),
+    /** Mail held a while (away, quiet hours, the hourly limit): the chat shows one line for it. */
+    catchUp: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('draft'),

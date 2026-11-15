@@ -79,3 +79,10 @@ body {
   background: #fff;
 }
 @media (prefers-reduced-motion: reduce) { .orb-working { animation: none; } }
+
+/* Calm mail alerts: the urgent peek's time bar, and room for the inbox panel on a wide screen. */
+@keyframes peek-time { from { width: 0; } to { width: 100%; } }
+.inbox-open { transition: padding-right 0.25s ease; }
+@media (min-width: 1200px) {
+  .inbox-open { padding-right: 480px; }
+}

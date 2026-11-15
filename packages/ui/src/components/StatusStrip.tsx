@@ -27,7 +27,16 @@ function Pill({ children, tone = 'muted', title }: { children: React.ReactNode; 
   );
 }
 
-export function StatusStrip({ status, conn, onSettings }: { status: Status | null; conn: Connection; onSettings?: () => void }) {
+interface Props {
+  status: Status | null;
+  conn: Connection;
+  onSettings?: () => void;
+  /** New mail waiting in the side rail's inbox; shown instead of "Mail: connected". */
+  mail?: { fresh: number; urgent: number };
+  onMail?: () => void;
+}
+
+export function StatusStrip({ status, conn, onSettings, mail, onMail }: Props) {
   const now = useNow();
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const date = now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
@@ -43,7 +52,14 @@ export function StatusStrip({ status, conn, onSettings }: { status: Status | nul
       <Pill tone={agentTone} title={status?.model}>
         <span data-testid="agent-state">{agent === 'working' ? '● working' : agent === 'paused' ? '❚❚ paused' : agent === 'offline' ? '○ offline' : '○ idle'}</span>
       </Pill>
-      <Pill tone={status?.mail === 'error' ? 'danger' : 'muted'}>{MAIL[status?.mail ?? 'not_configured']}</Pill>
+      {status?.mail === 'connected' && mail && mail.fresh > 0 ? (
+        <button type="button" data-testid="mail-count" onClick={onMail} title="Open the inbox" className="whitespace-nowrap" style={{ color: mail.urgent ? 'var(--warning)' : 'var(--fg)' }}>
+          ✉ {mail.fresh}
+          {mail.urgent > 0 && ` · ${mail.urgent} urgent`}
+        </button>
+      ) : (
+        <Pill tone={status?.mail === 'error' ? 'danger' : 'muted'}>{MAIL[status?.mail ?? 'not_configured']}</Pill>
+      )}
       <Pill tone={status?.wifi && !status.wifi.connected ? 'warning' : 'muted'}>
         {status?.wifi ? (status.wifi.connected ? `Wi-Fi ${status.wifi.ssid ?? ''}`.trim() : 'Wi-Fi off') : 'Wi-Fi –'}
       </Pill>

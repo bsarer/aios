@@ -6,6 +6,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type UpdateCheck, checkForUpdate, readBuildInfo, realGit } from '@aios/core';
@@ -71,7 +72,16 @@ export async function update(source: string, service: string, s: UpdateSteps, op
   return 0;
 }
 
+/** sudo can't work under NoNewPrivileges (a terminal started by Astra's service the wrong way). */
+export function noNewPrivileges(status: string): boolean {
+  return /^NoNewPrivs:\s*1\s*$/m.test(status);
+}
+
 async function main(argv: string[]): Promise<number> {
+  if (!argv.includes('--check') && noNewPrivileges(await readFile('/proc/self/status', 'utf8').catch(() => ''))) {
+    console.log('This terminal can’t ask for your password (it was started with "no new privileges"). Open a terminal yourself (Super+Enter) and run: astra update');
+    return 1;
+  }
   const info = readBuildInfo(ROOT);
   const paths = kioskPaths();
   const run = (cmd: string, args: string[], cwd?: string) => {

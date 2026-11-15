@@ -5,7 +5,7 @@
  * the nightly job use the chat's model and key, and every section setup doesn't show is kept
  * from the existing config. Pure, so it is unit-tested (scripts/test/onboard.test.ts).
  */
-import { AiosConfig, DEFAULT_PORT, LocalModelConfig, ModelRoleConfig, type SecretRef } from '@aios/shared';
+import { AiosConfig, DEFAULT_PORT, LocalModelConfig, ModelRoleConfig, type SecretRef, SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
@@ -101,7 +101,8 @@ export const SetupAnswers = z.strictObject({
   }),
   /** Home folders as ~/Name. */
   folders: z.array(z.string().regex(/^~\/[^/\0][^\0]{0,200}$/, 'a folder in your home folder')).min(1, 'Tick at least one folder').max(8),
-  apps: z.strictObject({ docs: z.boolean(), video: z.boolean(), builder: z.boolean() }),
+  /** voice: the chat's microphone, through a whisper.cpp server on this computer. */
+  apps: z.strictObject({ docs: z.boolean(), video: z.boolean(), builder: z.boolean(), voice: z.boolean().default(false) }),
   /** The service always runs; these are the parts of the desktop it may change. */
   desktop: z.strictObject({ autostart: z.boolean(), hyprland: z.boolean(), bar: z.boolean() }),
   /** The screen Astra keeps; empty when there is only one. */
@@ -117,6 +118,8 @@ export interface FoundApps {
   gridcraftCli: string | null;
   mpv: string | null;
   claude: string | null;
+  /** A whisper.cpp server answers on [models.speech]'s default address. */
+  speech?: boolean;
 }
 
 export interface BuiltSetup {
@@ -144,7 +147,8 @@ export function buildConfig(a: SetupAnswers, existing: AiosConfig | null, preset
   });
   const models: AiosConfig['models'] = {
     ...(existing?.models.embeddings ? { embeddings: existing.models.embeddings } : {}),
-    ...(existing?.models.speech ? { speech: existing.models.speech } : {}),
+    // Voice: kept when it was set up by hand, turned on with defaults when the server is running.
+    ...(a.apps.voice && (existing?.models.speech || found.speech) ? { speech: existing?.models.speech ?? SpeechConfig.parse({}) } : {}),
     chat,
     triage: { ...chat },
     nightly: { ...chat },
@@ -223,7 +227,7 @@ export function summarize(c: AiosConfig | null, presets: Record<string, Provider
     local: c.models.local?.model ?? null,
     mail: { address: c.mail.address, imap: { host: c.mail.imap.host, port: c.mail.imap.port }, smtp: { host: c.mail.smtp.host, port: c.mail.smtp.port } },
     folders: c.files.roots,
-    apps: { docs: c.docs.enabled, video: c.video.enabled, builder: c.builder.enabled },
+    apps: { docs: c.docs.enabled, video: c.video.enabled, builder: c.builder.enabled, voice: !!c.models.speech },
     autostart: c.ui.kiosk,
     calendar: !!c.calendar,
     monitor: c.screen.monitor,

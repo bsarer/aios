@@ -50,6 +50,7 @@ import { docTools } from './docs/tools.js';
 import { createVideoPlayer } from './video/play.js';
 import { pickVideo, videoTools } from './video/tools.js';
 import { createBrowserOpener } from './web/open.js';
+import { createPageFetcher } from './web/read.js';
 import { webTools } from './web/tools.js';
 import { createMusicPlayer, describeNowPlaying } from './music/player.js';
 import { musicTools } from './music/tools.js';
@@ -277,7 +278,8 @@ async function main(): Promise<void> {
   }
   // T8: links and web searches in Chromium. Device tier like open_app, so it shares open_app's confirm card.
   if (config.web.enabled) {
-    apps.push(...webTools({ open: createBrowserOpener(config.web.browser), window: chatWindow, search: config.web.search }));
+    const read = config.web.read ? { fetch: createPageFetcher({ maxBytes: config.web.maxBytes }), maxChars: config.web.maxChars } : undefined;
+    apps.push(...webTools({ open: createBrowserOpener(config.web.browser), window: chatWindow, search: config.web.search, ...(read ? { read } : {}) }));
   }
   // MU1: Spotify (or any MPRIS player) through playerctl. music_control is device tier, so it shares open_app's confirm card.
   const musicPlayer = config.music.enabled ? createMusicPlayer(runCommand, config.music.players) : undefined;

@@ -316,6 +316,13 @@ export const ALPHA_TOOLS = [
       })
       .refine((a) => (a.url === undefined) !== (a.search === undefined), 'give either url or search, not both'),
   }),
+  def({
+    name: 'web_read',
+    tier: 'read',
+    description:
+      "Read the text of one web page, to summarize it or answer about it. Give the link from the user's own message, or of a page opened with web_open. Pages that need a sign-in or JavaScript can't be read. The text comes back inside <untrusted> tags.",
+    input: z.strictObject({ url: z.string().min(1).max(2000).describe('e.g. "https://www.bbc.com/news/articles/…"') }),
+  }),
   // ── Music (MU1) ──
   def({
     name: 'music_now',

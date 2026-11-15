@@ -306,6 +306,11 @@ export const WebConfig = z.strictObject({
     .regex(/^https:\/\/[^\s]+$/, 'must be an https:// address')
     .refine((s) => s.split('%s').length === 2, 'must contain %s once, where the search words go')
     .default('https://www.google.com/search?q=%s'),
+  /** Let the chat read a page's text (web_read) when the user gives its link, to summarize it. */
+  read: z.boolean().default(true),
+  /** The most of a page that is read, in bytes, and the most of its text the model gets. */
+  maxBytes: z.int().min(10_000).max(10_000_000).default(2_000_000),
+  maxChars: z.int().min(1000).max(60_000).default(16_000),
 });
 export type WebConfig = z.infer<typeof WebConfig>;
 

@@ -71,7 +71,7 @@ describe('web links and searches (T8)', () => {
   });
 
   it('checks the [web] config', () => {
-    expect(WebConfig.parse({})).toEqual({ enabled: true, browser: 'chromium', search: SEARCH });
+    expect(WebConfig.parse({})).toEqual({ enabled: true, browser: 'chromium', search: SEARCH, read: true, maxBytes: 2_000_000, maxChars: 16_000 });
     expect(() => WebConfig.parse({ search: 'https://example.com/' })).toThrow();
     expect(() => WebConfig.parse({ search: 'file:///x?%s' })).toThrow();
   });

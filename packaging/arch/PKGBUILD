@@ -29,7 +29,6 @@ optdepends=(
   'yt-dlp: play YouTube and other links (astra addons --video)'
   'ollama: the local model, finding files by meaning and the system assistant (astra addons --local)'
   'cmake: build whisper.cpp for speaking to the chat (astra addons --voice)'
-  'signal-cli: reading and replying to Signal messages (astra addons --signal)'
 )
 # Built JavaScript and a native module with its own build ids; stripping only saves a little.
 options=('!strip' '!debug')

@@ -3,11 +3,14 @@
  * so nobody has to find and install pieces by hand. With no flag it lists each add-on and whether
  * it is installed. The catalog is `scripts/addons.json`: Arch packages (one `sudo pacman -S`
  * for all of them, one password), Ollama's service and models, and whisper.cpp built from its
- * release tag with its model, run as a user service on 127.0.0.1. The setup window's Add-ons step
- * opens a terminal running this.
+ * release tag with its model, run as a user service on 127.0.0.1. signal-cli isn't in Arch's
+ * repositories, so the Signal add-on downloads upstream's native build, checks its SHA-256 and
+ * unpacks the one program into Astra's data folder. The setup window's Add-ons step opens a
+ * terminal running this.
  */
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, openSync, readSync, renameSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, createReadStream, existsSync, openSync, readSync, renameSync, rmSync } from 'node:fs';
 import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -38,6 +41,13 @@ const Addon = z.strictObject({
       port: z.int().min(1024).max(65_535),
     })
     .optional(),
+  signalCli: z
+    .strictObject({
+      version: z.string().regex(/^\d+\.\d+\.\d+$/),
+      url: z.url({ protocol: /^https$/, hostname: /^github\.com$/ }),
+      sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .optional(),
 });
 export type Addon = z.infer<typeof Addon>;
 export type Catalog = Record<AddonId, Addon>;
@@ -54,6 +64,23 @@ export function readCatalog(input: unknown = raw): Catalog {
 export function whisperPaths(data = dataDir(), home = homedir()) {
   const dir = join(data, 'whisper');
   return { dir, src: join(dir, 'whisper.cpp'), server: join(dir, 'whisper-server'), models: join(dir, 'models'), unit: join(home, '.config', 'systemd', 'user', 'astra-whisper.service'), service: 'astra-whisper.service' };
+}
+
+/** Where the Signal add-on puts signal-cli (one program, upstream's native build). */
+export function signalPaths(data = dataDir()) {
+  const dir = join(data, 'signal-cli');
+  return { dir, bin: join(dir, 'signal-cli'), part: join(dir, 'signal-cli.tar.gz.part'), unpack: join(dir, 'unpack') };
+}
+
+/** The SHA-256 of a file, in hex. */
+export function sha256File(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const h = createHash('sha256');
+    createReadStream(path)
+      .on('data', (d) => h.update(d))
+      .once('error', reject)
+      .once('end', () => resolve(h.digest('hex')));
+  });
 }
 
 /** The user service that runs whisper-server on this computer only. */
@@ -82,10 +109,12 @@ export interface Step {
   cmd: string;
   args: string[];
   cwd?: string;
+  /** A folder to make before the step runs. */
+  mkdir?: string;
 }
 
 /** The commands for the chosen add-ons, in order. Pure, so it is unit-tested. */
-export function plan(ids: AddonId[], c: Catalog, w = whisperPaths(), haveSrc = false): Step[] {
+export function plan(ids: AddonId[], c: Catalog, w = whisperPaths(), haveSrc = false, sp = signalPaths()): Step[] {
   const chosen = ADDON_IDS.filter((id) => ids.includes(id));
   const steps: Step[] = [];
   const pkgs = [...new Set(chosen.flatMap((id) => c[id].packages))];
@@ -105,9 +134,11 @@ export function plan(ids: AddonId[], c: Catalog, w = whisperPaths(), haveSrc = f
       steps.push(
         { say: 'Building whisper.cpp (a few minutes)...', cmd: 'cmake', args: ['-B', 'build', '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DWHISPER_BUILD_TESTS=OFF'], cwd: w.src },
         { say: '', cmd: 'cmake', args: ['--build', 'build', '-j', '--config', 'Release', '--target', 'whisper-server'], cwd: w.src },
-        { say: `Downloading the speech model ${wh.model} (about 150 MB)...`, cmd: 'curl', args: ['-fL', '--retry', '3', '-o', join(w.models, `${wh.model}.part`), wh.modelUrl] },
+        { say: `Downloading the speech model ${wh.model} (about 150 MB)...`, cmd: 'curl', args: ['-fL', '--retry', '3', '-o', join(w.models, `${wh.model}.part`), wh.modelUrl], mkdir: w.models },
       );
     }
+    const sc = a.signalCli;
+    if (sc) steps.push({ say: `Downloading signal-cli ${sc.version} (about 120 MB)...`, cmd: 'curl', args: ['-fL', '--retry', '3', '--proto', '=https', '-o', sp.part, sc.url], mkdir: sp.dir });
   }
   return steps;
 }
@@ -117,25 +148,34 @@ export interface Runner {
   log: (line: string) => void;
   /** Steps that touch files, kept apart so the test can follow them. */
   finishVoice: (a: Addon) => Promise<string | null>;
+  /** Checks the download and puts signal-cli in place. */
+  finishSignal: (a: Addon) => Promise<string | null>;
   waitForOllama: () => boolean;
+  /** The computer's processor (process.arch); upstream builds signal-cli for x86_64 only. */
+  arch?: string;
 }
 
-export async function install(ids: AddonId[], c: Catalog, r: Runner, w = whisperPaths(), haveSrc = existsSync(join(w.src, '.git'))): Promise<number> {
+export async function install(ids: AddonId[], c: Catalog, r: Runner, w = whisperPaths(), haveSrc = existsSync(join(w.src, '.git')), sp = signalPaths()): Promise<number> {
   if (!ids.length) return 0;
-  for (const s of plan(ids, c, w, haveSrc)) {
+  if (ids.includes('signal') && (r.arch ?? process.arch) !== 'x64') {
+    r.log('The Signal add-on is only built for x86_64 computers, so it wasn’t installed.');
+    return 1;
+  }
+  for (const s of plan(ids, c, w, haveSrc, sp)) {
     if (s.say) r.log(s.say);
     if (s.cmd === 'ollama' && !r.waitForOllama()) {
       r.log('Ollama didn’t start. Check it with: systemctl status ollama');
       return 1;
     }
-    if (s.cmd === 'curl') await mkdir(w.models, { recursive: true });
+    if (s.mkdir) await mkdir(s.mkdir, { recursive: true });
     if (r.run(s.cmd, s.args, s.cwd) !== 0) {
       r.log(`That step failed (${s.cmd}). The lines above say why; run astra addons again to retry.`);
       return 1;
     }
   }
-  if (ids.includes('voice')) {
-    const err = await r.finishVoice(c.voice);
+  for (const [id, finish] of [['voice', r.finishVoice], ['signal', r.finishSignal]] as const) {
+    if (!ids.includes(id)) continue;
+    const err = await finish(c[id]);
     if (err) {
       r.log(err);
       return 1;
@@ -170,9 +210,37 @@ export function realFinishVoice(w = whisperPaths(), run: Runner['run']) {
   };
 }
 
-/** Installed when all its programs are on PATH; voice when its server and model are in place. */
-export function installed(id: AddonId, a: Addon, onPath: (bin: string) => boolean, exists: (p: string) => boolean, w = whisperPaths()): boolean {
+/**
+ * Only the archive's one program, unpacked into an empty folder of its own and moved into place,
+ * after its SHA-256 matched the catalog's. Nothing else in the archive is written.
+ */
+export function realFinishSignal(sp = signalPaths(), run: Runner['run']) {
+  return async (a: Addon): Promise<string | null> => {
+    const sc = a.signalCli!;
+    const got = await sha256File(sp.part).catch(() => '');
+    if (got !== sc.sha256) {
+      rmSync(sp.part, { force: true });
+      return 'The signal-cli download didn’t match its checksum. Nothing was changed; run astra addons --signal again.';
+    }
+    rmSync(sp.unpack, { recursive: true, force: true });
+    await mkdir(sp.unpack, { recursive: true });
+    const code = run('tar', ['-xzf', sp.part, '-C', sp.unpack, '--no-same-owner', '--no-same-permissions', 'signal-cli']);
+    rmSync(sp.part, { force: true });
+    if (code !== 0) {
+      rmSync(sp.unpack, { recursive: true, force: true });
+      return 'Couldn’t unpack signal-cli. Run astra addons --signal again.';
+    }
+    renameSync(join(sp.unpack, 'signal-cli'), sp.bin);
+    rmSync(sp.unpack, { recursive: true, force: true });
+    await chmod(sp.bin, 0o755);
+    return null;
+  };
+}
+
+/** Installed when all its programs are on PATH; voice when its server and model are in place; Signal when signal-cli is. */
+export function installed(id: AddonId, a: Addon, onPath: (bin: string) => boolean, exists: (p: string) => boolean, w = whisperPaths(), sp = signalPaths()): boolean {
   if (a.whisper) return exists(w.server) && exists(join(w.models, a.whisper.model)) && exists(w.unit);
+  if (a.signalCli) return exists(sp.bin) || onPath('signal-cli');
   return a.bins.length > 0 && a.bins.every(onPath);
 }
 
@@ -203,6 +271,7 @@ async function main(argv: string[]): Promise<number> {
     run,
     log: (l) => console.log(l),
     finishVoice: realFinishVoice(w, run),
+    finishSignal: realFinishSignal(signalPaths(), run),
     waitForOllama: () => {
       for (let i = 0; i < 20; i++) {
         if (spawnSync('ollama', ['list'], { stdio: 'ignore' }).status === 0) return true;

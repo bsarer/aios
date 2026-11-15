@@ -1,10 +1,16 @@
 /** Add-ons: the catalog is checked, the plan is one pacman call then fixed steps, and voice only runs a checked model. Pretend commands only. */
 import { describe, expect, it } from 'vitest';
-import { ADDON_IDS, install, isGgml, plan, readCatalog, whisperPaths, whisperUnit } from '../src/addons.js';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ADDON_IDS, type Catalog, install, installed, isGgml, plan, readCatalog, realFinishSignal, signalPaths, whisperPaths, whisperUnit } from '../src/addons.js';
 import raw from '../addons.json' with { type: 'json' };
 
 const c = readCatalog();
 const w = whisperPaths('/home/j/.local/share/astra', '/home/j');
+const sp = signalPaths('/home/j/.local/share/astra');
+const noop = { finishVoice: async () => null, finishSignal: async () => null, waitForOllama: () => true };
 
 describe('astra addons', () => {
   it('reads the catalog and refuses anything that could reach a shell', () => {
@@ -37,9 +43,60 @@ describe('astra addons', () => {
   it('stops at the first failing step and says how to retry', async () => {
     const ran: string[] = [];
     const log: string[] = [];
-    const code = await install(['music', 'video'], c, { run: (cmd, args) => (ran.push(`${cmd} ${args.join(' ')}`), cmd === 'sudo' ? 1 : 0), log: (l) => log.push(l), finishVoice: async () => null, waitForOllama: () => true }, w, false);
+    const code = await install(['music', 'video'], c, { run: (cmd, args) => (ran.push(`${cmd} ${args.join(' ')}`), cmd === 'sudo' ? 1 : 0), log: (l) => log.push(l), ...noop }, w, false);
     expect(code).toBe(1);
     expect(ran).toHaveLength(1);
     expect(log.at(-1)).toContain('run astra addons again');
+  });
+
+  it('gets signal-cli from upstream’s pinned release, never from pacman, since Arch doesn’t have it', () => {
+    const all = Object.values(raw).flatMap((v) => (typeof v === 'object' && v && 'packages' in v ? (v as { packages: string[] }).packages : []));
+    expect(all).not.toContain('signal-cli');
+    const steps = plan(['signal'], c, w, false, sp);
+    expect(steps.map((s) => s.cmd)).toEqual(['sudo', 'curl']);
+    expect(steps[1]!.args).toEqual(['-fL', '--retry', '3', '--proto', '=https', '-o', '/home/j/.local/share/astra/signal-cli/signal-cli.tar.gz.part', 'https://github.com/AsamK/signal-cli/releases/download/v0.14.9/signal-cli-0.14.9-Linux-native.tar.gz']);
+    expect(steps[1]!.mkdir).toBe(sp.dir);
+    expect(c.signal.signalCli!.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(() => readCatalog({ ...raw, signal: { ...raw.signal, signalCli: { ...raw.signal.signalCli, url: 'https://evil.example/signal-cli.tar.gz' } } })).toThrow();
+    expect(() => readCatalog({ ...raw, signal: { ...raw.signal, signalCli: { ...raw.signal.signalCli, sha256: 'abc' } } })).toThrow();
+    expect(installed('signal', c.signal, () => false, (p) => p === sp.bin, w, sp)).toBe(true);
+    expect(installed('signal', c.signal, (b) => b === 'signal-cli', () => false, w, sp)).toBe(true);
+    expect(installed('signal', c.signal, () => false, () => false, w, sp)).toBe(false);
+  });
+
+  it('refuses Signal on a computer upstream doesn’t build for, before downloading anything', async () => {
+    const ran: string[] = [];
+    const log: string[] = [];
+    expect(await install(['signal'], c, { run: (cmd) => (ran.push(cmd), 0), log: (l) => log.push(l), ...noop, arch: 'arm64' }, w, false, sp)).toBe(1);
+    expect(ran).toEqual([]);
+    expect(log[0]).toContain('x86_64');
+  });
+
+  it('puts signal-cli in place only when the download matches its checksum', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'astra-signal-'));
+    const p = signalPaths(dir);
+    mkdirSync(p.dir, { recursive: true });
+    const tarball = Buffer.from('pretend tarball');
+    const good: Catalog['signal'] = { ...c.signal, signalCli: { ...c.signal.signalCli!, sha256: createHash('sha256').update(tarball).digest('hex') } };
+    // A pretend tar: checks code's arguments, then writes the one program into the folder it was given.
+    const tars: string[][] = [];
+    const run = (cmd: string, args: string[]) => {
+      tars.push([cmd, ...args]);
+      writeFileSync(join(args[3]!, 'signal-cli'), '#!/bin/sh\n');
+      return 0;
+    };
+
+    writeFileSync(p.part, 'something else');
+    expect(await realFinishSignal(p, run)(good)).toMatch(/checksum/);
+    expect(tars).toEqual([]);
+    expect(existsSync(p.part)).toBe(false);
+    expect(existsSync(p.bin)).toBe(false);
+
+    writeFileSync(p.part, tarball);
+    expect(await realFinishSignal(p, run)(good)).toBeNull();
+    expect(tars).toEqual([['tar', '-xzf', p.part, '-C', p.unpack, '--no-same-owner', '--no-same-permissions', 'signal-cli']]);
+    expect(readFileSync(p.bin, 'utf8')).toBe('#!/bin/sh\n');
+    expect(statSync(p.bin).mode & 0o777).toBe(0o755);
+    expect(existsSync(p.part) || existsSync(p.unpack)).toBe(false);
   });
 });

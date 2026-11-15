@@ -209,7 +209,7 @@ Settings: the ⚙ gear at the right of the status strip, or `/settings` in the c
 
 Message history: in the message box, Up brings back what you sent before (messages and commands, newest first) and Down goes forward again, back to what you were typing. Up and Down only do this on the first and last line, so they still move the cursor within a long message. Nothing new is stored: the list is your messages in the chat plus what you sent since the page loaded.
 
-Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one. The lightbulb button in the message box does the same: type the idea and press Enter or Save idea, and it is saved through `/feedback` exactly as if you had typed it.
+Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one. The floating **Feedback** button at the bottom right does the same without a command: pick Idea, Problem or I like, type, and press Enter or Save. It is saved through `/feedback` exactly as if you had typed it (as `Idea: …`, `Problem: …` or `Like: …`), and "See what I've saved" shows the list.
 
 ## Videos
 
@@ -234,6 +234,14 @@ Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `s
 "Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which the Astra package installs (from source: `sudo pacman -S playerctl`; `astra doctor` says when it is missing). `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
 
 Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
+
+## Signal
+
+"Any Signal messages?", "what did Sam say on Signal?" and "tell Sam I'm running late on Signal" work once Astra is linked to your phone, the way Signal Desktop is: your phone stays the main device, and you can unlink Astra from it at any time (Signal → Settings → Linked devices). Link it in the **Signal** step of `astra setup` (or `astra settings`): press **Link your phone** and scan the QR code with Signal on your phone.
+
+Astra talks to Signal through [signal-cli](https://github.com/AsamK/signal-cli), which comes as Astra's Signal add-on (setup's Add-ons step, or `astra addons --signal`; it brings its own Java runtime). Astra keeps the messages that arrive while it runs for `keepDays` on this computer and puts a line in the chat (and a desktop notification) when one arrives, held in quiet hours and while paused. A reply is a card with **Send** and **Discard**: nothing goes out until you press Send, and the card warns when you didn't name the person or a message or email was in view. Names and messages are outside text (anyone can message you or call themselves anything), so they reach the model only inside `<untrusted>` tags and count like an email: while one is in view, Astra can't change settings, write memory or send anything. `/signal` says whether Signal is connected and how many messages are unread.
+
+Settings: `[signal]` `enabled` and `account` (set by setup when you link), `command` (default `signal-cli`), `notify` (default true), `keepDays` (default 30). Attachments, reactions, calls and stories aren't shown yet.
 
 ## Voice
 
@@ -371,6 +379,10 @@ fixtures/mail.ts  42 sample emails: threads, attachments, 8 hostile samples
 fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2 hostile
 evals             model bake-off: tasks, runner, report
 ```
+
+## Dependencies added in SG1
+
+`qrcode-generator` 2.0.4 (MIT, by Kazuhiko Arase, no dependencies, last release 2025-08) draws the QR code the setup window shows for linking Signal; it runs only in the setup scripts. signal-cli itself is a separate program (GPL-3.0, actively maintained by AsamK; v0.14.9 needs Java 25), started by Astra without a shell and reached over its JSON-RPC mode on stdin and stdout; checked against signal-cli's man pages and wiki on 2026-11-15. It ships as Astra's Signal add-on (`scripts/addons.json`, `astra addons --signal`) and the Arch package's optdepends.
 
 ## Dependencies added in R1
 

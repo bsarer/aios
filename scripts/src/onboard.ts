@@ -20,6 +20,7 @@ import { ADDON_IDS, type AddonId, installed, onPathIn, readCatalog } from './add
 import { accountFirstName, findApps, homeFolders, mailHosts, ollamaEmbedModels, ollamaModels, realProbes, screens } from './onboard/probe.js';
 import { openTerminal } from '@aios/core';
 import { type SetupDeps, startSetupServer } from './onboard/server.js';
+import { SignalLinker } from './onboard/signal.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..', '..');
@@ -80,6 +81,9 @@ export async function runSetupWindow(): Promise<void> {
   let resolveDone: () => void = () => undefined;
   const finished = new Promise<void>((r) => (resolveDone = r));
 
+  // SG1: signal-cli as the window's scan found it (the scan runs again each time the window loads).
+  let signalCli: string | null = null;
+  const linker = new SignalLinker(() => signalCli);
   const deps: SetupDeps = {
     page: () => readFile(join(ROOT, 'scripts', 'onboard', 'page.html'), 'utf8'),
     presets,
@@ -90,7 +94,7 @@ export async function runSetupWindow(): Promise<void> {
       name: await accountFirstName(probes),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       folders: await homeFolders(probes),
-      apps: { ...(await findApps(probes)), embed: (await ollamaEmbedModels(probes))[0] ?? null },
+      apps: { ...(await findApps(probes).then((a) => ((signalCli = a.signal), a))), embed: (await ollamaEmbedModels(probes))[0] ?? null },
       addons: ADDON_IDS.map((id) => ({ id, label: catalog[id].label, blurb: catalog[id].blurb, installed: installed(id, catalog[id], onPathIn(), existsSync) })),
       ollama: await ollamaModels(probes),
       screens: await screens(probes),
@@ -99,6 +103,7 @@ export async function runSetupWindow(): Promise<void> {
     checkAi: (o) => checkAiKey(o),
     checkMail: (o) => checkMail(o),
     installDesktop,
+    signal: linker,
     // The package's astra; a checkout runs its own through pnpm.
     installAddons: (ids: AddonId[]) => openTerminal(existsSync('/usr/bin/astra') ? ['/usr/bin/astra', 'addons', ...ids.map((i) => `--${i}`)] : ['pnpm', '-C', ROOT, 'astra', 'addons', ...ids.map((i) => `--${i}`)], 'astra-addons'),
     done: () => {
@@ -117,6 +122,7 @@ export async function runSetupWindow(): Promise<void> {
   window?.on('exit', () => resolveDone());
   await finished;
   window?.kill();
+  linker.cancel();
   await server.close();
 }
 

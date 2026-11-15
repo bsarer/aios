@@ -115,6 +115,43 @@ export const ALPHA_TOOLS = [
       limit: z.int().min(1).max(10).optional(),
     }),
   }),
+  // ── Signal (SG1) ──
+  def({
+    name: 'signal_chats',
+    tier: 'read',
+    description:
+      "The user's recent Signal chats, newest first: each chat's id, name, when the last message came and how many are unread. With query, finds chats and Signal contacts by name or number instead (use it to find who \"message Sam on Signal\" means).",
+    input: z.strictObject({
+      query: z.string().min(1).max(100).optional().describe('A name or number, e.g. "Sam"'),
+      limit: z.int().min(1).max(30).optional(),
+    }),
+  }),
+  def({
+    name: 'signal_read',
+    tier: 'read',
+    description: 'Read the latest messages in one Signal chat, oldest first. Get the chat id from signal_chats.',
+    input: z.strictObject({
+      chat: z.string().min(1).max(200).describe('Chat id from signal_chats, e.g. "+905551234567" or "g:…"'),
+      limit: z.int().min(1).max(50).optional(),
+    }),
+  }),
+  def({
+    name: 'signal_draft',
+    tier: 'draft',
+    description:
+      "Write a Signal message and show it to the user on a card with Send and Discard. Never sends: only the user's click on Send does. Give chat (an id from signal_chats) or, for someone not in signal_chats, number (the phone number the user typed, in international form like +905551234567).",
+    input: z.strictObject({
+      chat: z.string().min(1).max(200).optional(),
+      number: z.string().min(8).max(20).optional(),
+      text: z.string().min(1).max(2000),
+    }),
+  }),
+  def({
+    name: 'signal_send',
+    tier: 'write',
+    description: 'Send a Signal message card. Blocked until the user clicks Send on the card.',
+    input: z.strictObject({ id: z.string() }),
+  }),
   // ── Calendar (C1) ──
   def({
     name: 'calendar_list',

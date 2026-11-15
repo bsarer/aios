@@ -57,6 +57,7 @@
   .row.fixed { flex:none; }
   .row.fixed > * { flex:none; }
   [hidden] { display:none !important; }
+  img.qr { background:#fff; padding:8px; border-radius:8px; display:block; margin:12px 0; }
 </style>
 </head>
 <body>
@@ -92,13 +93,13 @@
 
   const STEPS = [
     ['welcome', 'Welcome'], ['ai', 'AI'], ['mail', 'Mail'], ['calendar', 'Calendar'],
-    ['folders', 'Folders'], ['addons', 'Add-ons'], ['apps', 'Apps'], ['desktop', 'Desktop'], ['done', 'Finish'],
+    ['folders', 'Folders'], ['addons', 'Add-ons'], ['signal', 'Signal'], ['apps', 'Apps'], ['desktop', 'Desktop'], ['done', 'Finish'],
   ];
   let step = 0, seen = 0, S = null, editing = false;
   const A = { name: '', timezone: '', ai: { provider: 'openrouter', baseUrl: '', model: '', key: '' }, local: null,
     mail: { address: '', password: '', imap: { host: '', port: 993 }, smtp: { host: '', port: 465 } },
-    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '' };
-  const T = { ai: null, mail: null, mailProvider: undefined, finished: null, addons: null, pick: new Set() };
+    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '', signal: { enabled: false } };
+  const T = { ai: null, mail: null, mailProvider: undefined, finished: null, addons: null, pick: new Set(), signal: null, signalPoll: null };
 
   function okToLeave() {
     const s = STEPS[step][0];
@@ -114,6 +115,7 @@
       if (editing && !A.mail.password && S.existing.mail.address.toLowerCase() === A.mail.address.toLowerCase()) return '';
       return 'Press Test sign-in first.';
     }
+    if (s === 'signal') return A.signal.enabled && !signalNumber() ? 'Link your phone first, or untick Signal.' : '';
     if (s === 'folders') return A.folders.length ? '' : 'Tick at least one folder.';
     return '';
   }
@@ -139,6 +141,23 @@
   }
   const field = (label, input, hint) => [el('label', { for: input.id, text: label }), input, hint ? el('div', { class: 'hint' }, hint) : null];
   const bind = (obj, key, attrs, after) => el('input', { ...attrs, value: obj[key] ?? '', oninput: (e) => { obj[key] = e.target.value; if (after) after(); } });
+
+  // SG1: the number linked in this window, or the one linked before.
+  function signalNumber() {
+    if (T.signal && T.signal.state === 'linked') return T.signal.number;
+    return S.existing && S.existing.signal ? S.existing.signal.account : null;
+  }
+  function pollSignal() {
+    clearTimeout(T.signalPoll);
+    T.signalPoll = setTimeout(async () => {
+      const r = await call('signal-link');
+      const was = T.signal && T.signal.state;
+      T.signal = r;
+      if (r.state === 'linked') A.signal.enabled = true;
+      if (r.state === 'waiting') pollSignal();
+      if (STEPS[step][0] === 'signal' && (r.state !== 'waiting' || was !== 'waiting')) render();
+    }, 2000);
+  }
 
   const views = {
     welcome: () => [
@@ -215,6 +234,34 @@
       el('div', { class: 'note' }, S.existing && S.existing.calendar ? 'Your Google Calendar is already connected.' : 'One-click Sign in with Google is coming next. For now, press Next and connect it after setup with: ', S.existing && S.existing.calendar ? null : el('code', { text: 'astra calendar-login' })),
       el('p', { class: 'hint', text: 'Not using Google Calendar? Astra works without one.' }),
     ],
+    signal: () => {
+      const number = signalNumber();
+      const waiting = T.signal && T.signal.state === 'waiting';
+      const linkBtn = el('button', { type: 'button', class: 'btn', id: 'signal-link', onclick: async () => {
+        linkBtn.disabled = true; linkBtn.textContent = 'Getting a code…';
+        T.signal = await call('signal-link', {});
+        if (T.signal.state === 'waiting') pollSignal();
+        if (T.signal.state === 'linked') A.signal.enabled = true;
+        render();
+      } }, number ? 'Link again' : 'Link your phone');
+      return [
+        el('h1', { text: 'Connect Signal' }),
+        el('p', { class: 'lead', text: 'Astra can read your Signal messages, tell you when one arrives and write replies. A reply goes out only when you press Send on it.' }),
+        !S.apps.signal ? el('div', { class: 'note' }, 'Signal needs Astra’s Signal add-on. Go Back to Add-ons, tick Signal and install it, then come back here.') : null,
+        S.apps.signal && number && !waiting ? el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'signal-on', checked: A.signal.enabled, onchange: (e) => { A.signal.enabled = e.target.checked; } }),
+          el('div', {}, el('label', { for: 'signal-on', class: 'flat' }, 'Signal', el('span', { class: 'badge', text: 'Linked' })), el('span', { text: 'Linked to ' + number + ' as the device “Astra”. Your messages stay on this computer.' }))) : null,
+        S.apps.signal && waiting ? [
+          el('div', { class: 'note' }, el('b', { text: 'On your phone: ' }), 'open Signal, go to Settings → Linked devices → Link new device, and scan this code.'),
+          el('img', { src: T.signal.qr, alt: 'QR code to link Signal', width: 260, height: 260, class: 'qr' }),
+          el('p', { class: 'hint', text: 'Waiting for your phone… The code works for a few minutes.' }),
+        ] : null,
+        S.apps.signal && !waiting ? el('div', { class: 'gap' }, linkBtn) : null,
+        T.signal && T.signal.state === 'failed' ? result({ ok: false, message: T.signal.message }) : null,
+        T.signal && T.signal.state === 'linked' ? result({ ok: true, message: 'Linked to ' + T.signal.number + '.' }) : null,
+        el('p', { class: 'hint', text: 'Astra is linked like Signal Desktop: your phone stays the main device, and you can unlink Astra there at any time.' }),
+      ];
+    },
     folders: () => [
       el('h1', { text: 'Which folders can Astra use?' }),
       el('p', { class: 'lead', text: 'Astra can find, open, copy and rename files only in the folders you tick. It never deletes or replaces a file.' }),
@@ -304,7 +351,8 @@
           el('li', { text: `Astra calls you ${A.name.trim()} (${A.timezone}).` }),
           el('li', { text: `AI: ${(S.presets.find((p) => p.id === A.ai.provider) || { label: 'your provider' }).label}, ${A.ai.model}${A.local ? `, and ${A.local} on this computer` : ''}.` }),
           el('li', { text: `Mail: ${A.mail.address}.` }),
-          el('li', { text: `Folders: ${A.folders.join(', ')}.` })),
+          el('li', { text: `Folders: ${A.folders.join(', ')}.` }),
+          A.signal.enabled && signalNumber() ? el('li', { text: `Signal: ${signalNumber()}.` }) : null),
         T.finished && !T.finished.ok ? result(T.finished) : null,
       ];
     },
@@ -320,7 +368,7 @@
     $('#back').hidden = step === 0 || (last && T.finished && T.finished.ok);
     const next = $('#next');
     next.disabled = false;
-    if (!last) { next.textContent = STEPS[step][0] === 'calendar' ? 'Skip for now' : 'Next'; next.onclick = () => go(step + 1); return; }
+    if (!last) { next.textContent = STEPS[step][0] === 'calendar' || (STEPS[step][0] === 'signal' && !signalNumber()) ? 'Skip for now' : 'Next'; next.onclick = () => go(step + 1); return; }
     if (T.finished && T.finished.ok) { next.textContent = 'Open Astra'; next.onclick = async () => { next.disabled = true; await call('open', {}); next.textContent = 'Opening…'; }; return; }
     next.textContent = editing ? 'Save' : 'Start Astra';
     next.onclick = async () => {
@@ -367,7 +415,7 @@
     A.folders = e ? [...e.folders] : offered.filter((f) => ['~/Documents', '~/Downloads', '~/Pictures', '~/Music', '~/Videos'].includes(f));
     if (e) for (const f of e.folders) if (!offered.includes(f)) S.folders.push({ path: f });
     if (!e) A.apps.voice = !!S.apps.speech;
-    if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; }
+    if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; A.signal.enabled = !!(e.signal && e.signal.enabled); }
     if (!A.monitor && S.screens.length > 1) A.monitor = (S.screens.find((s) => s.focused) || S.screens[0]).name;
     if (e) { seen = STEPS.length - 1; T.mailProvider = undefined; }
     initial = JSON.stringify(A);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
+import { FeedbackButton } from './components/FeedbackButton';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
 import { WidgetBar } from './components/WidgetBar';
@@ -34,6 +35,8 @@ export function App() {
     onActionCancel: (id) => send({ type: 'action_cancel', id }),
     onEventConfirm: (id, hash) => send({ type: 'event_confirm', id, hash }),
     onEventDiscard: (id) => send({ type: 'event_discard', id }),
+    onSignalSend: (id, hash) => send({ type: 'signal_send', id, hash }),
+    onSignalDiscard: (id) => send({ type: 'signal_discard', id }),
     onDocChangeConfirm: (id, hash) => send({ type: 'doc_change_confirm', id, hash }),
     onDocChangeDiscard: (id) => send({ type: 'doc_change_discard', id }),
     onFileChangeConfirm: (id, hash) => send({ type: 'file_change_confirm', id, hash }),
@@ -89,6 +92,8 @@ export function App() {
       </main>
       <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
       {/* W1: pinned system features along the bottom of the screen. */}
+      {/* The floating Feedback button: it only sends /feedback, the same as typing it. */}
+      <FeedbackButton disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} />
       <WidgetBar
         widgets={state.widgets}
         disabled={conn !== 'open'}

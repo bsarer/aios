@@ -1127,19 +1127,27 @@ async function main(): Promise<void> {
     check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === 'first line\nsecond line', JSON.stringify(await input.inputValue()));
     await input.fill('');
 
-    // The lightbulb saves an idea through /feedback, the same as typing it; Esc closes the box.
+    // The floating Feedback button saves through /feedback, the same as typing it; Esc closes the card.
     const lastNotice = () => page.locator('[data-kind="notice"]').last().innerText();
-    await page.getByTestId('idea').click();
-    check('the lightbulb opens the idea box', await waitFor(async () => (await page.getByTestId('idea-box').count()) === 1));
+    const fbCard = () => page.getByTestId('feedback-card').count();
+    const dock = await page.getByTestId('feedback').boundingBox();
+    const composerBox = await page.getByTestId('composer').boundingBox();
+    check('the Feedback button floats clear of the message box', !!dock && !!composerBox && (dock.x >= composerBox.x + composerBox.width || dock.y + dock.height <= composerBox.y), JSON.stringify({ dock, composerBox }));
+    await page.getByTestId('feedback').click();
+    check('the Feedback button opens its card, with the text box ready', await waitFor(async () => (await fbCard()) === 1 && (await page.getByTestId('feedback-text').evaluate((el: { ownerDocument: { activeElement: unknown } }) => el === el.ownerDocument.activeElement))));
+    await shot(page, 'feedback-card');
     await page.keyboard.press('Escape');
-    check('Esc closes the idea box', await waitFor(async () => (await page.getByTestId('idea-box').count()) === 0));
-    await page.getByTestId('idea').click();
-    await page.getByTestId('idea-input').fill('Show the weather on the brief');
-    await page.getByTestId('idea-input').press('Enter');
-    check('saving an idea says it was saved and closes the box', await waitFor(async () => /idea #1\b/.test(await lastNotice()) && (await page.getByTestId('idea-box').count()) === 0), await lastNotice());
-    await input.fill('/feedback list');
-    await input.press('Enter');
-    check('/feedback list shows the idea from the button', await waitFor(async () => (await lastNotice()).includes('Show the weather on the brief')), await lastNotice());
+    check('Esc closes the card without stopping anything', await waitFor(async () => (await fbCard()) === 0));
+    await page.getByTestId('feedback').click();
+    await page.getByTestId('feedback-kind-problem').click();
+    await page.getByTestId('feedback-text').fill('The brief opened twice\nafter a restart');
+    await page.getByTestId('feedback-text').press('Enter');
+    check('saving shows thanks and the chat confirms it', await waitFor(async () => (await page.getByTestId('feedback-saved').count()) === 1 && /idea #1\b/.test(await lastNotice())), await lastNotice());
+    await shot(page, 'feedback-saved');
+    check('the card closes by itself after saving', await waitFor(async () => (await fbCard()) === 0, 4000));
+    await page.getByTestId('feedback').click();
+    await page.getByTestId('feedback-list').click();
+    check('"See what I\'ve saved" lists it, kind and line break kept', await waitFor(async () => (await lastNotice()).includes('Problem: The brief opened twice\nafter a restart')), await lastNotice());
 
     // The gear opens settings; this checkout has no /usr/bin/astra, so it says to use a terminal.
     check('the Settings gear is in the status strip', (await page.getByTestId('settings').count()) === 1);

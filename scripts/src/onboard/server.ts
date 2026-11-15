@@ -23,6 +23,7 @@ import {
   summarize,
 } from './answers.js';
 import type { CheckResult } from './checks.js';
+import type { LinkState } from './signal.js';
 import { ADDON_IDS, type AddonId } from '../addons.js';
 
 export interface SetupDeps {
@@ -35,7 +36,7 @@ export interface SetupDeps {
     name: string;
     timezone: string;
     folders: { path: string }[];
-    apps: FoundApps & { whisper: string | null };
+    apps: FoundApps & { whisper: string | null; signal?: string | null };
     ollama: string[];
     screens: { name: string; width: number; height: number; focused: boolean }[];
     addons: { id: AddonId; label: string; blurb: string; installed: boolean }[];
@@ -47,6 +48,8 @@ export interface SetupDeps {
   checkMail: (o: { address: string; password: string; servers: MailServers }) => Promise<CheckResult>;
   /** Service, launcher and the desktop parts the person ticked; returns what it did, in words. */
   installDesktop: (c: AiosConfig, d: SetupAnswers['desktop']) => Promise<string[]>;
+  /** SG1: linking the phone to Signal. Without it, the Signal step says linking isn't available. */
+  signal?: { start(): Promise<LinkState>; readonly status: LinkState; cancel(): void };
   /** Opens the chat and closes the setup window. */
   done: () => void;
   /** Closes the setup window without saving anything or opening the chat (the Exit button). */
@@ -106,6 +109,13 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       if (!password) return { ok: false, message: s.provider === 'gmail' ? 'Paste the app password first.' : 'Type the password first.' };
       return deps.checkMail({ address: b.address, password, servers: s });
     },
+    // SG1: the window gets the QR picture and the outcome; never the link as text.
+    'POST signal-link': async () => (deps.signal ? deps.signal.start() : { state: 'failed', message: 'Linking Signal isn’t available here.' }),
+    'GET signal-link': async () => deps.signal?.status ?? { state: 'idle' },
+    'POST signal-cancel': async () => {
+      deps.signal?.cancel();
+      return { ok: true };
+    },
     'POST addons': async (body) => {
       const { ids } = Addons.parse(body);
       try {
@@ -120,7 +130,8 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       const existing = await deps.readConfig();
       const look = await deps.look();
       const s = serversFor(answers.mail.address, await deps.mx(answers.mail.address));
-      const built = buildConfig(answers, existing, deps.presets, look.apps, s);
+      const link = deps.signal?.status;
+      const built = buildConfig(answers, existing, deps.presets, look.apps, s, link?.state === 'linked' ? link.number : null);
       for (const [ref, value] of built.secrets) await deps.keyring.set(ref, value);
       await deps.writeConfig(built.config);
       const did = ['Saved your settings, and your keys in the keyring.', ...(await deps.installDesktop(built.config, answers.desktop))];

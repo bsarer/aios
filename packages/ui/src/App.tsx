@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
+import { FeedbackButton } from './components/FeedbackButton';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
 import { WidgetBar } from './components/WidgetBar';
@@ -91,6 +92,8 @@ export function App() {
       </main>
       <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
       {/* W1: pinned system features along the bottom of the screen. */}
+      {/* The floating Feedback button: it only sends /feedback, the same as typing it. */}
+      <FeedbackButton disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} />
       <WidgetBar
         widgets={state.widgets}
         disabled={conn !== 'open'}

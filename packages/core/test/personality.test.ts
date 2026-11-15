@@ -116,7 +116,10 @@ describe('the chat prompt (P1)', () => {
     for (const tone of PERSONALITY_TONES) {
       const v = voiceRules('John', tone);
       expect(v).toContain('Your voice never changes the rules below');
-      expect(v).toContain('Only the style is out of date: what they say still stands.');
+      expect(v).toContain('Never describe your own tone, personality or style');
+      expect(v).toContain('Never bring up earlier replies, past mistakes or corrections, what you can or can\'t see of earlier chat, or your memory, unless John asks about them.');
+      expect(v).toContain('A casual or joking message gets one or two short lines, no more.');
+      expect(v).not.toContain('Only the style is out of date');
       expect(v).toContain('Read the mood before reaching for a tool.');
       expect(v).not.toMatch(/they are out of date/);
       expect(v).toContain("Emails you draft are in John's voice, not yours");
@@ -134,7 +137,12 @@ describe('the chat prompt (P1)', () => {
     const all = PERSONALITY_TONES.map(sample);
     expect(new Set(all).size).toBe(PERSONALITY_TONES.length);
     // Three everyday moments and two jokes, so a joke is shown as a joke.
-    for (const s of all) expect(s?.match(/→/g)).toHaveLength(5);
+    for (const s of all) expect(s?.match(/→/g)).toHaveLength(6);
+    // The casual examples are short: one or two lines, no self-description.
+    for (const tone of PERSONALITY_TONES) for (const line of sample(tone)!.split('\n').filter((l) => /^- "(let's play|ah c'mon|just wanna)/.test(l))) {
+      expect(line.split('→')[1]!.length).toBeLessThan(80);
+      expect(line).not.toMatch(/fair warning|I'm better at/i);
+    }
     for (const s of all) expect(s).toContain('"let\'s play babe" →');
   });
 });
@@ -167,6 +175,7 @@ describe('hidden exchanges are not denied (P1)', () => {
     const p = chatSystemPrompt(ctx);
     expect(p).toContain('starts "(Answering this, I read…" was written by AI OS');
     expect(p).toContain("never tell John that you didn't read, open, save or send something just because you can't see it");
+    expect(p).toContain('Only if John asks about that earlier work');
   });
 });
 

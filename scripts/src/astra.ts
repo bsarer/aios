@@ -2,8 +2,10 @@
  * R1: the `astra` command. /usr/bin/astra (the Arch package) and `pnpm astra` run this; each
  * subcommand runs one of the scripts beside it, so `astra setup` is exactly `pnpm run setup`.
  *
- *   astra                    open the chat (Super+Shift+H does the same)
- *   astra setup [--kiosk]    first-run setup, or reinstall the service and kiosk only
+ *   astra                    open the chat (Super+Shift+H does the same); setup first, the first time
+ *   astra setup              set up Astra in a window (R2)
+ *   astra settings           change the answers, in the same window
+ *   astra setup --terminal   the same questions in this terminal; --kiosk reinstalls only the service and kiosk
  *   astra doctor             check the install; one line per check, each with a fix
  *   astra backup             write ~/astra-backup-<time>.tar.gz (never keyring secrets)
  *   astra restore FILE       put a backup back (what is there now is moved aside)
@@ -16,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { APP_NAME } from '@aios/shared';
+import { APP_NAME, configDir } from '@aios/shared';
 import { kioskPaths } from './kiosk.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,7 +34,8 @@ export type Route =
   | { kind: 'error'; message: string };
 
 const SCRIPTS: Record<string, { file: string; flags: string[] }> = {
-  setup: { file: 'setup.ts', flags: ['--kiosk', '--dry-run'] },
+  setup: { file: 'setup.ts', flags: ['--kiosk', '--dry-run', '--terminal'] },
+  settings: { file: 'onboard.ts', flags: [] },
   doctor: { file: 'doctor.ts', flags: [] },
   backup: { file: 'backup.ts', flags: [] },
   'calendar-login': { file: 'calendar-login.ts', flags: [] },
@@ -54,7 +57,9 @@ export function route(argv: string[]): Route {
   if (!s) return { kind: 'error', message: `unknown command ${cmd} (see astra help)` };
   const bad = rest.find((a) => !s.flags.includes(a));
   if (bad !== undefined) return { kind: 'error', message: `astra ${cmd} does not take ${bad}${s.flags.length ? ` (it takes ${s.flags.join(', ')})` : ''}` };
-  return { kind: 'script', file: join(here, s.file), args: rest };
+  // R2: setup opens the window unless a terminal-only flag asks for the questions here.
+  if (cmd === 'setup' && rest.length === 0) return { kind: 'script', file: join(here, 'onboard.ts'), args: [] };
+  return { kind: 'script', file: join(here, s.file), args: rest.filter((a) => a !== '--terminal') };
 }
 
 function help(): string {
@@ -95,10 +100,8 @@ function main(argv: string[]): number {
       return 0;
     case 'open': {
       const { launcher } = kioskPaths();
-      if (!existsSync(launcher)) {
-        console.error(`${APP_NAME} is not set up for you yet. Run \`astra setup\` first.`);
-        return 1;
-      }
+      // R2: the first time, setup opens in a window and opens the chat when it's done.
+      if (!existsSync(launcher) || !existsSync(join(configDir(), 'config.toml'))) return run(process.execPath, ['--import', 'tsx', join(here, 'onboard.ts')], join(ROOT, 'scripts'));
       return run(launcher, ['open'], ROOT);
     }
     case 'restore':

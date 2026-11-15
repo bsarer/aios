@@ -106,6 +106,7 @@ export async function runSetupWindow(): Promise<void> {
       if (existsSync(launcher)) spawn(launcher, ['open'], { stdio: 'ignore', detached: true }).unref();
       resolveDone();
     },
+    exit: () => resolveDone(),
   };
 
   const server = await startSetupServer(deps);

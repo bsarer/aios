@@ -154,6 +154,7 @@ async function serve(over: Partial<SetupDeps> = {}) {
   const written: AiosConfig[] = [];
   const seen: { ai: string[]; mail: string[] } = { ai: [], mail: [] };
   let done = 0;
+  let exited = 0;
   const addonCalls: string[][] = [];
   const deps: SetupDeps = {
     page: async () => '<script nonce="{{NONCE}}"></script>',
@@ -171,6 +172,7 @@ async function serve(over: Partial<SetupDeps> = {}) {
       return 'xdg-terminal-exec';
     },
     done: () => void done++,
+    exit: () => void exited++,
     ...over,
   };
   const s = await startSetupServer(deps, { token: 'tok' });
@@ -189,7 +191,7 @@ async function serve(over: Partial<SetupDeps> = {}) {
       req.on('error', reject);
       req.end(data);
     });
-  return { s, send, stored, written, seen, addonCalls, done: () => done };
+  return { s, send, stored, written, seen, addonCalls, done: () => done, exited: () => exited };
 }
 
 describe('R2 setup server: only its own page can drive it', () => {
@@ -206,6 +208,21 @@ describe('R2 setup server: only its own page can drive it', () => {
       expect((await t.send('/s/tok/api/finish', { method: 'POST', body: {}, headers: { origin: 'https://evil.example' } })).status).toBe(403);
       expect((await t.send('/s/tok/api/finish', { method: 'POST', body: {}, headers: { 'content-type': 'text/plain' } })).status).toBe(415);
       expect((await t.send('/s/tok/api/nope', { method: 'POST', body: {} })).status).toBe(404);
+    } finally {
+      await t.s.close();
+    }
+  });
+
+  it('exits without saving: nothing is written and the chat isn’t opened', async () => {
+    const t = await serve();
+    try {
+      expect(JSON.parse((await t.send('/s/tok/api/exit', { method: 'POST', body: {} })).body)).toEqual({ ok: true });
+      expect((await t.send('/s/tok/api/exit', { method: 'POST', body: {}, headers: { origin: 'https://evil.example' } })).status).toBe(403);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(t.exited()).toBe(1);
+      expect(t.done()).toBe(0);
+      expect(t.written).toEqual([]);
+      expect(t.stored.size).toBe(0);
     } finally {
       await t.s.close();
     }

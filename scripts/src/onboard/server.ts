@@ -49,6 +49,8 @@ export interface SetupDeps {
   installDesktop: (c: AiosConfig, d: SetupAnswers['desktop']) => Promise<string[]>;
   /** Opens the chat and closes the setup window. */
   done: () => void;
+  /** Closes the setup window without saving anything or opening the chat (the Exit button). */
+  exit: () => void;
 }
 
 const MAX_BODY = 64 * 1024;
@@ -124,6 +126,11 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       const did = ['Saved your settings, and your keys in the keyring.', ...(await deps.installDesktop(built.config, answers.desktop))];
       finished = true;
       return { ok: true, did };
+    },
+    // Exit: nothing is saved here. Finish is the only route that writes the config or the keyring.
+    'POST exit': async () => {
+      setTimeout(() => deps.exit(), 50);
+      return { ok: true };
     },
     'POST open': async () => {
       if (!finished && !(await deps.readConfig())) return { ok: false, message: 'Finish setup first.' };

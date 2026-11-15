@@ -25,7 +25,7 @@ function check(ok: unknown, what: string): void {
   console.log(`  ✓ ${what}`);
 }
 
-function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; installs: number; mailTests: { address: string; password: string; host: string }[]; addons: string[][] }): SetupDeps {
+function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; exits: number; installs: number; mailTests: { address: string; password: string; host: string }[]; addons: string[][] }): SetupDeps {
   return {
     page: () => readFile(join(here, '..', 'onboard', 'page.html'), 'utf8'),
     presets: readPresets(providers as Record<string, unknown>),
@@ -69,6 +69,7 @@ function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, st
       return ['Started Astra in the background (astra.service).'];
     },
     done: () => void state.done++,
+    exit: () => void state.exits++,
   };
 }
 
@@ -76,7 +77,7 @@ const next = (p: Page) => p.click('#next');
 const heading = (p: Page) => p.textContent('h1');
 
 async function main(): Promise<void> {
-  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[], addons: [] as string[][] };
+  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, exits: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[], addons: [] as string[][] };
   const server = await startSetupServer(fakeDeps(state));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
   const errors: string[] = [];
@@ -201,6 +202,22 @@ async function main(): Promise<void> {
     await again.waitForSelector('text=Astra is ready');
     check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'blank fields keep the stored key and password');
     check(state.mailTests.length === before, 'Settings did not sign in again for an unchanged address');
+
+    console.log('Exit without saving');
+    const saved = JSON.stringify(state.config);
+    const leave = await browser.newPage();
+    leave.on('pageerror', (e) => errors.push(e.message));
+    await leave.goto(server.url);
+    await leave.waitForSelector('#name');
+    check((await leave.textContent('#exit')) === 'Exit without saving', 'Settings has an Exit without saving button');
+    await leave.fill('#name', 'Someone else');
+    await leave.click('#exit');
+    check((await leave.textContent('#err'))?.includes('won’t be saved') === true && state.exits === 0, 'with a change, Exit asks once first');
+    await leave.click('#exit');
+    await leave.waitForSelector('text=Nothing was saved');
+    await leave.waitForTimeout(150);
+    check(state.exits === 1 && state.done === 1, 'the second press closes the window without opening the chat');
+    check(JSON.stringify(state.config) === saved, 'Exit saved nothing');
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join('; ')}` : ''}`);
   } finally {
     await browser.close();

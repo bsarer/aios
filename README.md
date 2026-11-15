@@ -32,6 +32,8 @@ nothing in your home folder changes until `astra setup`. Tagged releases also ca
 (CI builds it on every `v*` tag). After a `nodejs` major update, reinstall the package so its
 database module matches.
 
+**Add-ons:** setup's Add-ons step installs what features need, or run `astra addons` to see them and `astra addons --voice --video --music --local` to install (one password). Voice builds whisper.cpp for you and runs it on this computer only.
+
 **Update:** type `/update` in the chat and press Update, or run `astra update` (`--check` only looks). It pulls the checkout the package was built in, builds, installs (sudo asks for your password) and restarts Astra; your settings, keys and data stay. **Stop:** `astra stop` closes the chat and stops Astra until you open it from the app menu, run `astra`, or log in again.
 
 **From source** (for development): `./install.sh --check`, then `./install.sh`, which installs
@@ -216,6 +218,16 @@ Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it
 `/play` plays your newest video without asking the model; `/play recording` plays the newest one with "recording" in its name, and `/play https://…` a link.
 
 Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
+
+## Links and web searches
+
+"Open bbc.com", "go to github.com" or "search the web for cheap flights to Ankara" opens a new Chromium window, on another screen or the next workspace like any app, and the screen goes with it. Chromium comes with the Astra package. Links must be `http://` or `https://` (a site's name alone gets `https://`); nothing on this computer (`localhost`, `127.x`) and no user names or passwords in links. Opening a page sends nothing from it back to the chat. A link or search that comes from an email, invite or document never opens by itself: a card names the site and asks you first.
+
+Summaries: "summarize https://www.bbc.com/news/…" or, after opening a page, "summarize that page" reads it. Astra fetches the page itself, not through your browser, so pages behind a sign-in can't be read, and it can't see tabs you opened yourself: send their link. It reads only a link from your own message (or a page it opened for you), never one an email, document or page gives. It reads only public sites, never this computer or your local network, at most 2 MB of each. Page text is outside text like an email: while it is in view, changes wait for a click on a card.
+
+`/web bbc.com` opens a link and `/web cheap flights to Ankara` searches, without asking the model.
+
+Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `search` (default `"https://www.google.com/search?q=%s"`; any https address with `%s` where the words go, such as `"https://duckduckgo.com/?q=%s"`), `read` (default true; false turns summaries off), `maxBytes` (default 2000000), `maxChars` (default 16000, the most of a page's text the AI gets).
 
 ## Music
 

@@ -437,6 +437,12 @@ Setup moves from the terminal to a window. `astra` the first time, `astra setup`
 - `astra stop` closes the chat and stops the service; the launcher starts a stopped service, so the app menu entry starts Astra again.
 *Checked:* unit tests with temporary git repos and pretend commands (`packages/core/test/update.test.ts`, `scripts/test/update.test.ts`, shell, kiosk, astra command); e2e `/update` on a checkout. The terminal and pacman steps were not run on Omarchy here.
 
+**A1: Add-ons in the package** (2026-11-15, at the user's request: "all critical installs should be part of the Astra package ... this goes for whisper as well")
+- Required programs are package dependencies: besides node, chromium, libsecret, jq, curl and hyprland, the ones the chat calls (libnotify, networkmanager, bluez-utils, wireplumber, libpulse, gtk3, xdg-utils, procps-ng, git, systemd).
+- Feature add-ons (`scripts/addons.json`, `astra addons`, setup's Add-ons step): videos (mpv, yt-dlp), music controls (playerctl), private local AI (ollama, its service, qwen3:4b and embeddinggemma, checked on ollama.com/library 2026-11-15) and voice (whisper.cpp v1.9.5 built from github.com/ggml-org/whisper.cpp with cmake, the base.en model from huggingface.co/ggerganov/whisper.cpp, `astra-whisper.service` on 127.0.0.1:8178; build and server flags checked by building it 2026-11-15). One `sudo pacman -S --needed` for all; the package CI checks every name with `pacman -Si`.
+- Not yet add-ons: Claude Code (the app builder; its installer command wasn't confirmed) and WordCraft and GridCraft (not in Arch's repositories).
+*Checked:* unit tests (`scripts/test/addons.test.ts`, setup server), the setup e2e's Add-ons step, a real whisper.cpp build through `install` with pacman, systemctl and the model download stubbed (the download host is blocked in the build sandbox). Not run on Omarchy here.
+
 **R3: Sign in with Google** (after R2)
 OAuth for Gmail and Calendar in one consent screen, instead of an app password.
 
@@ -539,6 +545,7 @@ Ten minutes before an event (`calendar` EventSource), a card with recent mail th
 
 **T8: Open links and web lookup** (S for opening, M for reading pages)
 "Open my bank's site" opens a URL the user gave (or a saved bookmark) in the default browser on a card. Fetching and summarizing a page is a separate step: page text is untrusted like email, with no write-tier tools or memory while it is in view.
+*Opening, done:* `web_open` (device tier) opens a link or a search from `[web] search` in a new Chromium window away from the chat, and the screen follows it; `/web` without the model; a link from outside text gets a card naming the site. *Reading, done (decided 2026-11-15: fetch a link, not the browser's tabs):* `web_read` fetches a public page in code and returns its text inside <untrusted source="web">, only for a link from the user's own words or a page they opened. *Checked so far:* unit tests (`packages/core/test/web.test.ts`, `web-read.test.ts`); not yet on the real machine.
 
 **T9: Power and updates** (S for sleep, restart and shut down; M for system updates)
 Sleep, restart and shut down on a card, through Omarchy's own commands. System updates (`omarchy-update`) on a card with the list of packages, and a warning to save work first.

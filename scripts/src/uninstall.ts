@@ -9,7 +9,7 @@
  * removes the package. An installed copy inside the data folder (install.sh) is kept.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -18,6 +18,7 @@ import { Keyring, dataDir } from '@aios/core';
 import { configDir, parseConfig } from '@aios/shared';
 import { terminalPrompter } from './prompt.js';
 import { kioskPaths, uninstallKiosk } from './kiosk.js';
+import { whisperPaths } from './addons.js';
 import { secretRefs } from './setup-lib.js';
 
 /** What --purge deletes: the config folder, and the data folder's entries except an installed copy ('app'). */
@@ -30,6 +31,13 @@ async function main(): Promise<void> {
   const purge = process.argv.includes('--purge');
   const yes = process.argv.includes('--yes');
   for (const r of await uninstallKiosk(kioskPaths(), async (cmd, args) => void (await promisify(execFile)(cmd, args)))) console.log(`removed ${r}`);
+  // Voice's whisper.cpp service from astra addons; its files are in the data folder (--purge).
+  const w = whisperPaths();
+  if (existsSync(w.unit)) {
+    await promisify(execFile)('systemctl', ['--user', 'disable', '--now', w.service]).catch(() => undefined);
+    rmSync(w.unit, { force: true });
+    console.log(`removed ${w.unit}`);
+  }
   const dir = configDir();
   let toml: string | null = null;
   try {

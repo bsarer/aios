@@ -88,7 +88,7 @@ async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean, save: (c:
   const coreDir = join(root, 'packages', 'core');
   const monitor = config.screen.monitor ? { monitor: config.screen.monitor } : {};
   if (dryRun) {
-    console.log(`\n--- ${paths.unit} (dry run) ---\n${unitFile({ node: process.execPath, coreDir })}`);
+    console.log(`\n--- ${paths.unit} (dry run) ---\n${unitFile({ node: process.execPath, coreDir, packaged: process.env.ASTRA_PACKAGED === '1' })}`);
     console.log(`--- ${paths.launcher} (dry run) ---\n${launcherScript({ port: config.ui.port, profileDir: paths.profileDir })}`);
     console.log(`--- ${paths.aiosLua} (dry run) ---\n${hyprlandModule({ launcher: paths.launcher, autostart: config.ui.kiosk, ...monitor })}`);
     return;
@@ -104,7 +104,7 @@ async function kiosk(config: AiosConfig, p: Prompter, dryRun: boolean, save: (c:
   }
   const report = await installKiosk(
     paths,
-    { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, bar, ...(config.screen.monitor ? { monitor: config.screen.monitor } : {}) },
+    { node: process.execPath, coreDir, port: config.ui.port, autostart: config.ui.kiosk, hyprland, bar, packaged: process.env.ASTRA_PACKAGED === '1', ...(config.screen.monitor ? { monitor: config.screen.monitor } : {}) },
     run,
   );
   for (const f of report.written) console.log(`wrote ${f}`);

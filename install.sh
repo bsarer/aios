@@ -16,7 +16,7 @@ set -euo pipefail
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 # R1: the folder and service names, as packages/shared/src/brand.ts picks them.
-if [[ ! -e $CONFIG_HOME/astra && -f $CONFIG_HOME/aios/config.toml ]]; then
+if [[ -f $CONFIG_HOME/aios/config.toml ]]; then
   APP_DIR=aios SERVICE=aios-core.service
 else
   APP_DIR=astra SERVICE=astra.service

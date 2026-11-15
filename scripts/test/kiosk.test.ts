@@ -42,12 +42,14 @@ describe('install and uninstall', () => {
     const h = home();
     const first = await installKiosk(h.p, opts, h.run);
     expect(first.written.sort()).toEqual([h.p.aiosLua, h.p.hyprlandLua, h.p.launcher, h.p.unit].sort());
-    expect(readFileSync(`${h.p.hyprlandLua}.aios-backup`, 'utf8')).toBe(OMARCHY_HYPRLAND_LUA);
+    expect(readFileSync(`${h.p.hyprlandLua}.astra-backup`, 'utf8')).toBe(OMARCHY_HYPRLAND_LUA);
     expect(readFileSync(h.p.hyprlandLua, 'utf8')).toBe(`${OMARCHY_HYPRLAND_LUA}\n${h.p.requireLine}\n`);
     expect(h.calls).toEqual(['systemctl --user daemon-reload', 'systemctl --user enable astra.service']);
 
     const second = await installKiosk(h.p, opts, h.run);
     expect(second.written).toEqual([]);
+    expect(readFileSync(h.p.unit, 'utf8')).not.toContain('ASTRA_PACKAGED');
+    expect(unitFile({ node: '/usr/bin/node', coreDir: '/usr/lib/astra/packages/core', packaged: true })).toContain('Environment=ASTRA_PACKAGED=1\nExecStart=');
     expect(readFileSync(h.p.hyprlandLua, 'utf8').split(h.p.requireLine)).toHaveLength(2);
   });
 
@@ -121,9 +123,20 @@ describe('S7: the AI button in Omarchy 4’s top bar', () => {
     expect(cfg.bar.layout.right[0]).toEqual({ id: BAR_ID, type: 'command', exec: "'/home/j/.local/bin/aios-kiosk' bar", interval: 2, tooltip: 'Astra', onClick: "'/home/j/.local/bin/aios-kiosk' open" });
     expect(cfg.bar.layout.right[1]).toEqual({ id: 'omarchy.tray' });
     expect(cfg.bar.layout.left).toEqual([{ id: 'omarchy.menu' }]);
-    expect(addBarButton(added, '/x')).toBe(added);
+    expect(addBarButton(added, '/home/j/.local/bin/aios-kiosk')).toBe(added);
     expect(JSON.parse(removeBarButton(added))).toEqual(JSON.parse(OMARCHY_SHELL_JSON));
     expect(removeBarButton(OMARCHY_SHELL_JSON)).toBe(OMARCHY_SHELL_JSON);
+  });
+
+  it('R1: Astra points the shared button at itself in place, and its uninstall leaves one that runs AI OS', () => {
+    const aios = addBarButton(OMARCHY_SHELL_JSON, '/home/j/.local/bin/aios-kiosk')!;
+    const astra = addBarButton(aios, '/home/j/.local/bin/astra-kiosk')!;
+    const right = (j: string) => (JSON.parse(j) as { bar: { layout: { right: { id: string; exec?: string }[] } } }).bar.layout.right;
+    expect(right(astra).filter((e) => e.id === BAR_ID)).toEqual([expect.objectContaining({ exec: "'/home/j/.local/bin/astra-kiosk' bar" })]);
+    expect(right(astra)).toHaveLength(2);
+    // Astra's uninstall takes out only its own button.
+    expect(JSON.parse(removeBarButton(astra, '/home/j/.local/bin/astra-kiosk'))).toEqual(JSON.parse(OMARCHY_SHELL_JSON));
+    expect(removeBarButton(aios, '/home/j/.local/bin/astra-kiosk')).toBe(aios);
   });
 
   it('quotes the launcher path for bash, and leaves a file it does not understand alone', () => {
@@ -139,7 +152,7 @@ describe('S7: the AI button in Omarchy 4’s top bar', () => {
     writeFileSync(h.p.shellJson, OMARCHY_SHELL_JSON);
     const r = await installKiosk(h.p, { ...opts, bar: true }, h.run);
     expect(r.written).toContain(h.p.shellJson);
-    expect(readFileSync(`${h.p.shellJson}.aios-backup`, 'utf8')).toBe(OMARCHY_SHELL_JSON);
+    expect(readFileSync(`${h.p.shellJson}.astra-backup`, 'utf8')).toBe(OMARCHY_SHELL_JSON);
     expect(readFileSync(h.p.shellJson, 'utf8')).toContain(BAR_ID);
     expect(h.calls).toContain('omarchy-shell shell reloadConfig');
     expect((await installKiosk(h.p, { ...opts, bar: true }, h.run)).written).toEqual([]);

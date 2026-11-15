@@ -12,7 +12,7 @@
  */
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { BAR_ID, type KioskPaths, REQUIRE_LINE } from '@aios/core';
 import { APP_NAME, CHAT_APP_CLASS, CHAT_CLASS_PATTERN, MONITOR_NAME } from '@aios/shared';
 
@@ -25,7 +25,7 @@ export const OPEN_KEYS = 'SUPER + SHIFT + H';
 export { BAR_ID, type KioskPaths, REQUIRE_LINE, kioskPaths } from '@aios/core';
 
 /** systemd --user unit. `node` is an absolute path: user units don't see mise's shims. */
-export function unitFile(o: { node: string; coreDir: string }): string {
+export function unitFile(o: { node: string; coreDir: string; packaged?: boolean }): string {
   return `# ${APP_NAME} core. Written by setup; removed by \`astra uninstall\`.
 [Unit]
 Description=${APP_NAME} core (chat, mail watcher, memory)
@@ -38,7 +38,7 @@ StartLimitBurst=30
 [Service]
 Type=simple
 WorkingDirectory=${o.coreDir}
-ExecStart=${o.node} --import tsx src/main.ts
+${o.packaged ? 'Environment=ASTRA_PACKAGED=1\n' : ''}ExecStart=${o.node} --import tsx src/main.ts
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
@@ -191,17 +191,29 @@ export function addBarButton(json: string, launcher: string): string | null {
   c.bar.layout ??= {};
   if (typeof c.bar.layout !== 'object' || Array.isArray(c.bar.layout)) return null;
   const layout = c.bar.layout;
+  const quoted = sh(launcher);
+  const button = { id: BAR_ID, type: 'command', exec: `${quoted} bar`, interval: 2, tooltip: APP_NAME, onClick: `${quoted} open` };
+  // R1: AI OS and Astra share the button's id. One already there for this launcher stays as it is;
+  // one for the other app's launcher is pointed at this one, in place.
   for (const section of Object.values(layout)) {
-    if (Array.isArray(section) && section.some((e) => e && typeof e === 'object' && (e as { id?: unknown }).id === BAR_ID)) return json;
+    if (!Array.isArray(section)) continue;
+    const i = section.findIndex((e) => e && typeof e === 'object' && (e as { id?: unknown }).id === BAR_ID);
+    if (i < 0) continue;
+    if ((section[i] as { exec?: unknown }).exec === button.exec) return json;
+    section[i] = button;
+    return `${JSON.stringify(cfg, null, 2)}\n`;
   }
   const right = Array.isArray(layout.right) ? layout.right : [];
-  const quoted = sh(launcher);
-  layout.right = [{ id: BAR_ID, type: 'command', exec: `${quoted} bar`, interval: 2, tooltip: APP_NAME, onClick: `${quoted} open` }, ...right];
+  layout.right = [button, ...right];
   return `${JSON.stringify(cfg, null, 2)}\n`;
 }
 
-/** S7: shell.json without the AI button; unchanged text when it isn't there or the file isn't JSON. */
-export function removeBarButton(json: string): string {
+/**
+ * S7: shell.json without the AI button; unchanged text when it isn't there or the file isn't JSON.
+ * R1: with a launcher, only a button that runs that launcher goes, so uninstalling Astra leaves
+ * a button that AI OS's setup put back for AI OS.
+ */
+export function removeBarButton(json: string, launcher?: string): string {
   let cfg: { bar?: { layout?: Record<string, unknown> } };
   try {
     cfg = JSON.parse(json) as typeof cfg;
@@ -213,7 +225,8 @@ export function removeBarButton(json: string): string {
   let found = false;
   for (const [k, section] of Object.entries(layout)) {
     if (!Array.isArray(section)) continue;
-    const kept = section.filter((e) => !(e && typeof e === 'object' && (e as { id?: unknown }).id === BAR_ID));
+    const mine = (e: unknown) => !!e && typeof e === 'object' && (e as { id?: unknown }).id === BAR_ID && (launcher === undefined || (e as { exec?: unknown }).exec === `${sh(launcher)} bar`);
+    const kept = section.filter((e) => !mine(e));
     if (kept.length !== section.length) {
       found = true;
       layout[k] = kept;
@@ -276,6 +289,8 @@ export interface InstallOptions {
   monitor?: string;
   /** S7: add the AI button to Omarchy's top bar (shell.json, with a backup). */
   bar?: boolean;
+  /** R1: written by the Astra package, so the unit sets ASTRA_PACKAGED=1 (see appIds). */
+  packaged?: boolean;
 }
 
 /** What install did, for setup to print. */
@@ -295,7 +310,7 @@ async function writeIfChanged(path: string, content: string, mode: number, repor
 
 export async function installKiosk(p: KioskPaths, o: InstallOptions, run: Run): Promise<InstallReport> {
   const report: InstallReport = { written: [], notes: [] };
-  await writeIfChanged(p.unit, unitFile({ node: o.node, coreDir: o.coreDir }), 0o644, report);
+  await writeIfChanged(p.unit, unitFile({ node: o.node, coreDir: o.coreDir, packaged: o.packaged ?? false }), 0o644, report);
   await writeIfChanged(p.launcher, launcherScript({ port: o.port, profileDir: p.profileDir, service: p.service }), 0o755, report);
   await run('systemctl', ['--user', 'daemon-reload']);
   await run('systemctl', ['--user', 'enable', p.service]);
@@ -316,13 +331,18 @@ export async function installKiosk(p: KioskPaths, o: InstallOptions, run: Run): 
   const before = await readFile(p.hyprlandLua, 'utf8');
   const after = addRequire(before, p.requireLine);
   if (after !== before) {
-    await writeFile(`${p.hyprlandLua}.aios-backup`, before);
+    await writeFile(`${p.hyprlandLua}.${backupTag(p)}-backup`, before);
     await writeFile(p.hyprlandLua, after);
     report.written.push(p.hyprlandLua);
-    report.notes.push(`Backed up the previous version to ${p.hyprlandLua}.aios-backup.`);
+    report.notes.push(`Backed up the previous version to ${p.hyprlandLua}.${backupTag(p)}-backup.`);
   }
   if (o.bar) await installBarButton(p, run, report);
   return report;
+}
+
+/** R1: backups are named per app (.aios-backup, .astra-backup), so Astra never overwrites AI OS's. */
+function backupTag(p: KioskPaths): string {
+  return basename(p.aiosLua, '.lua');
 }
 
 /** S7: the AI button in Omarchy 4's top bar. Starts from Omarchy's defaults when there is no shell.json yet. */
@@ -340,11 +360,11 @@ async function installBarButton(p: KioskPaths, run: Run, report: InstallReport):
     return;
   }
   if (own && after === before) return;
-  if (own) await writeFile(`${p.shellJson}.aios-backup`, before);
+  if (own) await writeFile(`${p.shellJson}.${backupTag(p)}-backup`, before);
   await mkdir(dirname(p.shellJson), { recursive: true });
   await writeFile(p.shellJson, after);
   report.written.push(p.shellJson);
-  report.notes.push(own ? `Added the AI button to the top bar; the previous version is ${p.shellJson}.aios-backup.` : 'Added the AI button to the top bar.');
+  report.notes.push(own ? `Added the AI button to the top bar; the previous version is ${p.shellJson}.${backupTag(p)}-backup.` : 'Added the AI button to the top bar.');
   await run('omarchy-shell', ['shell', 'reloadConfig']).catch(() => report.notes.push('Restart the top bar (or log out and in) to see the AI button.'));
 }
 
@@ -365,7 +385,7 @@ export async function uninstallKiosk(p: KioskPaths, run: Run): Promise<string[]>
   }
   if (existsSync(p.shellJson)) {
     const before = await readFile(p.shellJson, 'utf8');
-    const after = removeBarButton(before);
+    const after = removeBarButton(before, p.launcher);
     if (after !== before) {
       await writeFile(p.shellJson, after);
       removed.push(`AI button in ${p.shellJson}`);

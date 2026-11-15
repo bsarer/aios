@@ -27,8 +27,14 @@ export interface AppIds {
 export const ASTRA_IDS: AppIds = { dir: 'astra', service: 'astra.service', keyring: 'astra', kiosk: 'astra-kiosk', hyprModule: 'astra', legacy: false };
 export const LEGACY_IDS: AppIds = { dir: 'aios', service: 'aios-core.service', keyring: 'aios', kiosk: 'aios-kiosk', hyprModule: 'aios', legacy: true };
 
-/** Which names this user's install uses. */
+/**
+ * Which names this process uses. The Astra package (/usr/bin/astra and the astra.service it writes
+ * set ASTRA_PACKAGED=1) is always Astra. A source checkout is AI OS while ~/.config/aios/config.toml
+ * exists, even after Astra is set up too, so an AI OS kept for falling back never reads Astra's
+ * config, keyring or data; otherwise it is Astra.
+ */
 export function appIds(env: NodeJS.ProcessEnv = process.env, exists: (path: string) => boolean = existsSync): AppIds {
+  if (env.ASTRA_PACKAGED === '1') return ASTRA_IDS;
   const base = env.XDG_CONFIG_HOME || `${env.HOME ?? ''}/.config`;
-  return !exists(`${base}/${ASTRA_IDS.dir}`) && exists(`${base}/${LEGACY_IDS.dir}/config.toml`) ? LEGACY_IDS : ASTRA_IDS;
+  return exists(`${base}/${LEGACY_IDS.dir}/config.toml`) ? LEGACY_IDS : ASTRA_IDS;
 }

@@ -17,8 +17,15 @@ describe('appIds', () => {
     expect(LEGACY_IDS).toMatchObject({ dir: 'aios', service: 'aios-core.service', keyring: 'aios', legacy: true });
   });
 
-  it('is Astra as soon as an Astra folder exists, and honours XDG_CONFIG_HOME', () => {
-    expect(appIds(env, fs('/home/j/.config/aios/config.toml', '/home/j/.config/astra'))).toEqual(ASTRA_IDS);
+  it('stays AI OS from a source checkout even once Astra is set up, so falling back to AI OS never reads Astra', () => {
+    expect(appIds(env, fs('/home/j/.config/aios/config.toml', '/home/j/.config/astra'))).toEqual(LEGACY_IDS);
+  });
+
+  it('is always Astra from the package (ASTRA_PACKAGED=1), even next to an AI OS config', () => {
+    expect(appIds({ ...env, ASTRA_PACKAGED: '1' }, fs('/home/j/.config/aios/config.toml'))).toEqual(ASTRA_IDS);
+  });
+
+  it('honours XDG_CONFIG_HOME', () => {
     expect(appIds({ ...env, XDG_CONFIG_HOME: '/x' }, fs('/x/aios/config.toml'))).toEqual(LEGACY_IDS);
     expect(appIds({ ...env, XDG_CONFIG_HOME: '/x' }, fs('/home/j/.config/aios/config.toml'))).toEqual(ASTRA_IDS);
   });

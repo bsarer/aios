@@ -2,7 +2,7 @@
  * R2: `astra setup` (and `astra settings`, and `astra` the first time) opens setup in a window.
  * A small server on 127.0.0.1 serves the page (onboard/server.ts); this file wires it to the
  * keyring, the config file, the app scan and the desktop install, and opens the window in
- * Chromium with its own profile. `astra setup --terminal` keeps the question-and-answer setup.
+ * Chromium with a new, empty profile each time (onboard/window.ts). `astra setup --terminal` keeps the question-and-answer setup.
  */
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -21,6 +21,7 @@ import { accountFirstName, findApps, homeFolders, mailHosts, ollamaEmbedModels, 
 import { openTerminal } from '@aios/core';
 import { type SetupDeps, startSetupServer } from './onboard/server.js';
 import { SignalLinker } from './onboard/signal.js';
+import { freshProfile, removeProfile } from './onboard/window.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..', '..');
@@ -115,15 +116,20 @@ export async function runSetupWindow(): Promise<void> {
   };
 
   const server = await startSetupServer(deps);
-  window = openWindow(server.url, join(dataDir(), 'setup-profile'));
+  const profile = await freshProfile(dataDir());
+  window = openWindow(server.url, profile);
   console.log(window ? `${APP_NAME} setup is open in a window.` : `Open this address in a browser on this computer to set up ${APP_NAME}:`);
   console.log(`  ${server.url}`);
   console.log('Close this terminal or press Ctrl+C to stop setup.');
   window?.on('exit', () => resolveDone());
   await finished;
+  const closed = window && window.exitCode === null && window.signalCode === null ? new Promise<void>((r) => window?.once('exit', () => r())) : Promise.resolve();
   window?.kill();
   linker.cancel();
   await server.close();
+  // Chromium writes its profile until it exits; give it a few seconds, then remove it.
+  await Promise.race([closed, new Promise<void>((r) => setTimeout(r, 5000).unref())]);
+  await removeProfile(profile);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

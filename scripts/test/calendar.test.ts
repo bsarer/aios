@@ -341,7 +341,7 @@ describe('calendar quarantine', () => {
     expect(out.map((m) => m.content)).toEqual([
       's',
       "what's on tomorrow",
-      '(Answering this, I read the calendar. That exchange is hidden from me now, because event text from invites can carry instructions. If the user refers to it, look at the calendar again.)',
+      '(Answering this, I read the calendar. That exchange is hidden from me now, because event text from invites can carry instructions. If the user follows up on it, look at the calendar again first, then do what they ask.)',
       'thanks',
     ]);
   });

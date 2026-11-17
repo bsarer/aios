@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { down, edited, emptyRecall, onFirstLine, onLastLine, type Recall, remember, seed, up } from '../history';
 import { useVoice } from '../useVoice';
+import { Icon } from './ui';
 
 interface Props {
   working: boolean;
@@ -14,12 +15,6 @@ interface Props {
   /** The user's own messages already in the chat, oldest first, for Up/Down. */
   earlier?: string[];
 }
-
-const Disabled = ({ label, icon }: { label: string; icon: string }) => (
-  <button type="button" disabled title={`${label} (not available yet)`} aria-label={label} className="cursor-not-allowed px-1.5 text-lg opacity-35">
-    {icon}
-  </button>
-);
 
 export function Composer({ working, disabled, onSend, onStop, tight = false, voiceMaxSeconds = null, earlier = [] }: Props) {
   const [text, setText] = useState('');
@@ -110,12 +105,13 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
   };
 
   return (
-    <div data-testid="composer" className={`glass mx-auto ${tight ? 'mb-2' : 'mb-4'} w-[min(820px,calc(100%-24px))] rounded-2xl px-3 py-2`}>
-      <div className="flex items-end gap-2">
-        <Disabled label="Attach" icon="📎" />
+    <div data-testid="composer" className={`mx-auto w-[min(760px,calc(100%-24px))] ${tight ? 'pb-2' : 'pb-5'}`}>
+      {/* Attach and image come back here when they work. */}
+      <div className="flex items-end gap-2 rounded-3xl border py-2.5 pl-5 pr-2.5 shadow-[0_8px_30px_rgb(0_0_0/0.35)]" style={{ background: 'var(--surface)', borderColor: 'var(--line-strong)' }}>
         <textarea
           ref={ref}
           data-testid="input"
+          aria-label="Message"
           rows={1}
           value={text}
           onChange={(e) => {
@@ -137,12 +133,9 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
             else if (e.key === 'ArrowDown' && onLastLine(text, caret)) show(down(recall.current), e);
           }}
           placeholder={disabled ? 'Reconnecting…' : 'Ask anything'}
-          className="max-h-[220px] flex-1 resize-none bg-transparent px-1 py-1.5 outline-none placeholder:opacity-50"
+          className="max-h-[220px] flex-1 resize-none bg-transparent py-2 outline-none placeholder:opacity-50"
         />
-        <Disabled label="Image" icon="🖼" />
-        {voiceMaxSeconds === null ? (
-          <Disabled label="Voice" icon="🎙" />
-        ) : (
+        {voiceMaxSeconds !== null && (
           <button
             type="button"
             data-testid="mic"
@@ -152,39 +145,58 @@ export function Composer({ working, disabled, onSend, onStop, tight = false, voi
             title={voice.state === 'listening' ? 'Stop and turn it into text (Ctrl+M)' : 'Speak instead of typing (Ctrl+M)'}
             aria-label={voice.state === 'listening' ? 'Stop listening' : 'Voice'}
             aria-pressed={voice.state === 'listening'}
-            className={`rounded-lg px-1.5 text-lg disabled:opacity-50 ${voice.state === 'listening' ? 'animate-pulse' : ''}`}
-            style={voice.state === 'listening' ? { background: 'var(--danger)', color: 'var(--bg)' } : undefined}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 ${voice.state === 'listening' ? 'animate-pulse' : 'hover:bg-[var(--panel)]'}`}
+            style={voice.state === 'listening' ? { background: 'var(--danger)', color: 'var(--bg)', outlineColor: 'var(--accent)' } : { color: 'var(--muted)', outlineColor: 'var(--accent)' }}
           >
-            🎙
+            <Icon name="mic" size={19} />
           </button>
         )}
         {working ? (
-          <button type="button" onClick={onStop} data-testid="stop" className="rounded-xl px-3 py-1.5 text-[15px]" style={{ background: 'var(--panel)', color: 'var(--fg)' }}>
-            Stop
+          <button
+            type="button"
+            onClick={onStop}
+            data-testid="stop"
+            aria-label="Stop"
+            title="Stop (Esc)"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{ background: 'var(--panel)', borderColor: 'var(--line-strong)', color: 'var(--fg)', outlineColor: 'var(--accent)' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor" />
+            </svg>
           </button>
         ) : (
-          <button type="button" onClick={submit} disabled={!text.trim() || disabled} className="rounded-xl px-3 py-1.5 text-[15px] font-medium disabled:opacity-40" style={{ background: 'var(--accent)', color: 'var(--bg)' }}>
-            Send
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!text.trim() || disabled}
+            data-testid="send"
+            aria-label="Send"
+            title="Send (Enter)"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40 disabled:hover:brightness-100"
+            style={{ background: 'var(--accent)', color: 'var(--bg)', outlineColor: 'var(--accent)' }}
+          >
+            <Icon name="arrowUp" size={20} strokeWidth={2.2} />
           </button>
         )}
       </div>
       {/* V2: the words of the piece still being spoken, until it ends and joins the box. */}
       {voice.interim && (
-        <div data-testid="voice-interim" aria-live="polite" className="px-1 pt-1 text-[15px] italic" style={{ color: 'var(--muted)' }}>
+        <div data-testid="voice-interim" aria-live="polite" className="px-5 pt-2 text-[15px] italic" style={{ color: 'var(--muted)' }}>
           {voice.interim.replace(/[.…\s]+$/, '')}…
         </div>
       )}
       {voice.error ? (
-        <div data-testid="voice-error" role="status" className="px-1 pt-1 text-xs" style={{ color: 'var(--danger)' }}>
+        <div data-testid="voice-error" role="status" className="pt-2 text-center text-[13px]" style={{ color: 'var(--danger)' }}>
           {voice.error}
         </div>
       ) : voiceBusy ? (
-        <div data-testid="voice-status" role="status" className="px-1 pt-1 text-xs" style={{ color: 'var(--muted)' }}>
+        <div data-testid="voice-status" role="status" className="pt-2 text-center text-[13px]" style={{ color: 'var(--muted)' }}>
           {voice.state === 'working' ? 'Turning it into text…' : voice.state === 'starting' ? 'Opening the microphone…' : `Listening… click the microphone or press Ctrl+M when you're done (up to ${voiceMaxSeconds} seconds) · Esc to cancel`}
         </div>
       ) : (
-        <div className="px-1 pt-1 text-xs" style={{ color: 'var(--muted)' }}>
-          Enter to send · Shift+Enter for a new line · Esc to stop{voiceMaxSeconds === null ? '' : ' · Ctrl+M to speak'} · /help for commands
+        <div className="pt-2 text-center text-[13px]" style={{ color: 'var(--muted)' }}>
+          Enter to send · Shift+Enter for a new line · ↑ for earlier messages · Esc to stop{voiceMaxSeconds === null ? '' : ' · Ctrl+M to speak'} · /help for commands
         </div>
       )}
     </div>

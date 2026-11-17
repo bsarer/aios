@@ -187,8 +187,8 @@ export function MailRail({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
         <div
           data-testid="mail-peek"
           role="status"
-          className="fixed right-[68px] top-1/2 z-30 w-[clamp(200px,calc((100vw-820px)/2-80px),260px)] -translate-y-1/2 rounded-2xl px-3.5 py-2.5 text-sm"
-          style={{ ...SOLID, border: '1px solid var(--border)', borderLeft: '3px solid var(--warning)', boxShadow: '0 10px 30px rgba(0,0,0,.35)' }}
+          className="fixed right-[68px] top-1/2 z-30 w-[clamp(200px,calc((100vw-760px)/2-80px),260px)] -translate-y-1/2 rounded-2xl px-3.5 py-2.5 text-sm"
+          style={{ ...SOLID, border: '1px solid var(--border)', boxShadow: '0 10px 30px rgba(0,0,0,.35)' }}
         >
           <div className="flex items-center text-[12.5px]" style={{ color: 'var(--warning)' }}>
             ● Looks urgent<span className="ml-auto" style={{ color: 'var(--muted)' }}>now</span>
@@ -196,10 +196,10 @@ export function MailRail({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
           <div className="mt-0.5 truncate text-[15px] font-semibold">{senderName(peek.from)}</div>
           <div className="line-clamp-2" style={{ color: 'var(--muted)' }}>{peek.subject}</div>
           <div className="mt-2 flex gap-1.5">
-            <button type="button" data-testid="peek-open" className="rounded-lg px-2.5 py-0.5 font-medium" style={{ background: 'var(--accent)', color: 'var(--bg)' }} onClick={() => setOpen(true)}>
+            <button type="button" data-testid="peek-open" className="btn btn-primary btn-sm" onClick={() => setOpen(true)}>
               Open
             </button>
-            <button type="button" data-testid="peek-later" className="glass rounded-lg px-2.5 py-0.5" onClick={inbox.dismissPeek}>
+            <button type="button" data-testid="peek-later" className="btn btn-secondary btn-sm" onClick={inbox.dismissPeek}>
               Later
             </button>
           </div>
@@ -244,13 +244,13 @@ function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
       <div className="mt-0.5">{r.summary}</div>
       {!r.ignored && (
         <div className="mt-1.5 flex gap-1.5 text-[12.5px]">
-          <button type="button" data-testid="mail-read" disabled={disabled} className="glass rounded-lg px-2 py-px disabled:opacity-40" onClick={() => go(`Read email ${r.id}`)}>
+          <button type="button" data-testid="mail-read" disabled={disabled} className="btn btn-secondary btn-sm" onClick={() => go(`Read email ${r.id}`)}>
             Read
           </button>
-          <button type="button" data-testid="mail-draft-reply" disabled={disabled} className="glass rounded-lg px-2 py-px disabled:opacity-40" onClick={() => go(`Draft a reply to email ${r.id}`)}>
+          <button type="button" data-testid="mail-draft-reply" disabled={disabled} className="btn btn-secondary btn-sm" onClick={() => go(`Draft a reply to email ${r.id}`)}>
             Draft reply
           </button>
-          <button type="button" data-testid="mail-ignore" disabled={disabled} className="glass rounded-lg px-2 py-px disabled:opacity-40" onClick={() => onIgnoreMail(r.itemId, r.id)}>
+          <button type="button" data-testid="mail-ignore" disabled={disabled} className="btn btn-secondary btn-sm" onClick={() => onIgnoreMail(r.itemId, r.id)}>
             Ignore
           </button>
         </div>
@@ -313,7 +313,7 @@ function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
         )}
       </div>
       <footer className="mt-2 flex items-center gap-2 border-t pt-2.5 text-[13px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-        <button type="button" data-testid="inbox-quiet" className="glass rounded-lg px-2.5 py-0.5" onClick={toggleQuiet}>
+        <button type="button" data-testid="inbox-quiet" className="btn btn-secondary btn-sm" onClick={toggleQuiet}>
           {quietUntil ? `Quiet until ${clock(quietUntil)} · End` : 'Quiet for 1 hour'}
         </button>
         <span className="ml-auto">Esc to close</span>

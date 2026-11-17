@@ -28,7 +28,7 @@ export function WidgetBar({
   const tileFor = (k: WidgetKind) => widgets.tiles.find((t) => t.widget === k);
 
   return (
-    <nav data-testid="widgets" aria-label="Pinned widgets" className="mx-auto mb-4 flex w-[min(820px,calc(100%-24px))] items-stretch gap-2">
+    <nav data-testid="widgets" aria-label="Pinned widgets" className="mx-auto mb-4 flex w-[min(760px,calc(100%-24px))] items-stretch gap-2">
       {widgets.pinned.map((k) => {
         const t = tileFor(k);
         const tone = t?.tone ?? 'normal';

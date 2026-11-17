@@ -26,7 +26,21 @@ export const QUIET_MS = 60 * 60 * 1000;
 
 const isNote = (i: ChatItem): i is Notification => i.kind === 'notification';
 
-/** Mail from the last day's notifications, newest first; one row per mail id (the newest wins). */
+/** When the email itself was sent; mail from before rows carried a date shows when it was posted. */
+export const sentAt = (r: InboxRow) => r.date ?? r.at;
+
+/**
+ * The row's time: the clock today, else the day too. All mail in one notification used to share
+ * the notification's time; each row now shows its own email's.
+ */
+export function rowTime(r: InboxRow, now: number): string {
+  const t = new Date(sentAt(r));
+  const time = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (t.toDateString() === new Date(now).toDateString()) return time;
+  return `${t.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+/** Mail from the last day's notifications, newest email first; one row per mail id (the newest notification wins). */
 export function inboxRows(items: ChatItem[], now: number): InboxRow[] {
   const seen = new Set<string>();
   const out: InboxRow[] = [];
@@ -38,7 +52,7 @@ export function inboxRows(items: ChatItem[], now: number): InboxRow[] {
       out.push({ ...m, itemId: n.id, at: n.at });
     }
   }
-  return out;
+  return out.sort((a, b) => sentAt(b) - sentAt(a));
 }
 
 /** Not ignored and posted after the user last opened the inbox. */

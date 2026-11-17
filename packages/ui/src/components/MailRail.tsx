@@ -11,6 +11,7 @@ import {
   loadQuietUntil,
   loadSeenAt,
   peekFor,
+  rowTime,
   saveQuietUntil,
   saveSeenAt,
   senderName,
@@ -236,7 +237,7 @@ function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
         <span className="text-[11px]" style={{ color: URGENCY_COLOR[r.urgency] }}>●</span>
         <span className="truncate text-[14.5px] font-semibold">{senderName(r.from)}</span>
         <span className="ml-auto shrink-0 text-xs" style={{ color: 'var(--muted)' }}>
-          {clock(r.at)}
+          {rowTime(r, Date.now())}
         </span>
       </div>
       <div style={{ color: 'var(--muted)' }}>{r.subject}</div>

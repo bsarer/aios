@@ -34,7 +34,14 @@ export interface PipelineOptions {
   role?: ModelRole;
   now?: () => number;
   newId?: () => string;
+  /** Timings for the audit log (counts and milliseconds only, never mail text). */
+  log?: (entry: MailTiming) => void;
 }
+
+export type MailTiming =
+  | { event: 'triage'; count: number; ms: number; outcome: 'ok' | 'failed' | 'cost_cap' }
+  /** `waitedMs`: from the first of these emails reaching the watcher to the notification. */
+  | { event: 'posted'; count: number; waitedMs: number };
 
 const minutes = (hhmm: string) => {
   const [h = 0, m = 0] = hhmm.split(':').map(Number);
@@ -108,13 +115,17 @@ export class MailPipeline {
       stale.forEach((e) => this.o.state.saveTriage(e.messageId, fallbackItem(e)));
       batch = batch.filter((e) => e.attempts < MAX_ATTEMPTS);
       if (!batch.length) continue;
+      const started = this.now();
+      const timed = (outcome: 'ok' | 'failed' | 'cost_cap') => this.o.log?.({ event: 'triage', count: batch.length, ms: this.now() - started, outcome });
       try {
         const items = await triage(this.o.model, batch, this.o.role);
+        timed('ok');
         batch.forEach((e, i) => this.o.state.saveTriage(e.messageId, items[i]!));
         if (this.failing || this.capped) this.o.notice('info', 'Mail summaries are working again.');
         this.failing = false;
         this.capped = false;
       } catch (err) {
+        timed(err instanceof ModelError && err.kind === 'cost_cap' ? 'cost_cap' : 'failed');
         if (err instanceof ModelError && err.kind === 'cost_cap') {
           // Mail still arrives under the cap, listed by sender and subject without a summary.
           batch.forEach((e) => this.o.state.saveTriage(e.messageId, fallbackItem(e)));
@@ -146,6 +157,7 @@ export class MailPipeline {
     rows.sort((a, b) => order[a.urgency] - order[b.urgency]);
     const catchUp = now - oldest > CATCH_UP_AFTER_MS;
     this.o.post({ kind: 'notification', id: this.newId(), text: headline(rows, catchUp), at: now, mails: rows, ...(catchUp ? { catchUp: true } : {}), ...(quiet ? { quiet: true } : {}) });
+    this.o.log?.({ event: 'posted', count: ready.length, waitedMs: now - Math.min(...ready.map((e) => e.receivedAt)) });
     this.o.state.markNotified(
       ready.map((e) => e.messageId),
       now,
@@ -166,5 +178,12 @@ function toRow(e: MailEvent): MailRow {
     summary: t.summary,
     urgency: t.urgency,
     needsReply: t.needs_reply,
+    date: mailDate(e),
   };
+}
+
+/** Anyone can write a Date header: one later than arrival (plus clock skew) falls back to arrival. */
+const DATE_SKEW_MS = 5 * 60 * 1000;
+export function mailDate(e: Pick<MailEvent, 'date' | 'receivedAt'>): number {
+  return e.date !== null && Number.isFinite(e.date) && e.date > 0 && e.date <= e.receivedAt + DATE_SKEW_MS ? e.date : e.receivedAt;
 }

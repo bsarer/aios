@@ -217,7 +217,7 @@ export async function readFull(client: ImapFlow, folder: Folder, uid: number): P
   };
 }
 
-export function connect(c: MailConnection, password: string, opts: { idle: boolean }): ImapFlow {
+export function connect(c: MailConnection, password: string, opts: { idle: boolean; maxIdleMs?: number }): ImapFlow {
   const client = new ImapFlow({
     host: c.host,
     port: c.port,
@@ -227,6 +227,8 @@ export function connect(c: MailConnection, password: string, opts: { idle: boole
     disableAutoIdle: !opts.idle,
     // Start IDLE soon after each command so new mail is pushed within seconds.
     autoIdleDelay: 2000,
+    // Break and restart IDLE this often: a connection that died quietly then fails within minutes.
+    ...(opts.maxIdleMs ? { maxIdleTime: opts.maxIdleMs } : {}),
   });
   client.on('error', () => {
     // Surfaced through 'close'; the owner reconnects.

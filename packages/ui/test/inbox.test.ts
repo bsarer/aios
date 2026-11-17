@@ -1,7 +1,7 @@
 /** Calm mail alerts: what the side rail's inbox lists, counts and peeks for, read from notification items. */
 import type { ChatItem, MailRow } from '@aios/shared/protocol';
 import { describe, expect, it } from 'vitest';
-import { QUIET_MS, counts, groups, inboxRows, isNew, peekFor, senderName } from '../src/inbox';
+import { QUIET_MS, counts, groups, inboxRows, isNew, peekFor, rowTime, senderName } from '../src/inbox';
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 10, 16, 14, 0);
@@ -25,6 +25,22 @@ const note = (id: string, at: number, mails: MailRow[], catchUp?: boolean): Chat
 });
 
 describe('inbox rows', () => {
+  it("orders by each email's own date and shows it, not the notification's time", () => {
+    const items: ChatItem[] = [
+      note('batch', NOW - HOUR, [mail('INBOX:1', 'normal', { date: NOW - 3 * HOUR }), mail('INBOX:2', 'normal', { date: NOW - 90 * 60_000 })]),
+      note('later', NOW - 30 * 60_000, [mail('INBOX:3', 'normal', { date: NOW - 2 * HOUR })]),
+    ];
+    const rows = inboxRows(items, NOW);
+    expect(rows.map((r) => r.id)).toEqual(['INBOX:2', 'INBOX:3', 'INBOX:1']);
+    const times = rows.filter((r) => r.itemId === 'batch').map((r) => rowTime(r, NOW));
+    expect(new Set(times).size).toBe(2);
+    // A row without a date (posted before rows carried one) shows the notification's time.
+    const old = inboxRows([note('n', NOW - HOUR, [mail('INBOX:9', 'normal')])], NOW)[0]!;
+    expect(rowTime(old, NOW)).toBe(new Date(NOW - HOUR).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    // Yesterday's mail names the day too.
+    expect(rowTime({ ...old, date: NOW - 30 * HOUR }, NOW)).toContain(',');
+  });
+
   it('lists the last day of mail, newest notification first, each mail once', () => {
     const items: ChatItem[] = [
       note('old', NOW - 25 * HOUR, [mail('INBOX:1', 'normal')]),

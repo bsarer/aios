@@ -20,6 +20,8 @@ export const MailRow = z.strictObject({
   urgency: z.enum(['low', 'normal', 'high']),
   needsReply: z.boolean(),
   ignored: z.boolean().optional(),
+  /** When the email was sent (its Date header, else when it arrived), ms. Shown in the inbox. */
+  date: z.number().optional(),
 });
 export type MailRow = z.infer<typeof MailRow>;
 

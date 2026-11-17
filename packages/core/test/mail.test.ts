@@ -2,7 +2,7 @@ import type { ChatItem, TriageItem } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { findSpecial, parseMailId, walkStructure } from '../src/mail/imap.js';
-import { MailPipeline, headline, inQuietHours } from '../src/mail/pipeline.js';
+import { MailPipeline, type MailTiming, headline, inQuietHours, mailDate } from '../src/mail/pipeline.js';
 import { MailState, type NewMail } from '../src/mail/state.js';
 import { mailTools, recentMailTool } from '../src/mail/tools.js';
 import { triageRequest } from '../src/mail/triage.js';
@@ -49,6 +49,8 @@ class FakeSource implements MailSource {
   private existsCb: (() => void)[] = [];
   private closeCb: (() => void)[] = [];
   open_ = false;
+  /** A connection that died without closing: info() never answers. */
+  hang = false;
   constructor(private readonly s: FakeServer) {
     s.sources.push(this);
   }
@@ -58,6 +60,7 @@ class FakeSource implements MailSource {
     return this.info();
   }
   async info() {
+    if (this.hang) return new Promise<never>(() => undefined);
     if (!this.open_) throw new Error('closed');
     return { uidValidity: this.s.uidValidity, uidNext: this.s.nextUid };
   }
@@ -86,7 +89,7 @@ class FakeSource implements MailSource {
   }
 }
 
-function watcherSetup() {
+function watcherSetup(checkTimeoutMs?: number) {
   const server = new FakeServer();
   const state = new MailState(new Store(':memory:'));
   const statuses: WatcherStatus[] = [];
@@ -98,6 +101,7 @@ function watcherSetup() {
     onNew: (n) => (newCount += n),
     onStatus: (s) => statuses.push(s),
     backoffMs: [5],
+    ...(checkTimeoutMs ? { checkTimeoutMs } : {}),
   });
   const queued = () => state.withStatus('pending', 500).map((e) => e.messageId);
   return { server, state, w, statuses, queued, newCount: () => newCount };
@@ -149,6 +153,20 @@ describe('mail watcher', () => {
     await until(() => queued().length === 2);
     await w.check();
     expect(queued()).toEqual(['<x@x>', '<y@x>']);
+    await w.stop();
+  });
+
+  it('drops a connection that stops answering and picks up the mail on a new one', async () => {
+    const { server, w, queued, statuses } = watcherSetup(50);
+    w.start();
+    await until(() => statuses.includes('connected'));
+    await w.check();
+    server.sources.at(-1)!.hang = true; // silently dead: no close event, IDLE pushes nothing
+    server.msgs.push({ uid: server.nextUid, internal: Date.now(), messageId: '<late@x>', mailId: `INBOX:${server.nextUid++}`, from: 'l <l@x>', subject: 's', date: Date.now(), body: 'b' });
+    await w.check(); // the poll: gives up after 50 ms instead of waiting on the socket
+    await until(() => queued().length === 1);
+    expect(queued()).toEqual(['<late@x>']);
+    expect(statuses.filter((s) => s === 'connected').length).toBe(2);
     await w.stop();
   });
 
@@ -211,6 +229,7 @@ function fakeTriage(urgency: (id: string) => TriageItem['urgency'] = () => 'norm
 
 function pipelineSetup(over: { quietHours?: { start: string; end: string }; maxPerHour?: number; urgency?: (id: string) => TriageItem['urgency'] } = {}) {
   const state = new MailState(new Store(':memory:'));
+  const timings: MailTiming[] = [];
   const model = fakeTriage(over.urgency);
   const posted: ChatItem[] = [];
   let paused = false;
@@ -226,6 +245,7 @@ function pipelineSetup(over: { quietHours?: { start: string; end: string }; maxP
     maxPerHour: over.maxPerHour,
     quietHours: over.quietHours,
     now: () => now,
+    log: (t) => timings.push(t),
   });
   let n = 0;
   const arrive = (count = 1, date = now) => {
@@ -242,6 +262,7 @@ function pipelineSetup(over: { quietHours?: { start: string; end: string }; maxP
     posted,
     notes,
     arrive,
+    timings,
     setPaused: (v: boolean) => (paused = v),
     advance: (ms: number) => (now += ms),
     setNow: (iso: string) => (now = new Date(iso).getTime()),
@@ -294,6 +315,28 @@ describe('triage pipeline', () => {
     await p.run();
     expect(model.requests).toHaveLength(0);
     expect(posted).toHaveLength(0);
+  });
+
+  it("gives each mail its own email's date, not the notification's time", async () => {
+    const { arrive, notes, advance } = pipelineSetup();
+    const start = new Date('2026-10-19T09:00:00Z').getTime();
+    arrive(1, start - 40 * 60_000);
+    arrive(1, start - 5 * 60_000);
+    arrive(1, start + 24 * 60 * 60_000); // a Date header in the future: arrival time instead
+    advance(1000);
+    await until(() => notes().length === 1);
+    expect(notes()[0]!.mails!.map((m) => m.date).sort()).toEqual([start - 40 * 60_000, start - 5 * 60_000, start].sort());
+    expect(mailDate({ date: null, receivedAt: 7 })).toBe(7);
+  });
+
+  it('logs how long triage took and how long mail waited, with no mail text', async () => {
+    const { arrive, notes, timings } = pipelineSetup();
+    arrive(2);
+    await until(() => notes().length === 1);
+    expect(timings).toEqual([
+      { event: 'triage', count: 2, ms: 0, outcome: 'ok' },
+      { event: 'posted', count: 2, waitedMs: 0 },
+    ]);
   });
 
   it('puts urgent mail first and low-priority mail in the digest', async () => {

@@ -657,6 +657,7 @@ async function main(): Promise<void> {
     maxPerHour: config.notifications.maxPerHour,
     quietHours: config.notifications.quietHours,
     role: roleFor(config, 'mailTriage', 'triage'),
+    log: (entry) => audit.append({ kind: 'mail', ...entry }),
   });
   let mailProblem = '';
   const watcher = new MailWatcher({
@@ -669,6 +670,8 @@ async function main(): Promise<void> {
     },
     onStatus: (status, detail) => {
       shell.setMailStatus(status);
+      // A dropped or stuck connection: logged so slow mail can be traced to it.
+      if (status === 'connecting' && detail) audit.append({ kind: 'mail', event: 'reconnect', detail });
       if (status === 'error' && detail && detail !== mailProblem) {
         audit.append({ kind: 'mail', event: 'error', detail });
         shell.agent.notice('warning', `I can't reach your mailbox: ${detail}. I'll keep retrying.`);

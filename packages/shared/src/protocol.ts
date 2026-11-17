@@ -92,6 +92,8 @@ export const ChatItem = z.discriminatedUnion('kind', [
     streaming: z.boolean(),
     /** Set when generation was stopped by the user. */
     stopped: z.boolean().optional(),
+    /** K4: the user clicked Save to knowledge base on this reply. */
+    savedToKnowledge: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('tool'),
@@ -421,6 +423,8 @@ export const Status = z.strictObject({
   appsAt: z.enum(['screen', 'workspace']).optional(),
   /** V2: the microphone button's state; left out when [models.speech] is not set. */
   voice: z.strictObject({ maxSeconds: z.int().positive() }).optional(),
+  /** K4: the knowledge base is on, so replies show Save to knowledge base. */
+  knowledge: z.literal(true).optional(),
 });
 export type Status = z.infer<typeof Status>;
 
@@ -507,6 +511,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('update_start'), id: z.string().max(100) }),
   /** The gear in the status strip: opens the setup window on the current settings, nothing else. */
   z.strictObject({ type: z.literal('settings_open') }),
+  /** K4: Save to knowledge base on an assistant reply; names the reply, never its text. */
+  z.strictObject({ type: z.literal('knowledge_save'), id: z.string().max(100) }),
   z.strictObject({
     type: z.literal('draft_edit'),
     id: z.string().max(100),

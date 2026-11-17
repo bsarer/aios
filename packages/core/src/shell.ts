@@ -100,7 +100,14 @@ export interface ShellOptions {
   /** SG1: Signal message cards' Send and Discard, and /signal's status line. Without it, signal messages are ignored and /signal says Signal is off. */
   signal?: { actions: Pick<SignalActions, 'send' | 'discard'>; status: () => string };
   /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
-  knowledge?: { view: () => string; run: () => Promise<{ by: 'model' | 'code'; error?: string } | null> };
+  knowledge?: {
+    view: () => string;
+    run: () => Promise<{ by: 'model' | 'code'; error?: string } | null>;
+    /** K4: /knowledge check, written by code. */
+    check?: () => string;
+    /** K4: files a reply the user saved (their click) as a wiki page; its id, or null. */
+    save?: (text: string) => string | null;
+  };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
   /** P1: the install checks for /doctor, written by code. Without it, /doctor says to run `pnpm doctor`. */
@@ -188,6 +195,7 @@ export class Shell {
       model: this.o.modelName,
       ...(this.o.chatWindow?.appsAt ? { appsAt: this.o.chatWindow.appsAt } : {}),
       ...(this.o.voice ? { voice: { maxSeconds: this.o.voice.maxSeconds } } : {}),
+      ...(this.o.knowledge?.save ? { knowledge: true as const } : {}),
     };
   }
 
@@ -269,6 +277,8 @@ export class Shell {
     if (msg.type === 'update_start') return this.startUpdate(msg.id);
     // The user's own click on the gear; it runs only the fixed `astra settings`. Works while paused.
     if (msg.type === 'settings_open') return this.openSettings('click');
+    // K4: the user's own click on Save to knowledge base. Works while paused; there is no tool for it.
+    if (msg.type === 'knowledge_save') return this.saveToKnowledge(msg.id);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -454,6 +464,20 @@ export class Shell {
     return say(`Exported to ${path}`);
   }
 
+  /**
+   * K4: Save to knowledge base on a reply. The click names the reply; its text is read from the
+   * store, so nothing else can be saved this way, and each reply is saved once.
+   */
+  private saveToKnowledge(id: string): void {
+    const save = this.o.knowledge?.save;
+    const item = this.o.store.getItem(id);
+    if (!save || item?.kind !== 'assistant' || item.streaming || item.savedToKnowledge || !item.text.trim()) return;
+    const page = save(item.text);
+    this.o.audit.append({ kind: 'knowledge', event: 'save', saved: !!page, chars: item.text.length });
+    if (!page) return void this.agent.notice('warning', 'There was nothing in that reply to save.');
+    this.patchItem({ ...item, savedToKnowledge: true });
+  }
+
   /** U1: the newest /update card that offered Update, so an old card's button can't start one. */
   private updateCard: Extract<ChatItem, { kind: 'update' }> | null = null;
 
@@ -632,6 +656,7 @@ export class Shell {
       case 'knowledge': {
         const k = this.o.knowledge;
         if (!k) return say('The knowledge base is off. Turn it on with enabled = true under [knowledge] in your config.');
+        if (cmd.check) return say(k.check ? k.check() : 'The knowledge wiki is off (wiki = false under [knowledge]).');
         if (!cmd.update) return say(k.view());
         if (this.paused) return say('I am paused, so the knowledge base waits. Type /resume to continue.');
         say('Updating your knowledge base. This can take a few minutes.');

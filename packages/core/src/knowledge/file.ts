@@ -53,17 +53,17 @@ export const emptyKnowledge = (): Knowledge => ({
 });
 
 /** One plain line: no Markdown, tags or comment markers, so the file stays parseable and inert. */
-export function cleanNote(s: string): string {
+export function cleanNote(s: string, max = NOTE_CHARS): string {
   return s
     .normalize('NFKC')
     .replace(/[\u0000-\u001F\u007F\u2028\u2029]/g, ' ')
     .replace(/<!--|-->|[<>`*_#[\]|]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, NOTE_CHARS);
+    .slice(0, max);
 }
 
-const SOURCE_TAIL = new RegExp(`\\s*\\((${KNOWLEDGE_SOURCES.join('|')})(?:,\\s*(\\d{4}-\\d{2}-\\d{2}))?\\)\\s*$`);
+export const SOURCE_TAIL = new RegExp(`\\s*\\((${KNOWLEDGE_SOURCES.join('|')})(?:,\\s*(\\d{4}-\\d{2}-\\d{2}))?\\)\\s*$`);
 
 export function parseKnowledge(md: string): Knowledge {
   const k = emptyKnowledge();
@@ -112,7 +112,7 @@ export function renderKnowledge(k: Knowledge, userName: string): string {
   return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;
 }
 
-function writeAtomic(path: string, text: string): void {
+export function writeAtomic(path: string, text: string): void {
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, text, { mode: 0o600 });
   renameSync(tmp, path);

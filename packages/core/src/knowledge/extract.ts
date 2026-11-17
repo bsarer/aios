@@ -13,18 +13,32 @@
  */
 import { z } from 'zod';
 import type { ModelRequest } from '../model.js';
-import { KNOWLEDGE_EXTRACT_SYSTEM_PROMPT, KNOWLEDGE_TIDY_SYSTEM_PROMPT } from '../prompts.js';
+import { KNOWLEDGE_EXTRACT_SYSTEM_PROMPT, KNOWLEDGE_PAGE_SYSTEM_PROMPT, KNOWLEDGE_TIDY_SYSTEM_PROMPT } from '../prompts.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
 import { type Knowledge, MODEL_SECTIONS, type ModelSection, type Note, SECTION_LIMITS, cleanNote } from './file.js';
-import type { ExtractedNote } from './ledger.js';
+import type { ExtractedNote, ExtractedPage } from './ledger.js';
+import { PAGE_KINDS, type WikiPage, pageId } from './wiki.js';
 
 export const MAIL_TEXT_CHARS = 3000;
 export const DOC_TEXT_CHARS = 6000;
 export const MAX_NOTES_PER_ITEM = 12;
 
-/** The extractor's answer. Loose on length, so a long note is cut rather than failing the item. */
+export const MAX_PAGES_PER_ITEM = 8;
+export const MAX_FACTS_PER_PAGE = 6;
+
+const PageRef = z.strictObject({ kind: z.enum(PAGE_KINDS), name: z.string().min(1).max(300) });
+
+/**
+ * The extractor's answer. Loose on length, so a long note is cut rather than failing the item.
+ * K4: `pages` names the people, projects and organisations the item is about, with facts for
+ * each one's page and links to the others. Code files them; a page can only gain facts.
+ */
 export const ExtractedNotes = z.strictObject({
   notes: z.array(z.strictObject({ section: z.enum(MODEL_SECTIONS), text: z.string().min(1).max(1000) })).max(40),
+  pages: z
+    .array(z.strictObject({ ...PageRef.shape, facts: z.array(z.string().min(1).max(1000)).max(20), links: z.array(PageRef).max(20).optional() }))
+    .max(30)
+    .optional(),
 });
 
 /**
@@ -124,6 +138,34 @@ export function cleanExtracted(v: z.infer<typeof ExtractedNotes>): ExtractedNote
   return out;
 }
 
+/**
+ * K4: the extractor's pages, cleaned by code: names and facts to plain lines, pages with no
+ * usable name (one that makes no slug: "../..") left out, at most 8 pages, 6 facts and 6 links each.
+ */
+export function cleanPages(v: z.infer<typeof ExtractedNotes>): ExtractedPage[] {
+  const byId = new Map<string, ExtractedPage>();
+  for (const p of v.pages ?? []) {
+    const name = cleanNote(p.name, 80);
+    const id = pageId(p.kind, name);
+    if (!id) continue;
+    const page = byId.get(id) ?? { kind: p.kind, name, facts: [], links: [] };
+    if (!byId.has(id)) {
+      if (byId.size >= MAX_PAGES_PER_ITEM) continue;
+      byId.set(id, page);
+    }
+    for (const f of p.facts) {
+      const text = cleanNote(f, 300);
+      if (text && page.facts.length < MAX_FACTS_PER_PAGE && !page.facts.some((x) => normal(x) === normal(text))) page.facts.push(text);
+    }
+    for (const l of p.links ?? []) {
+      const lname = cleanNote(l.name, 80);
+      const lid = pageId(l.kind, lname);
+      if (lid && lid !== id && page.links.length < MAX_FACTS_PER_PAGE && !page.links.some((x) => pageId(x.kind, x.name) === lid)) page.links.push({ kind: l.kind, name: lname });
+    }
+  }
+  return [...byId.values()].filter((p) => p.facts.length || p.links.length);
+}
+
 /** "Ana Lopez: sister…" → "ana lopez": a person's note is replaced by a newer one about them. */
 function personKey(text: string): string | null {
   const m = /^([^:]{2,60}):/.exec(text);
@@ -153,6 +195,25 @@ export function mergeNotes(current: Knowledge, add: (Note & { section: ModelSect
     k.sections[s] = [...own, ...rest.slice(0, Math.max(0, SECTION_LIMITS[s] - own.length))];
   }
   return k;
+}
+
+// ── K4: a page's summary, rewritten when it gets new facts ──
+
+export const PAGE_FACTS_IN_SUMMARY = 80;
+export const PageSummary = z.strictObject({
+  summary: z.string().max(3000),
+  contradictions: z.array(z.string().min(1).max(1000)).max(10),
+});
+
+export function pageSummaryRequest(role: ModelRequest['role'], userName: string, p: WikiPage): ModelRequest {
+  const lines = [`Page: ${p.title} (${p.kind})`, `Summary now: ${p.summary || '(none)'}`, 'Facts, newest first:', ...p.facts.slice(0, PAGE_FACTS_IN_SUMMARY).map((f) => `- ${f.text} (${f.source}${f.on ? `, ${f.on}` : ''})`)];
+  return {
+    role,
+    messages: [
+      { role: 'system', content: KNOWLEDGE_PAGE_SYSTEM_PROMPT },
+      { role: 'user', content: [`Person: ${userName}`, 'One page of their knowledge wiki:', wrapUntrusted('knowledge', p.id, sanitize({ text: lines.join('\n') }, { maxChars: 20_000 }))].join('\n') },
+    ],
+  };
 }
 
 // ── Tidy (once, after the first pass) ──

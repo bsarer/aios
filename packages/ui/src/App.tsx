@@ -53,6 +53,7 @@ export function App() {
     onTodo: (id, todoId, action, hash) => send({ type: 'todo_action', id, todoId, action, hash }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
     onUpdate: (id) => send({ type: 'update_start', id }),
+    onKnowledgeSave: state.status?.knowledge ? (id) => send({ type: 'knowledge_save', id }) : undefined,
   };
 
   // Braced bodies: an effect may only return a cleanup function, and newer Chromium

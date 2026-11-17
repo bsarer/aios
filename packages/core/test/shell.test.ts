@@ -324,3 +324,55 @@ describe('audit and tiers', () => {
     expect(readFileSync(join(dir, 'a.jsonl'), 'utf8')).toContain('"decision":"denied"');
   });
 });
+
+describe('Clear', () => {
+  const note = (at: number, catchUp = false): ChatItem => ({ kind: 'notification', id: `n${at}`, text: '2 new emails', at, mails: [], ...(catchUp ? { catchUp } : {}) });
+
+  it('the button and /clear start the screen and the model’s context again, keep mail for the inbox, and delete nothing', async () => {
+    const { shell, store, model, events, items, audits } = setup([{ text: ['First answer.'] }, { text: ['Second answer.'] }]);
+    store.saveItem(note(CLOCK.getTime() - 1000, true));
+    await shell.handle({ type: 'send', text: 'what is the capital of France?' });
+    expect(kinds(items())).toContain('user');
+
+    await shell.handle({ type: 'chat_clear' });
+    const hello = events.filter((e) => e.type === 'hello').at(-1);
+    expect(hello).toMatchObject({ type: 'hello', clearedAt: CLOCK.getTime() });
+    // The old notification stays for the inbox; the chat itself is the greeting only.
+    expect(kinds(items())).toEqual(['notification', 'assistant']);
+    expect(items().at(-1)).toMatchObject({ kind: 'assistant', text: expect.stringContaining('What can I do for you?') });
+    expect(model.requests).toHaveLength(1);
+
+    await shell.handle({ type: 'send', text: 'and Spain?' });
+    const sent = JSON.stringify(model.requests[1]?.messages);
+    expect(sent).toContain('and Spain?');
+    expect(sent).not.toContain('capital of France');
+    expect(sent).not.toContain('First answer.');
+    // Nothing was deleted: the rows are still in the database, for the knowledge base.
+    expect(store.chatTurnsBetween(0, CLOCK.getTime() + 1).map((t) => t.content)).toContain('what is the capital of France?');
+
+    await shell.handle({ type: 'send', text: '/new' });
+    expect(kinds(items())).toEqual(['notification', 'assistant']);
+    expect(audits().filter((a) => a.kind === 'chat')).toEqual([expect.objectContaining({ event: 'clear', via: 'click' }), expect.objectContaining({ event: 'clear', via: 'command' })]);
+  });
+
+  it('works while paused, never calls the model, and waits for a reply being written', async () => {
+    const paused = setup();
+    await paused.shell.handle({ type: 'send', text: '/pause' });
+    await paused.shell.handle({ type: 'send', text: '/clear' });
+    expect(paused.store.clearedAt).toBe(CLOCK.getTime());
+    expect(paused.model.requests).toHaveLength(0);
+
+    const busy = setup([{ text: ['Thinking'], hang: true }]);
+    const run = busy.shell.handle({ type: 'send', text: 'a long question' });
+    await new Promise((r) => setTimeout(r, 10));
+    await busy.shell.handle({ type: 'chat_clear' });
+    expect(busy.store.clearedAt).toBeNull();
+    expect(busy.items().at(-1)).toMatchObject({ kind: 'notice', text: expect.stringContaining('Esc') });
+    await busy.shell.handle({ type: 'stop' });
+    await run;
+  });
+
+  it('the model has no tool that clears the chat', () => {
+    expect(JSON.stringify(ALPHA_TOOLS)).not.toMatch(/chat_clear|clear_chat|\/clear/i);
+  });
+});

@@ -147,12 +147,43 @@ export class Store {
     return parsed.success ? parsed.data : null;
   }
 
+  /**
+   * The chat as the screen shows it: items after the last Clear, plus mail notifications from
+   * before it, which the side rail's inbox still reads (the chat hides those, see `clearedAt`).
+   */
   recentItems(limit = 200): ChatItem[] {
-    const rows = this.db.prepare('SELECT json FROM items ORDER BY seq DESC LIMIT ?').all(limit) as { json: string }[];
+    const from = this.clearMark('items');
+    const rows = this.db
+      .prepare(`SELECT json FROM items WHERE seq > ? OR json_extract(json, '$.kind') = 'notification' ORDER BY seq DESC LIMIT ?`)
+      .all(from, limit) as { json: string }[];
     return rows.reverse().flatMap((r) => {
       const parsed = ChatItem.safeParse(JSON.parse(r.json));
       return parsed.success ? [parsed.data] : [];
     });
+  }
+
+  /**
+   * Clear (the chat's button, /clear): the screen and the model's context start again after
+   * this point. Nothing is deleted; the knowledge base still reads the chat by time.
+   */
+  clearChat(at: number): void {
+    const max = (table: 'items' | 'turns') => (this.db.prepare(`SELECT COALESCE(MAX(seq), 0) seq FROM ${table}`).get() as { seq: number }).seq;
+    this.db.transaction(() => {
+      this.setSetting('chat_cleared_items', String(max('items')));
+      this.setSetting('chat_cleared_turns', String(max('turns')));
+      this.setSetting('chat_cleared_at', String(at));
+    })();
+  }
+
+  /** When the chat was last cleared (epoch ms), or null. */
+  get clearedAt(): number | null {
+    const v = Number(this.getSetting('chat_cleared_at'));
+    return Number.isFinite(v) && v > 0 ? v : null;
+  }
+
+  private clearMark(table: 'items' | 'turns'): number {
+    const v = Number(this.getSetting(`chat_cleared_${table}`));
+    return Number.isInteger(v) && v > 0 ? v : 0;
   }
 
   // ── Model turns ──
@@ -167,9 +198,10 @@ export class Store {
   /**
    * The last `limit` turns, trimmed so the window starts at a user message: a tool
    * result or tool-calling assistant turn without its pair would be rejected by the API.
+   * Nothing from before the last Clear.
    */
   recentTurns(limit = 30): ChatMessage[] {
-    const rows = this.db.prepare('SELECT * FROM turns ORDER BY seq DESC LIMIT ?').all(limit) as {
+    const rows = this.db.prepare('SELECT * FROM turns WHERE seq > ? ORDER BY seq DESC LIMIT ?').all(this.clearMark('turns'), limit) as {
       role: string;
       content: string | null;
       tool_calls: string | null;

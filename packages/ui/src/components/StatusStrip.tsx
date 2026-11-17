@@ -44,12 +44,16 @@ interface Props {
   status: Status | null;
   conn: Connection;
   onSettings?: () => void;
+  /** Clear: starts the chat again (/clear). Left out while there is nothing to clear. */
+  onClear?: (() => void) | undefined;
+  /** A reply is being written: Clear waits for it (Esc stops it). */
+  working?: boolean;
   /** New mail waiting in the side rail's inbox; shown instead of the plain mail item. */
   mail?: { fresh: number; urgent: number };
   onMail?: () => void;
 }
 
-export function StatusStrip({ status, conn, onSettings, mail, onMail }: Props) {
+export function StatusStrip({ status, conn, onSettings, onClear, working = false, mail, onMail }: Props) {
   const now = useNow();
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const date = now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
@@ -112,6 +116,20 @@ export function StatusStrip({ status, conn, onSettings, mail, onMail }: Props) {
           <span data-testid="cost">{cost}</span> today
         </span>
       </Item>
+      {onClear && (
+        <button
+          type="button"
+          data-testid="clear-chat"
+          onClick={onClear}
+          disabled={conn !== 'open' || working}
+          title={working ? 'Clear: press Esc to stop the reply first' : 'Clear the chat and start a new conversation (/clear). Your mail stays in the inbox.'}
+          className="-mx-1 flex h-8 items-center gap-1.5 rounded-lg px-2 hover:bg-[var(--panel)] disabled:opacity-40"
+          style={{ color: 'var(--muted)' }}
+        >
+          <Icon name="erase" size={16} />
+          Clear
+        </button>
+      )}
       {onSettings && (
         <button
           type="button"

@@ -66,13 +66,18 @@ export function App() {
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [state.items]);
 
+  // After Clear, mail notifications from before it stay for the inbox but leave the chat.
+  const shown = useMemo(() => {
+    const cleared = state.clearedAt;
+    return cleared === null ? state.items : state.items.filter((i) => i.kind !== 'notification' || i.at > cleared);
+  }, [state.items, state.clearedAt]);
   // Before the first message of the session, the greeting sits mid-screen with a few starters.
-  const fresh = !state.items.some((i) => i.kind === 'user');
+  const fresh = !shown.some((i) => i.kind === 'user');
 
   return (
     // While the inbox is open on a wide screen, the chat moves aside for it (styles.css).
     <div className={`flex h-full flex-col ${inbox.open ? 'inbox-open' : ''}`}>
-      <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} mail={{ fresh: inbox.fresh, urgent: inbox.urgent }} onMail={() => inbox.setOpen(!inbox.open)} />
+      <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} onClear={fresh ? undefined : () => send({ type: 'chat_clear' })} working={working} mail={{ fresh: inbox.fresh, urgent: inbox.urgent }} onMail={() => inbox.setOpen(!inbox.open)} />
       {/* S7: the chat keeps its own screen; this says where apps are and how to come back. */}
       {state.status?.appsAt && (
         <div data-testid="apps-hint" className="mx-auto -mt-1 px-4 text-center text-[13px]" style={{ color: 'var(--muted)' }}>
@@ -98,13 +103,13 @@ export function App() {
       )}
       <main className="flex-1 overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_28px)]" data-testid="chat">
         <div className={`mx-auto flex w-[min(760px,calc(100%-24px))] flex-col gap-6 py-10 ${fresh ? 'min-h-full justify-center' : ''}`}>
-          {state.items.map((item) => (
+          {shown.map((item) => (
             // Everything but the two sides of the conversation lines up with the assistant's text.
             <div key={item.id} className={item.kind === 'user' || item.kind === 'assistant' ? '' : 'pl-10 empty:hidden'}>
               <Message item={item} actions={actions} />
             </div>
           ))}
-          {fresh && state.items.length > 0 && <Starters mail={state.status?.mail === 'connected'} disabled={conn !== 'open'} onSend={actions.onSend} />}
+          {fresh && shown.length > 0 && <Starters mail={state.status?.mail === 'connected'} disabled={conn !== 'open'} onSend={actions.onSend} />}
           <div ref={bottom} />
         </div>
       </main>

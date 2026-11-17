@@ -97,7 +97,9 @@ import { todoTools } from './todos/tools.js';
 import { WidgetBoard } from './widgets/widgets.js';
 import { KnowledgeCrawler, knowledgeView, progressText } from './knowledge/crawler.js';
 import { KnowledgeFile } from './knowledge/file.js';
-import { knowledgeReadTool } from './knowledge/tool.js';
+import { knowledgeReadTool, knowledgeSearchTool } from './knowledge/tool.js';
+import { KnowledgeWiki, wikiLine } from './knowledge/wiki.js';
+import { utcToLocal } from './calendar/time.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -543,6 +545,8 @@ async function main(): Promise<void> {
   // K1: the knowledge base, updated hourly in the background. Notes only: never memory, never a tool call.
   const kc = config.knowledge;
   const knowledgeFile = kc.enabled ? new KnowledgeFile(join(configDir(), 'knowledge'), config.user.name) : undefined;
+  // K4: the wiki pages beside it.
+  const knowledgeWiki = knowledgeFile && kc.wiki ? new KnowledgeWiki(knowledgeFile.dir) : undefined;
   // K2: the first pass on backfillModel (cloud by default), hourly updates on model (local by default).
   const knowledgeModel = (which: 'local' | 'cloud') => (which === 'cloud' ? { model, role: 'nightly' as const } : localModel ? { model: localModel, role: 'local' as const } : null);
   const knowledge = knowledgeFile
@@ -563,9 +567,13 @@ async function main(): Promise<void> {
         models: { backfill: knowledgeModel(kc.backfillModel), hourly: knowledgeModel(kc.model), older: kc.olderMail === 'off' ? null : knowledgeModel(kc.olderMail === 'cloud' ? 'cloud' : 'local') },
         isPaused,
         quietHours: config.notifications.quietHours,
+        wiki: knowledgeWiki,
+        // Counts only, written by code.
+        onCheck: (line) => shell?.agent.notice('info', `Weekly knowledge check. ${line} Type /knowledge check to see them.`),
       })
     : undefined;
   if (knowledgeFile) tools.register(knowledgeReadTool({ file: knowledgeFile }));
+  if (knowledgeFile && knowledgeWiki) tools.register(knowledgeSearchTool({ file: knowledgeFile, wiki: knowledgeWiki }));
   // V2: the chat's microphone button, when [models.speech] is set.
   const dictation = config.models.speech ? new Dictation({ model, audit, maxSeconds: config.models.speech.maxSeconds }) : undefined;
   const themePath = omarchyThemePath();
@@ -598,7 +606,28 @@ async function main(): Promise<void> {
     ...(todos ? { todos } : {}),
     ...(brief ? { brief } : {}),
     ...(widgets ? { widgets } : {}),
-    ...(knowledge && knowledgeFile ? { knowledge: { view: () => knowledgeView(knowledgeFile, progressText(knowledge.progress(), kc.backfillModel === 'cloud')), run: () => knowledge.run() } } : {}),
+    ...(knowledge && knowledgeFile
+      ? {
+          knowledge: {
+            view: () => knowledgeView(knowledgeFile, [progressText(knowledge.progress(), kc.backfillModel === 'cloud'), ...(knowledgeWiki ? [wikiLine(knowledgeWiki)] : [])].join('\n')),
+            run: () => knowledge.run(),
+            ...(knowledgeWiki
+              ? {
+                  check: () => knowledge.check(),
+                  save: (text: string) => {
+                    const stamp = utcToLocal(Date.now(), config.user.timezone).replace('T', ' ').slice(0, 16);
+                    const id = knowledgeWiki.saveAnswer(text, stamp);
+                    if (id) {
+                      knowledgeWiki.writeIndex(stamp);
+                      knowledgeWiki.log(stamp, `Saved an answer from the chat: ${id}`);
+                    }
+                    return id;
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(signal ? { signal: { actions: signal.actions, status: () => signal.service.status() } } : {}),
     ...(musicPlayer ? { music: { now: async () => describeNowPlaying(await musicPlayer.nowPlaying().catch(() => null)) } } : {}),

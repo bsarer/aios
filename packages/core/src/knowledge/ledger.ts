@@ -18,6 +18,7 @@
 import { createHash } from 'node:crypto';
 import type { Store } from '../store.js';
 import type { ModelSection } from './file.js';
+import type { PageKind } from './wiki.js';
 
 export type ItemKind = 'sent' | 'mail' | 'file' | 'chat' | 'calendar';
 export type ItemState = 'pending' | 'extracted' | 'merged' | 'empty' | 'failed';
@@ -27,6 +28,14 @@ export type Phase = 'backfill' | 'hourly' | 'older';
 export interface ExtractedNote {
   section: ModelSection;
   text: string;
+}
+
+/** K4: what one item says about one person, project or organisation, for its wiki page. */
+export interface ExtractedPage {
+  kind: PageKind;
+  name: string;
+  facts: string[];
+  links: { kind: PageKind; name: string }[];
 }
 
 export interface Item {
@@ -39,6 +48,8 @@ export interface Item {
   phase: Phase;
   state: ItemState;
   notes: ExtractedNote[];
+  /** K4: facts for wiki pages. */
+  pages: ExtractedPage[];
   attempts: number;
   priority: number;
 }
@@ -55,7 +66,11 @@ interface Row {
   priority: number;
 }
 
-const toItem = (r: Row): Item => ({ ...r, notes: r.notes ? (JSON.parse(r.notes) as ExtractedNote[]) : [] });
+/** Notes are stored as a list (K2), or with K4's pages as { notes, pages }. */
+const toItem = (r: Row): Item => {
+  const v = r.notes ? (JSON.parse(r.notes) as ExtractedNote[] | { notes: ExtractedNote[]; pages: ExtractedPage[] }) : [];
+  return { ...r, notes: Array.isArray(v) ? v : v.notes, pages: Array.isArray(v) ? [] : v.pages };
+};
 
 /** Priorities (0 first). Sent mail first: the user's own words say most. */
 export const PRIORITY = { sent: 0, replied: 1, contact: 2, mail: 3, file: 4, chat: 5, calendar: 6 } as const;
@@ -132,10 +147,11 @@ export class KnowledgeLedger {
     return (this.db.prepare("SELECT * FROM knowledge_items WHERE state = 'extracted' ORDER BY at DESC LIMIT ?").all(limit) as Row[]).map(toItem);
   }
 
-  setExtracted(key: string, notes: ExtractedNote[], now: number): void {
+  setExtracted(key: string, notes: ExtractedNote[], now: number, pages: ExtractedPage[] = []): void {
+    const any = notes.length > 0 || pages.length > 0;
     this.db
       .prepare('UPDATE knowledge_items SET state = ?, notes = ?, updated_at = ? WHERE key = ?')
-      .run(notes.length ? 'extracted' : 'empty', notes.length ? JSON.stringify(notes) : null, now, key);
+      .run(any ? 'extracted' : 'empty', any ? JSON.stringify(pages.length ? { notes, pages } : notes) : null, now, key);
   }
 
   /** One more failed try; `failed` after `maxAttempts`. */

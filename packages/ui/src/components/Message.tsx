@@ -76,6 +76,8 @@ export interface MessageActions {
   onTodo: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void;
   /** U1: Update on an /update card; opens a terminal running astra update. */
   onUpdate: (id: string) => void;
+  /** K4: Save to knowledge base on a reply; names the reply. Left out when the knowledge base is off. */
+  onKnowledgeSave?: ((id: string) => void) | undefined;
 }
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
@@ -1064,6 +1066,19 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
             <Markdown>{item.text}</Markdown>
           </div>
           {item.stopped && <div className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>Stopped</div>}
+          {!item.streaming && actions.onKnowledgeSave && item.text.trim() && (
+            <div className="mt-1 text-sm">
+              {item.savedToKnowledge ? (
+                <span data-testid="knowledge-saved" style={{ color: 'var(--muted)' }}>
+                  ✓ Saved to knowledge base
+                </span>
+              ) : (
+                <button type="button" data-testid="knowledge-save" className="rounded-lg px-1.5 py-0.5 opacity-60 hover:opacity-100" style={{ color: 'var(--muted)' }} onClick={() => actions.onKnowledgeSave?.(item.id)}>
+                  Save to knowledge base
+                </button>
+              )}
+            </div>
+          )}
         </div>
       );
     case 'tool':

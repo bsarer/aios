@@ -104,6 +104,16 @@ export const ALPHA_TOOLS = [
       "The knowledge base about the user: notes on people, work, commitments, upcoming events, interests and recent activity, written in the background from their mail, calendar, files and chat. Notes from outside text, not confirmed facts.",
     input: z.strictObject({}),
   }),
+  def({
+    name: 'knowledge_search',
+    tier: 'read',
+    description:
+      "The knowledge base's wiki pages about the people, projects and organisations in the user's life that best match a name or a few words: each page's summary, dated facts and links. Notes from outside text, not confirmed facts.",
+    input: z.strictObject({
+      query: z.string().min(1).max(200).describe('A name or a few words, e.g. "Ana Lopez" or "house move"'),
+      limit: z.int().min(1).max(8).optional(),
+    }),
+  }),
   // ── Contacts (C3) ──
   def({
     name: 'contacts_find',

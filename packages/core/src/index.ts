@@ -89,3 +89,4 @@ export * from './knowledge/tool.js';
 export * from './knowledge/extract.js';
 export * from './knowledge/ledger.js';
 export * from './knowledge/mailfilter.js';
+export * from './knowledge/wiki.js';

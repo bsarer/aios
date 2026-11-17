@@ -423,6 +423,12 @@ export const KnowledgeConfig = z.strictObject({
    * it), inside cost.dailyCapUsd, so reading old mail never uses up the chat's budget. 0: no cloud reading.
    */
   dailyBudgetUsd: z.number().min(0).max(50).default(0.5),
+  /** K4: a wiki page per person, project and organisation in knowledge/people, projects and orgs, with index.md and log.md. */
+  wiki: z.boolean().default(true),
+  /** K4: pages whose summary is rewritten per run when they get new facts (one small call each, no tools). 0: summaries are never written. */
+  pageSummariesPerRun: z.int().min(0).max(100).default(10),
+  /** K4: the check for old commitments, duplicates and pages with no links, every this many days. 0: only /knowledge check. */
+  checkEveryDays: z.int().min(0).max(90).default(7),
 });
 export type KnowledgeConfig = z.infer<typeof KnowledgeConfig>;
 

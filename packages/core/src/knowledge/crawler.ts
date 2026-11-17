@@ -18,12 +18,19 @@
  * is read on the local model overnight by default. Cloud reading stops for the day at
  * `dailyBudgetUsd`, inside the daily cost cap; /knowledge shows what it spent.
  *
+ * K4, the wiki (`wiki.ts`): the same call names the people, projects and organisations the item
+ * is about, with facts and links; code files them on one page each, then rewrites up to
+ * `pageSummariesPerRun` changed pages' summaries (one call each, no tools, the page inside
+ * <untrusted>), and writes index.md and log.md. Every `checkEveryDays`, code checks for old
+ * commitments, duplicates and pages with no links, and `onCheck` gets the counts.
+ *
  * Each item is read once (the ledger, `ledger.ts`) by one small structured call with no tools,
  * the item inside <untrusted> (`extract.ts`). Code merges the notes into the file and writes
  * Upcoming from the calendar. Without a model, the items wait and code adds plain lines to
  * Recent activity. Nothing here calls a tool, writes memory or config, or posts to the chat;
  * the audit log records counts only.
  */
+import { existsSync } from 'node:fs';
 import type { KnowledgeConfig } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import type { CalEvent, CalendarApi } from '../calendar/google.js';
@@ -36,10 +43,13 @@ import type { Store } from '../store.js';
 import {
   DOC_TEXT_CHARS,
   ExtractedNotes,
+  PageSummary,
   TidiedNotes,
   calendarRequest,
   chatRequest,
   cleanExtracted,
+  cleanPages,
+  pageSummaryRequest,
   cleanTidied,
   docRequest,
   mailRequest,
@@ -49,6 +59,7 @@ import {
 import { type Knowledge, type KnowledgeFile, type ModelSection, type Note, SECTION_LIMITS, cleanNote } from './file.js';
 import { type Item, type ItemKind, KnowledgeLedger, PRIORITY, type Phase, type Progress } from './ledger.js';
 import { skipReason } from './mailfilter.js';
+import { type FiledFact, type KnowledgeWiki, checkText } from './wiki.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -92,6 +103,10 @@ export interface KnowledgeCrawlerOptions {
   models: { backfill: ModelChoice | null; hourly: ModelChoice | null; older?: ModelChoice | null | undefined };
   isPaused: () => boolean;
   quietHours?: { start: string; end: string } | undefined;
+  /** K4: the wiki pages beside the file; none when [knowledge] wiki is off. */
+  wiki?: KnowledgeWiki | undefined;
+  /** K4: the weekly check's one line of counts, written by code (main posts it as a notice). */
+  onCheck?: ((line: string) => void) | undefined;
   now?: () => number;
 }
 
@@ -110,6 +125,9 @@ export interface KnowledgeRun {
   /** K3: emails left out this run as bulk, automated or from a skipped sender. */
   skipped: number;
   tidied: boolean;
+  /** K4: wiki pages that got new facts or links, and summaries rewritten. */
+  pages: number;
+  summaries: number;
   error?: string;
 }
 
@@ -501,9 +519,10 @@ export class KnowledgeCrawler {
           const { value, result } = await choice.model.structured(req, 'knowledge_notes', ExtractedNotes);
           this.spend(choice, result?.usage?.costUsd, now);
           const found = cleanExtracted(value);
-          this.ledger.setExtracted(item.key, found, now);
+          const pages = this.o.wiki ? cleanPages(value) : [];
+          this.ledger.setExtracted(item.key, found, now, pages);
           read++;
-          notes += found.length;
+          notes += found.length + pages.reduce((n, p) => n + p.facts.length, 0);
         } catch (err) {
           const kind = err instanceof ModelError ? err.kind : 'read_error';
           if (STOP_KINDS.has(kind)) {
@@ -539,7 +558,7 @@ export class KnowledgeCrawler {
     const older = this.olderModel(now);
     if (older && phase === 'hourly') reads.push([older, ['older']]);
     const evs = await this.events(now);
-    const run: KnowledgeRun = { by: choice ? 'model' : 'code', phase, found, read: 0, notes: 0, older: 0, skipped: this.skippedThisRun, tidied: false };
+    const run: KnowledgeRun = { by: choice ? 'model' : 'code', phase, found, read: 0, notes: 0, older: 0, skipped: this.skippedThisRun, tidied: false, pages: 0, summaries: 0 };
     let left = this.o.config.perRun;
     for (const [m, phases] of reads) {
       if (!m || left <= 0) continue;
@@ -598,8 +617,11 @@ export class KnowledgeCrawler {
       }
     }
 
-    k.updated = utcToLocal(now, tz).replace('T', ' ').slice(0, 16);
+    const stamp = utcToLocal(now, tz).replace('T', ' ').slice(0, 16);
+    k.updated = stamp;
     this.o.file.write(k, utcToLocal(now, tz).slice(0, 10), this.o.config.keepDays);
+    // K4: the facts for wiki pages, filed by code, then the changed pages' summaries.
+    if (this.o.wiki) await this.updateWiki(this.o.wiki, extracted, choice, run, stamp, now);
     this.ledger.setMerged(extracted.map((i) => i.key), now);
     this.setting.set('ranAt', String(now));
     const p = this.ledger.progress();
@@ -615,6 +637,8 @@ export class KnowledgeCrawler {
       older: run.older,
       skipped: run.skipped,
       tidied: run.tidied,
+      pages: run.pages,
+      summaries: run.summaries,
       mail: p.mail,
       files: p.files,
       spentToday: this.spentToday(now),
@@ -622,6 +646,79 @@ export class KnowledgeCrawler {
       ...(run.error ? { error: run.error } : {}),
     });
     return run;
+  }
+
+  // ── K4: the wiki ──
+
+  private dirtyPages(): string[] {
+    try {
+      const v = JSON.parse(this.setting.get('wikiDirty') || '[]') as unknown;
+      return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async updateWiki(wiki: KnowledgeWiki, extracted: Item[], choice: ModelChoice | null, run: KnowledgeRun, stamp: string, now: number): Promise<void> {
+    const tz = this.o.timeZone;
+    const facts: FiledFact[] = extracted.flatMap((i) =>
+      i.pages.flatMap((p) => {
+        const base = { kind: p.kind, name: p.name, links: p.links, source: sourceOf(i.kind), on: utcToLocal(i.at, tz).slice(0, 10) };
+        // The links ride on the first fact, or on an entry of their own when there are none.
+        return p.facts.length ? p.facts.map((text, n) => ({ ...base, text, links: n ? [] : p.links })) : [{ ...base, text: '' }];
+      }),
+    );
+    const filed = wiki.file(facts, stamp);
+    run.pages = filed.changed.length;
+    // Pages waiting for a summary, oldest first; kept between runs (500 at most).
+    let dirty = [...new Set([...this.dirtyPages(), ...filed.changed])].slice(-500);
+    const limit = this.o.config.pageSummariesPerRun;
+    if (choice && limit > 0 && !run.error) {
+      for (const id of dirty.slice(0, limit)) {
+        if (this.overBudget(choice, now)) break;
+        const page = wiki.read(id);
+        if (!page?.facts.length) {
+          dirty = dirty.filter((d) => d !== id);
+          continue;
+        }
+        try {
+          const { value, result } = await choice.model.structured(pageSummaryRequest(choice.role, this.o.userName, page), 'knowledge_page', PageSummary);
+          this.spend(choice, result?.usage?.costUsd, now);
+          wiki.setSummary(id, value.summary, value.contradictions, stamp);
+          run.summaries++;
+          dirty = dirty.filter((d) => d !== id);
+        } catch (err) {
+          const kind = err instanceof ModelError ? err.kind : 'read_error';
+          if (STOP_KINDS.has(kind)) break;
+          // A page that can't be summarised waits for its next new fact.
+          dirty = dirty.filter((d) => d !== id);
+          this.o.audit.append({ kind: 'knowledge', event: 'summary_failed', error: kind });
+        }
+      }
+    }
+    this.setting.set('wikiDirty', JSON.stringify(dirty));
+    if (filed.changed.length || run.summaries || !existsSync(wiki.indexPath)) wiki.writeIndex(stamp);
+    if (filed.changed.length || run.summaries) {
+      wiki.log(stamp, `Filed ${filed.facts} facts on ${filed.changed.length} pages (${filed.created} new)${run.summaries ? `, rewrote ${run.summaries} summaries` : ''}: ${filed.changed.slice(0, 12).join(', ')}${filed.changed.length > 12 ? ', …' : ''}`);
+    }
+    // The check, every checkEveryDays, once there are pages.
+    const every = this.o.config.checkEveryDays;
+    const checkedAt = this.num('checkedAt');
+    if (every > 0 && (!checkedAt || now - checkedAt >= every * DAY) && wiki.ids().length) {
+      this.setting.set('checkedAt', String(now));
+      const text = this.check(stamp);
+      this.o.onCheck?.(text.split('\n')[0]!);
+    }
+  }
+
+  /** K4: the check, by code, written to check.md; also /knowledge check. */
+  check(stamp = utcToLocal(this.now(), this.o.timeZone).replace('T', ' ').slice(0, 16)): string {
+    const wiki = this.o.wiki;
+    if (!wiki) return 'The knowledge wiki is off (wiki = false under [knowledge]).';
+    const c = wiki.check(this.o.file.read(), stamp.slice(0, 10));
+    this.o.audit.append({ kind: 'knowledge', event: 'check', pages: c.pages, stale: c.stale.length, duplicates: c.duplicates.length, orphans: c.orphans.length, disagree: c.disagree.length });
+    wiki.log(stamp, checkText(c, stamp).split('\n')[0]!);
+    return wiki.writeCheck(c, stamp);
   }
 }
 

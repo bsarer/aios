@@ -50,6 +50,9 @@ const CONFIG: KnowledgeConfig = {
   skipSenders: [],
   alwaysSenders: [],
   dailyBudgetUsd: 0.5,
+  wiki: true,
+  pageSummariesPerRun: 10,
+  checkEveryDays: 7,
 };
 
 function event(id: string, start: string, end: string, o: Partial<CalEvent> = {}): CalEvent {
@@ -457,8 +460,9 @@ describe('reading the knowledge base', () => {
   });
 
   it('/knowledge shows how far it is and the file; /knowledge update runs it; it waits while paused', async () => {
-    expect(parseCommand('/knowledge')).toEqual({ name: 'knowledge', update: false });
-    expect(parseCommand('/knowledge update')).toEqual({ name: 'knowledge', update: true });
+    expect(parseCommand('/knowledge')).toEqual({ name: 'knowledge', update: false, check: false });
+    expect(parseCommand('/knowledge update')).toEqual({ name: 'knowledge', update: true, check: false });
+    expect(parseCommand('/knowledge check')).toEqual({ name: 'knowledge', update: false, check: true });
     const r = rig();
     const notices: string[] = [];
     const shell = new Shell({

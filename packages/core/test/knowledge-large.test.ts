@@ -43,6 +43,9 @@ const CONFIG: KnowledgeConfig = {
   skipSenders: [],
   alwaysSenders: [],
   dailyBudgetUsd: 0.5,
+  wiki: true,
+  pageSummariesPerRun: 10,
+  checkEveryDays: 7,
 };
 
 interface Mail {

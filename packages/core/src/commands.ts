@@ -22,7 +22,7 @@ export type Command =
   | { name: 'todos' }
   | { name: 'pin'; text: string }
   | { name: 'unpin'; text: string }
-  | { name: 'knowledge'; update: boolean }
+  | { name: 'knowledge'; update: boolean; check: boolean }
   | { name: 'tone'; text: string }
   | { name: 'feedback'; list: true }
   | { name: 'feedback'; list: false; text: string }
@@ -79,7 +79,7 @@ export function parseCommand(text: string): Command | null {
     case 'unpin':
       return { name: 'unpin', text: rest.join(' ') };
     case 'knowledge':
-      return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(rest.join(' ').trim()) };
+      return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(rest.join(' ').trim()), check: /^check$/i.test(rest.join(' ').trim()) };
     case 'tone':
       return { name: 'tone', text: rest.join(' ') };
     case 'feedback': {
@@ -114,6 +114,7 @@ export const HELP_TEXT = [
   '/pin <checkup | brief | todos>  pin it as a tile at the bottom of the screen; /unpin takes it off',
   '/knowledge  show the knowledge base Astra keeps about you from your mail, calendar, files and chat',
   '/knowledge update  update it now (it updates by itself every hour)',
+  '/knowledge check  look for old commitments, duplicate pages and pages with no links',
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
   '/settings  open the settings window (the gear at the top does the same); /tone and /pin change tone and tiles here',
   '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',

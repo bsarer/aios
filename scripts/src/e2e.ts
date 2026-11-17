@@ -14,7 +14,7 @@
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -1088,6 +1088,16 @@ async function main(): Promise<void> {
     const knowledgeFile = join(tmp, 'config', 'aios', 'knowledge', 'about-me.md');
     check('/knowledge update writes and shows the knowledge base', await waitFor(async () => existsSync(knowledgeFile) && (await page.locator('[data-kind="notice"]').last().innerText()).includes('# About John'), 10_000));
     check('the knowledge base has its sections and the user\'s own', existsSync(knowledgeFile) && /## Upcoming[^]*## Recent activity[^]*## My notes/.test(readFileSync(knowledgeFile, 'utf8')));
+    // K4: Save to knowledge base on a reply files it as a wiki page, once, and says so.
+    const save = page.locator('[data-kind="assistant"]').last().getByTestId('knowledge-save');
+    check('replies have Save to knowledge base', await waitFor(async () => (await save.count()) === 1));
+    await save.click();
+    const savedDir = join(tmp, 'config', 'aios', 'knowledge', 'saved');
+    check('Save files the reply as a saved answer page', await waitFor(async () => existsSync(savedDir) && readdirSync(savedDir).length === 1 && (await page.locator('[data-kind="assistant"]').last().getByTestId('knowledge-saved').count()) === 1));
+    check('the wiki index lists it', existsSync(join(tmp, 'config', 'aios', 'knowledge', 'index.md')) && readFileSync(join(tmp, 'config', 'aios', 'knowledge', 'index.md'), 'utf8').includes('## Saved answers (1)'));
+    await input.fill('/knowledge check');
+    await input.press('Enter');
+    check('/knowledge check shows the check, written by code', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).startsWith('Checked ')));
     // V2: the microphone shows the words while the user talks, after what was typed, and sends nothing.
     // The fake microphone plays fake-mic.wav: 3 seconds of tone (talking), 1 second of quiet (a pause), looped.
     const mic = page.getByTestId('mic');

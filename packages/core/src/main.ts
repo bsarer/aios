@@ -109,6 +109,9 @@ async function main(): Promise<void> {
 
   const store = new Store(join(dataDir(), 'aios.db'));
   const audit = new AuditLog(join(dataDir(), 'audit.jsonl'));
+  // A tool step or reply cut off by the last stop would otherwise show as running forever.
+  const unfinished = store.recoverItems();
+  if (unfinished) audit.append({ kind: 'system', event: 'chat_recovered', items: unfinished });
   // P1: the assistant's name and tone; /tone changes the tone from the chat.
   const personality = new Personality({ defaults: config.personality, store, audit });
   const tone = () => personality.tone();

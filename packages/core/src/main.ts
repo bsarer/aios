@@ -53,6 +53,7 @@ import { createBrowserOpener } from './web/open.js';
 import { createPageFetcher } from './web/read.js';
 import { webTools } from './web/tools.js';
 import { createMusicPlayer, describeNowPlaying } from './music/player.js';
+import { SpotifySearch } from './music/spotify.js';
 import { musicTools } from './music/tools.js';
 import { SignalActions } from './signal/actions.js';
 import { SignalInbox } from './signal/inbox.js';
@@ -289,7 +290,12 @@ async function main(): Promise<void> {
   }
   // MU1: Spotify (or any MPRIS player) through playerctl. music_control is device tier, so it shares open_app's confirm card.
   const musicPlayer = config.music.enabled ? createMusicPlayer(runCommand, config.music.players) : undefined;
-  if (musicPlayer) apps.push(...musicTools({ player: musicPlayer }));
+  // MU2: playing a song by name searches Spotify with the user's own developer app, once `astra spotify-login` has set its Client ID.
+  const sp = config.music.spotify;
+  const spotify = sp.clientId
+    ? new SpotifySearch({ clientId: sp.clientId, clientSecret: async () => (await keyring.get(sp.clientSecretRef))?.reveal() ?? null, market: sp.market, apiBaseUrl: sp.apiBaseUrl, tokenUrl: sp.tokenUrl })
+    : undefined;
+  if (musicPlayer) apps.push(...musicTools({ player: musicPlayer, ...(spotify ? { spotify } : {}) }));
   // SG1: Signal through signal-cli, once setup has linked the phone. Sending is a card and a Send click.
   let signal: { service: SignalService; actions: SignalActions } | undefined;
   const sg = config.signal;

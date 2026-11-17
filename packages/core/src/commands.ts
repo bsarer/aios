@@ -104,7 +104,7 @@ export const HELP_TEXT = [
   '/reindex read your files again for file search, and show how far the index is',
   '/play [name or link]  play your newest video, one whose name contains the words, or an https link, in mpv',
   '/web <link or words>  open a link, or search the web for the words, in Chromium',
-  '/music [pause | play | next | previous]  say what is playing in Spotify (or another player), or pause, play or skip it',
+  '/music [pause | play | next | previous | play <song>]  say what is playing in Spotify (or another player), pause, play or skip it, or play a song by name',
   '/signal  whether Signal is connected, and how many messages are unread',
   '/checkup show disk, memory and processor now, and suggest files and windows to tidy up',
   '/doctor  check the install: service, kiosk, Omarchy commands, top bar button, keyring',

@@ -606,8 +606,19 @@ export class Shell {
         const word = cmd.text.trim().toLowerCase();
         // Shown to the user as a notice only; song names never reach the model this way.
         if (!word) return say(await this.o.music.now());
+        // MU2: "/music play <song>" plays that song; the words are the user's own, typed here.
+        const song = /^play\s+(.+)$/is.exec(cmd.text.trim())?.[1]?.trim();
+        if (song && this.o.tools.has('music_play_song')) {
+          const r = await this.o.tools.execute(
+            { id: `music-${Date.now()}`, name: 'music_play_song', arguments: JSON.stringify({ song: song.slice(0, 200) }) },
+            { signal: AbortSignal.timeout(20_000), untrustedInContext: false, userText: `/music ${cmd.text}` },
+          );
+          if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+          // Which song started, in a plain line written by code (shown to the user, never sent to a model).
+          return say(`Playing the best Spotify match for “${song.replace(/[\p{Cc}\p{Cf}]/gu, ' ').slice(0, 200)}”.`);
+        }
         const action = Object.hasOwn(MUSIC_WORDS, word) ? MUSIC_WORDS[word] : undefined;
-        if (!action) return say('Try /music, /music pause, /music play, /music next or /music previous.');
+        if (!action) return say('Try /music, /music pause, /music play, /music next, /music previous or /music play and a song.');
         // The user's own typed command: audited and rate limited like any device change.
         const r = await this.o.tools.execute(
           { id: `music-${Date.now()}`, name: 'music_control', arguments: JSON.stringify({ action }) },

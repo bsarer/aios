@@ -326,6 +326,24 @@ export const MusicConfig = z.strictObject({
     .max(8)
     .refine((a) => a.filter((p) => p === '%any').length <= 1, '%any at most once')
     .default(['spotify', '%any']),
+  /**
+   * Playing a song by name (MU2): Spotify's Web API search, with the Client Credentials flow of
+   * the user's own Spotify developer app (`astra spotify-login`). Search needs no sign-in of the
+   * user's account; the Spotify app then plays the match through playerctl. Checked 2026-11-17
+   * against developer.spotify.com (Search reference, February 2026 migration guide: development
+   * mode apps need the owner to have Premium, and search's `limit` is at most 10).
+   */
+  spotify: z
+    .strictObject({
+      /** The developer app's Client ID (letters and digits). Not a secret. Search is off until it is set. */
+      clientId: z.string().regex(/^[A-Za-z0-9]{16,64}$/, 'a Spotify Client ID (letters and digits)').optional(),
+      clientSecretRef: SecretRef.default('keyring:spotify-client'),
+      /** The country whose catalog is searched (ISO 3166-1 alpha-2); a client-credentials search has no user country. */
+      market: z.string().regex(/^[A-Z]{2}$/, 'a two-letter country code such as US or TR').default('US'),
+      apiBaseUrl: z.url({ protocol: /^https?$/ }).default('https://api.spotify.com/v1'),
+      tokenUrl: z.url({ protocol: /^https?$/ }).default('https://accounts.spotify.com/api/token'),
+    })
+    .prefault({}),
 });
 export type MusicConfig = z.infer<typeof MusicConfig>;
 

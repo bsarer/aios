@@ -9,6 +9,7 @@
  * them to the model only sanitized and inside <untrusted source="music">.
  */
 import type { Run } from '../system/run.js';
+import { TRACK_ID } from './spotify.js';
 
 export const MUSIC_ACTIONS = ['play', 'pause', 'toggle', 'next', 'previous'] as const;
 export type MusicAction = (typeof MUSIC_ACTIONS)[number];
@@ -50,6 +51,19 @@ export function controlArgs(players: readonly string[], action: MusicAction): st
   return [playerArg(players), command];
 }
 
+/**
+ * MU2: the arguments that make Spotify play one track: always the Spotify app itself (a
+ * spotify: URI means nothing to other players), then `open` and a URI code builds from an id
+ * of 22 letters and digits (exported for tests).
+ */
+export function openTrackArgs(trackId: string): string[] {
+  if (!TRACK_ID.test(trackId)) throw new MusicError('internal: bad track id');
+  return ['--player=spotify', 'open', `spotify:track:${trackId}`];
+}
+
+/** Spotify isn't running, so playerctl has nothing to open the song in. */
+export const NO_SPOTIFY = "Spotify isn't open. Open it first (it has to be running to play a song), then ask again";
+
 export function statusArgs(players: readonly string[]): string[] {
   return [playerArg(players), 'metadata', `--format=${FORMAT}`];
 }
@@ -68,6 +82,8 @@ export interface MusicPlayer {
   nowPlaying(signal?: AbortSignal): Promise<NowPlaying | null>;
   /** Throws MusicError(NO_PLAYER) when no player is open. */
   control(action: MusicAction, signal?: AbortSignal): Promise<void>;
+  /** MU2: plays one Spotify track. Throws MusicError(NO_SPOTIFY) when Spotify isn't running. */
+  playTrack(trackId: string, signal?: AbortSignal): Promise<void>;
 }
 
 export function createMusicPlayer(run: Run, players: readonly string[]): MusicPlayer {
@@ -84,6 +100,10 @@ export function createMusicPlayer(run: Run, players: readonly string[]): MusicPl
     async control(action, signal) {
       const r = await run('playerctl', controlArgs(players, action), opts(signal));
       if (r.code !== 0) throw new MusicError(NO_PLAYER);
+    },
+    async playTrack(trackId, signal) {
+      const r = await run('playerctl', openTrackArgs(trackId), opts(signal));
+      if (r.code !== 0) throw new MusicError(NO_SPOTIFY);
     },
   };
 }

@@ -16,6 +16,8 @@
  *   astra backup             write ~/astra-backup-<time>.tar.gz (never keyring secrets)
  *   astra restore FILE       put a backup back (what is there now is moved aside)
  *   astra calendar-login     sign in to Google Calendar again
+ *   astra spotify-login      let the chat play a song by name in Spotify (asks for your
+ *                            Spotify developer app's Client ID and secret)
  *   astra uninstall [--purge]  remove the service, kiosk and stored secrets; --purge also
  *                            deletes the config, memory and data (asks first)
  *   astra version
@@ -48,6 +50,7 @@ const SCRIPTS: Record<string, { file: string; flags: string[] }> = {
   addons: { file: 'addons.ts', flags: ['--video', '--music', '--local', '--voice', '--signal'] },
   backup: { file: 'backup.ts', flags: [] },
   'calendar-login': { file: 'calendar-login.ts', flags: [] },
+  'spotify-login': { file: 'spotify-login.ts', flags: [] },
   uninstall: { file: 'uninstall.ts', flags: ['--purge', '--yes'] },
 };
 

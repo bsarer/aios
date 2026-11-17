@@ -383,6 +383,13 @@ export const ALPHA_TOOLS = [
     description: 'Play, pause or skip the music in Spotify (or the player that is open). toggle switches between playing and paused; previous goes back one song.',
     input: z.strictObject({ action: z.enum(MUSIC_ACTIONS) }),
   }),
+  def({
+    name: 'music_play_song',
+    tier: 'device',
+    description:
+      'Play one song in Spotify by name: Spotify is searched for the words and its best match starts playing. Give the song, and the artist when the user names one. Songs only, not albums or playlists. Spotify has to be open.',
+    input: z.strictObject({ song: z.string().trim().min(1).max(200).describe('e.g. "Bohemian Rhapsody Queen" or "Hoppípolla"') }),
+  }),
   // ── Files (F1) ──
   def({
     name: 'files_list',

@@ -94,6 +94,8 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
       const what: Record<string, string> = { play: 'Play the music', pause: 'Pause the music', toggle: 'Play or pause the music', next: 'Skip to the next song', previous: 'Go back to the previous song' };
       return what[String(args.action)] ?? 'Change the music';
     }
+    case 'music_play_song':
+      return `Play the top Spotify match for ${q(cleanName(String(args.song ?? '').replace(/[\p{Cc}]/gu, ' ')))}`;
     default:
       return `Run ${tool}`;
   }

@@ -175,7 +175,16 @@ describe('hidden exchanges are not denied (P1)', () => {
     const p = chatSystemPrompt(ctx);
     expect(p).toContain('starts "(Answering this, I read…" was written by Astra');
     expect(p).toContain("never tell John that you didn't read, open, save or send something just because you can't see it");
-    expect(p).toContain('Only if John asks about that earlier work');
+    expect(p).toContain("When John's message follows up on that hidden exchange");
+    expect(p).not.toContain("say you can't see that part any more");
+  });
+
+  it('tells the model to read a hidden email again on a follow-up, by its id, instead of asking', () => {
+    const note = quarantineNote(['INBOX:29']);
+    expect(note).toContain('call mail_read with INBOX:29 again first');
+    expect(note).toContain('never ask them which email they mean');
+    expect(quarantineNote([])).toContain('find it again with mail_search or mail_recent');
+    expect(chatSystemPrompt(ctx)).toContain('call mail_read with the id the note names');
   });
 });
 

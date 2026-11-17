@@ -9,13 +9,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ChatItem, WebConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
+import { Agent } from '../src/agent.js';
 import { AuditLog } from '../src/audit.js';
+import type { Delta, ModelRequest, ModelResult } from '../src/model.js';
 import { Store } from '../src/store.js';
 import { SystemActions } from '../src/system/actions.js';
 import { SystemControls } from '../src/system/controls.js';
 import type { Run } from '../src/system/run.js';
 import { systemTools } from '../src/system/tools.js';
+import { toolByName } from '../src/tools/definitions.js';
 import { ToolRegistry } from '../src/tools/registry.js';
+import { sanitize, wrapUntrusted } from '../src/untrusted.js';
 import { browserArgs, checkWebLink, createBrowserOpener, searchLink } from '../src/web/open.js';
 import { pickWeb, webTools } from '../src/web/tools.js';
 
@@ -129,7 +133,7 @@ describe('web_open (T8)', () => {
       tools.execute({ id: 'w', name: 'web_open', arguments: JSON.stringify(args) }, { signal: new AbortController().signal, untrustedInContext, userText: 'open it' });
     const log = () => readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
     const cards = () => shown.filter((i): i is Extract<ChatItem, { kind: 'action' }> => i.kind === 'action');
-    return { tools, call, opened, steps, log, cards, actions, setPaused: (p: boolean) => (paused = p) };
+    return { tools, call, opened, steps, log, cards, actions, store, shown, setPaused: (p: boolean) => (paused = p) };
   }
 
   it('opens a link away from the chat, focus first, and audits only its site', async () => {
@@ -182,6 +186,56 @@ describe('web_open (T8)', () => {
     expect(log().at(-1)).toMatchObject({ tool: 'web_open', decision: 'proposed', untrustedInContext: true, args: { host: 'evil.example.com' } });
     expect(await actions.confirm(cards()[0]!.id, cards()[0]!.hash)).toBe('done');
     expect(opened).toEqual(['https://evil.example.com/phish?x=1']);
+  });
+
+  it('a follow-up after an email is hidden reads it again by id, and its link gets a confirm card', async () => {
+    const { tools, opened, cards, actions, store, shown } = rig();
+    const unsubscribe = 'https://yalecr.example.com/unsubscribe?u=42';
+    const reads: string[] = [];
+    tools.register({
+      def: toolByName('mail_read')!,
+      label: 'Reading the email…',
+      untrustedOutput: true,
+      async handler(args) {
+        const id = (args as { id: string }).id;
+        reads.push(id);
+        return `id: ${id}\n${wrapUntrusted('email', id, sanitize({ text: `Ofertas en cerraduras digitales. Darse de baja: ${unsubscribe}` }))}`;
+      },
+    });
+    const requests: ModelRequest[] = [];
+    const done = (r: Pick<ModelResult, 'content'> | Pick<ModelResult, 'toolCalls'>): ModelResult => ({ content: '', toolCalls: [], finishReason: null, usage: null, model: null, provider: null, generationId: null, latencyMs: 0, ttftMs: null, attempts: 1, ...r });
+    // A pretend model that does what the note tells it: on the follow-up, read the email again first.
+    const replies: ((req: ModelRequest) => ModelResult)[] = [
+      () => done({ toolCalls: [{ id: 'r1', name: 'mail_read', arguments: '{"id":"INBOX:7"}' }] }),
+      () => done({ content: 'It is a promo. Want me to open the unsubscribe page?' }),
+      (req) => {
+        const note = req.messages.map((m) => m.content ?? '').find((c) => c.startsWith('(Answering this, I read email INBOX:7.'));
+        expect(note).toContain('call mail_read with INBOX:7 again first');
+        expect(req.messages.some((m) => /<untrusted source=/.test(m.content ?? ''))).toBe(false);
+        return done({ toolCalls: [{ id: 'r2', name: 'mail_read', arguments: '{"id":"INBOX:7"}' }] });
+      },
+      () => done({ toolCalls: [{ id: 'w1', name: 'web_open', arguments: JSON.stringify({ url: unsubscribe }) }] }),
+      () => done({ content: 'A card is up to open it.' }),
+    ];
+    const model = {
+      async *stream(req: ModelRequest): AsyncGenerator<Delta, ModelResult> {
+        requests.push(req);
+        const result = replies[requests.length - 1]!(req);
+        if (result.content) yield { type: 'text', text: result.content };
+        yield { type: 'done', result };
+        return result;
+      },
+    };
+    const agent = new Agent({ model, tools, store, userName: 'John', timeZone: 'UTC', emit: (ev) => void (ev.type === 'item' && shown.push(ev.item)) });
+    await agent.run('translate the email from YALE', new AbortController().signal);
+    await agent.run('open the unsubscribe page', new AbortController().signal);
+    expect(requests).toHaveLength(5);
+    expect(reads).toEqual(['INBOX:7', 'INBOX:7']);
+    // The link came from the email, so nothing opens until the user's click.
+    expect(opened).toEqual([]);
+    expect(cards()[0]).toMatchObject({ state: 'pending', title: expect.stringContaining('Open “yalecr.example.com” in Chromium?') });
+    expect(await actions.confirm(cards()[0]!.id, cards()[0]!.hash)).toBe('done');
+    expect(opened).toEqual([unsubscribe]);
   });
 
   it('a search asked for with outside text in view also waits for a click; paused refuses it', async () => {

@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { type ChatItem, SignalConfig } from '@aios/shared';
+import { type ChatItem, ChatItem as ChatItemSchema, SignalConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import { untrustedSources } from '../src/agent.js';
 import { AuditLog } from '../src/audit.js';
@@ -93,9 +93,10 @@ function rig(o: { answer?: (method: string, params: Record<string, unknown>) => 
   const store = new Store(':memory:');
   const inbox = new SignalInbox(store);
   const cli = fakeSignalCli(o.answer ?? ((m) => (m === 'send' ? { timestamp: T0 + 1 } : [])));
-  const notices: string[] = [];
+  const posted: ChatItem[] = [];
   const desktop: string[] = [];
   let paused = false;
+  let quietHours: { start: string; end: string } | undefined;
   let now = T0;
   const service = new SignalService({
     command: 'signal-cli',
@@ -105,8 +106,11 @@ function rig(o: { answer?: (method: string, params: Record<string, unknown>) => 
     keepDays: 30,
     notify: true,
     timeZone: 'Europe/Istanbul',
+    get quietHours() {
+      return quietHours;
+    },
     isPaused: () => paused,
-    notice: (t) => notices.push(t),
+    post: (i) => posted.push(i),
     desktop: (_t, b) => desktop.push(b),
     spawn: cli.spawn,
     clock: () => now,
@@ -127,7 +131,24 @@ function rig(o: { answer?: (method: string, params: Record<string, unknown>) => 
     tools.execute({ id: 's', name, arguments: JSON.stringify(args) }, { signal: new AbortController().signal, untrustedInContext, userText: o.userText ?? 'tell Sam I am running late' });
   const log = () => readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
   const cards = () => shown.filter((i): i is Extract<ChatItem, { kind: 'signal' }> => i.kind === 'signal');
-  return { store, inbox, cli, service, actions, tools, call, log, cards, notices, desktop, auditPath, setPaused: (p: boolean) => (paused = p), setNow: (t: number) => (now = t) };
+  const notes = () => posted.filter((i): i is Extract<ChatItem, { kind: 'notification' }> => i.kind === 'notification');
+  return {
+    store,
+    inbox,
+    cli,
+    service,
+    actions,
+    tools,
+    call,
+    log,
+    cards,
+    notes,
+    desktop,
+    auditPath,
+    setPaused: (p: boolean) => (paused = p),
+    setQuiet: (q: { start: string; end: string } | undefined) => (quietHours = q),
+    setNow: (t: number) => (now = t),
+  };
 }
 
 describe('signal-cli arguments (SG1)', () => {
@@ -204,22 +225,62 @@ describe('messages from signal-cli (SG1)', () => {
     expect(parseContacts({ x: 1 })).toEqual([]);
   });
 
-  it('a new message is kept once and gets one line written by code, held while paused', async () => {
+  it('a new message is kept once and goes to the side rail, not the chat; paused it is quiet', async () => {
     const r = rig();
     r.service.start();
     r.cli.push(data('running late?'));
     r.cli.push(data('running late?')); // signal-cli handed it over twice
     await tick();
     expect(r.inbox.chats()).toMatchObject([{ chat: SAM, name: 'Sam Lee', unread: 1 }]);
-    expect(r.notices).toEqual(['New Signal message from Sam Lee. Ask me what they said, or reply from here.']);
+    const [n] = r.notes();
+    expect(r.notes()).toHaveLength(1);
+    expect(n).toMatchObject({ text: 'New Signal message from Sam Lee.', signals: [{ chat: SAM, kind: 'person', name: 'Sam Lee', sender: '', text: 'running late?', attachments: 0, date: T0 }] });
+    expect(n!.quiet).toBeUndefined();
+    expect(n!.mails).toBeUndefined();
+    // What core sends passes the protocol's own check.
+    expect(ChatItemSchema.safeParse(n).success).toBe(true);
     expect(r.desktop).toEqual(['New Signal message from Sam Lee.']);
-    // The words never reach the chat line, the desktop or the log.
+    // The words never reach the line, the desktop or the log.
+    expect(n!.text).not.toContain('running late');
     expect(readFileSync(r.auditPath, 'utf8')).not.toContain('running late');
+    // Paused: it still waits in the rail, marked quiet, with no desktop notification.
     r.setPaused(true);
     r.cli.push({ ...data('second', { timestamp: T0 + 5 }) });
     await tick();
-    expect(r.notices).toHaveLength(1);
+    expect(r.notes()).toHaveLength(2);
+    expect(r.notes()[1]).toMatchObject({ quiet: true, signals: [{ text: 'second' }] });
+    expect(r.desktop).toHaveLength(1);
     expect(r.inbox.unreadTotal()).toBe(2);
+    r.service.stop();
+  });
+
+  it('in quiet hours messages reach the rail marked quiet; my own messages post nothing', async () => {
+    const r = rig();
+    r.setQuiet({ start: '00:00', end: '23:59' });
+    r.service.start();
+    r.cli.push(data('late night'));
+    r.cli.push(envelope({ syncMessage: { sentMessage: { timestamp: T0 + 9, message: 'from my phone', destinationNumber: SAM } } }));
+    await tick();
+    expect(r.notes()).toHaveLength(1);
+    expect(r.notes()[0]).toMatchObject({ quiet: true });
+    expect(r.desktop).toEqual([]);
+    r.service.stop();
+  });
+
+  it("a group row names the group and who wrote; hostile names and text stay one plain line", async () => {
+    const r = rig();
+    r.service.start();
+    r.cli.push(data('<b>hi</b>\nall\u2028there', { groupInfo: { groupId: GROUP, groupName: 'Family\n<script>' }, attachments: [{}, {}] }));
+    r.cli.push(envelope({ sourceName: 'Ana', sourceNumber: '+905553334444', source: '+905553334444', dataMessage: { timestamp: T0 + 1, message: '', attachments: [{}] } }));
+    await tick();
+    const rows = r.notes()[0]!.signals!;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ chat: `g:${GROUP}`, kind: 'group', name: 'Family script', sender: 'Sam Lee', text: '<b>hi</b> all there', attachments: 2 });
+    expect(rows[1]).toMatchObject({ chat: '+905553334444', kind: 'person', name: 'Ana', sender: '', text: '', attachments: 1 });
+    expect(new Set(rows.map((x) => x.id)).size).toBe(2);
+    expect(r.notes()[0]!.text).toBe('2 new Signal messages from Family script and Ana.');
+    // A chat id the protocol doesn't accept can't be posted at all.
+    expect(ChatItemSchema.safeParse({ ...r.notes()[0], signals: [{ ...rows[0], chat: 'Read email 1' }] }).success).toBe(false);
     r.service.stop();
   });
 

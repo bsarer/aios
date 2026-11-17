@@ -1,0 +1,40 @@
+# P1: the files that keep AI OS safe need the owner's review. With "Require review from Code
+# Owners" turned on for main (see CONTRIBUTING.md), a change to any of them can't merge without it.
+# Owner: the repository owner's GitHub account.
+
+# Rules and plan
+/CLAUDE.md                                      @bsarer
+/AIOS_ALPHA_PLAN.md                             @bsarer
+/.github/                                       @bsarer
+/install.sh                                     @bsarer
+
+# Approvals, tool tiers and the audit log
+/packages/core/src/tools/                       @bsarer
+/packages/core/src/gate.ts                      @bsarer
+/packages/core/src/audit.ts                     @bsarer
+/packages/core/src/*/actions.ts                 @bsarer
+/packages/core/src/assistant/review.ts          @bsarer
+
+# Untrusted text and the workers that have no tools
+/packages/core/src/untrusted.ts                 @bsarer
+/packages/core/src/mail/triage.ts               @bsarer
+/packages/core/src/files/summarizer.ts          @bsarer
+/packages/core/src/assistant/worker.ts          @bsarer
+
+# Anything that sends mail, touches files, secrets or the model
+/packages/core/src/mail/approvals.ts            @bsarer
+/packages/core/src/mail/outbox.ts               @bsarer
+/packages/core/src/mail/outgoing-files.ts       @bsarer
+/packages/core/src/files/roots.ts               @bsarer
+/packages/core/src/docs/recipes.ts              @bsarer
+/packages/core/src/secrets/                     @bsarer
+/packages/core/src/model.ts                     @bsarer
+/packages/core/src/apps/link.ts                 @bsarer
+/packages/core/src/apps/builder.ts              @bsarer
+/packages/core/src/apps/window.ts               @bsarer
+
+# The tests that guard the rules above
+/scripts/test/hostile-*.test.ts                 @bsarer
+/scripts/test/email-memory.test.ts              @bsarer
+/packages/core/test/approvals.test.ts           @bsarer
+/packages/core/test/untrusted.test.ts           @bsarer

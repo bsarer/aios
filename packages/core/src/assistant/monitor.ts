@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AssistantConfig, ChatItem } from '@aios/shared';
+import type { AssistantConfig, ChatItem, Tone } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
 import { inQuietHours } from '../mail/pipeline.js';
 import { ModelError } from '../model.js';
@@ -40,6 +40,8 @@ export interface MonitorOptions {
   notify?: (title: string, body: string) => void;
   quietHours?: { start: string; end: string } | undefined;
   audit: AuditLog;
+  /** P1: the tone for the local model's advice. Default friendly. */
+  tone?: () => Tone;
   /** The biggest files in the allowed folders on a drive, for a disk alert. */
   bigFiles?: (drivePath: string, limit: number) => Promise<{ display: string; bytes: number }[]>;
   home?: string;
@@ -105,6 +107,30 @@ export class ResourceMonitor {
       lines.push(`${driveName(d.label)}: ${bytesText(d.freeBytes)} of ${bytesText(d.totalBytes)} free.`);
     }
     return lines;
+  }
+
+  /** W1: short numbers for the checkup tile, written by code; `attention` when one is past its threshold. */
+  async glance(): Promise<{ lines: string[]; attention: boolean }> {
+    const c = this.o.config;
+    const lines: string[] = [];
+    let attention = false;
+    const mem = await this.o.reader.memory();
+    if (mem && mem.totalBytes > 0) {
+      const freePct = (mem.availableBytes / mem.totalBytes) * 100;
+      if (freePct < c.memoryFreePercent) attention = true;
+      lines.push(`Memory ${Math.round(100 - freePct)}% used`);
+    }
+    const avg = this.cpuAverage(c.cpuMinutes * 60_000, true);
+    if (avg !== null) {
+      if (avg >= c.cpuPercent) attention = true;
+      lines.push(`CPU ${Math.round(avg)}%`);
+    }
+    for (const d of await this.o.reader.disks(this.folders())) {
+      if (d.totalBytes <= 0) continue;
+      if ((d.freeBytes / d.totalBytes) * 100 < c.diskFreePercent || d.freeBytes / 1024 ** 3 < c.diskFreeGb) attention = true;
+      lines.push(`${d.label === '/' ? 'System' : d.label === '~' ? 'Home' : d.label} ${bytesText(d.freeBytes)} free`);
+    }
+    return { lines: lines.slice(0, 4), attention };
   }
 
   private folders(): { label: string; path: string }[] {
@@ -234,10 +260,10 @@ export class ResourceMonitor {
     this.o.post(item);
     // Numbers only: process and file names stay out of the audit log.
     this.o.audit.append({ kind: 'assistant', event: 'resource_alert', resource, key });
-    if (!inQuietHours(this.now(), this.o.timeZone, this.o.quietHours)) this.o.notify?.('AI OS', a.headline);
+    if (!inQuietHours(this.now(), this.o.timeZone, this.o.quietHours)) this.o.notify?.('Astra', a.headline);
     if (!this.o.model) return;
     try {
-      const advice = await resourceAdvice(this.o.model, { resource, facts: a.facts, top: a.top });
+      const advice = await resourceAdvice(this.o.model, { resource, facts: a.facts, top: a.top }, this.o.tone?.());
       const cur = this.items.get(item.id);
       if (advice && cur) {
         const next = { ...cur, advice };

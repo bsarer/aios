@@ -84,6 +84,20 @@ const PATHS = {
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   cross: <path d="M6 6l12 12M18 6 6 18" />,
   arrowUp: <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />,
+  chat: <path d="M4 5h16v11H9l-5 4z" />,
+  download: <path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" />,
+  mic: (
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+    </>
+  ),
+  gear: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;
@@ -141,7 +155,7 @@ export function Card({ icon, title, tone = 'accent', badge, aside, children, cla
           </span>
         )}
       </div>
-      {children !== undefined && <div className="card-body">{children}</div>}
+      {children !== undefined && children !== null && children !== false && <div className="card-body">{children}</div>}
     </div>
   );
 }

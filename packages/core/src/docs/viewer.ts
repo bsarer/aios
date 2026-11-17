@@ -41,6 +41,8 @@ export interface DocumentFilesOptions {
   engine: Pick<DocEngine, 'wordPdf' | 'sheetNames' | 'sheetRange'>;
   audit: AuditLog;
   post: (item: ChatItem) => void;
+  /** F3: viewer cards that live inside another card (a file search's results), by id. */
+  innerItem?: (id: string) => ChatItem | null;
   /** D3: what the Edit button needs. Without it, Edit clicks are ignored (and audited). */
   edit?: {
     open: OpenDocument;
@@ -78,7 +80,7 @@ export class DocumentFiles {
 
   /** What is behind a card. Null when there is no such card. */
   async file(itemId: string, signal?: AbortSignal): Promise<DocumentFile | null> {
-    const item = this.o.store.getItem(itemId);
+    const item = this.o.store.getItem(itemId) ?? this.o.innerItem?.(itemId) ?? null;
     if (!item || item.kind !== 'document') return null;
     const log = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'docs', event: 'document_opened', itemId, path: item.path, ...entry });
     let file: DocFile;
@@ -122,7 +124,7 @@ export class DocumentFiles {
    */
   async edit(itemId: string): Promise<void> {
     const audit = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'tool', tool: 'doc_open_app', tier: 'device', via: 'click', itemId, ...entry });
-    const item = this.o.store.getItem(itemId);
+    const item = this.o.store.getItem(itemId) ?? this.o.innerItem?.(itemId) ?? null;
     if (!item || item.kind !== 'document') return void audit({ decision: 'denied', reason: 'not a document card' });
     const ed = this.o.edit;
     if (!ed) return void audit({ decision: 'denied', reason: 'editing is off', path: item.path });

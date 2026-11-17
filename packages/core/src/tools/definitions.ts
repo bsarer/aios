@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_CHANGES, SheetChange, WordChange } from '../docs/changes.js';
+import { MUSIC_ACTIONS } from '../music/player.js';
 
 /**
  * Risk tiers are enforced in code (registry and approval brokers), not by prompts.
@@ -94,6 +95,72 @@ export const ALPHA_TOOLS = [
       fact: z.string().min(1).max(300),
       target: z.enum(['facts', 'profile']).optional().describe('"profile" for standing instructions and preferences; default "facts"'),
     }),
+  }),
+  // ── Knowledge base (K1) ──
+  def({
+    name: 'knowledge_read',
+    tier: 'read',
+    description:
+      "The knowledge base about the user: notes on people, work, commitments, upcoming events, interests and recent activity, written in the background from their mail, calendar, files and chat. Notes from outside text, not confirmed facts.",
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'knowledge_search',
+    tier: 'read',
+    description:
+      "The knowledge base's wiki pages about the people, projects and organisations in the user's life that best match a name or a few words: each page's summary, dated facts and links. Notes from outside text, not confirmed facts.",
+    input: z.strictObject({
+      query: z.string().min(1).max(200).describe('A name or a few words, e.g. "Ana Lopez" or "house move"'),
+      limit: z.int().min(1).max(8).optional(),
+    }),
+  }),
+  // ── Contacts (C3) ──
+  def({
+    name: 'contacts_find',
+    tier: 'read',
+    description:
+      "Look people up in the user's Google Contacts by name, address, phone number or company: their email addresses and phone numbers. Use it to find the address for \"email Sam\" or to answer \"what's Sara's number?\". Read only.",
+    input: z.strictObject({
+      query: z.string().min(1).max(100).describe('A name or the start of one, e.g. "Sam", or an address, number or company'),
+      limit: z.int().min(1).max(10).optional(),
+    }),
+  }),
+  // ── Signal (SG1) ──
+  def({
+    name: 'signal_chats',
+    tier: 'read',
+    description:
+      "The user's recent Signal chats, newest first: each chat's id, name, when the last message came and how many are unread. With query, finds chats and Signal contacts by name or number instead (use it to find who \"message Sam on Signal\" means).",
+    input: z.strictObject({
+      query: z.string().min(1).max(100).optional().describe('A name or number, e.g. "Sam"'),
+      limit: z.int().min(1).max(30).optional(),
+    }),
+  }),
+  def({
+    name: 'signal_read',
+    tier: 'read',
+    description: 'Read the latest messages in one Signal chat, oldest first. Get the chat id from signal_chats.',
+    input: z.strictObject({
+      chat: z.string().min(1).max(200).describe('Chat id from signal_chats, e.g. "+905551234567" or "g:…"'),
+      limit: z.int().min(1).max(50).optional(),
+    }),
+  }),
+  def({
+    name: 'signal_draft',
+    tier: 'draft',
+    description:
+      "Write a Signal message and show it to the user on a card with Send and Discard. Never sends: only the user's click on Send does. Give chat (an id from signal_chats) or, for someone not in signal_chats, number (the phone number the user typed, in international form like +905551234567).",
+    input: z.strictObject({
+      chat: z.string().min(1).max(200).optional(),
+      number: z.string().min(8).max(20).optional(),
+      text: z.string().min(1).max(2000),
+    }),
+  }),
+  def({
+    name: 'signal_send',
+    tier: 'write',
+    description: 'Send a Signal message card. Blocked until the user clicks Send on the card.',
+    input: z.strictObject({ id: z.string() }),
   }),
   // ── Calendar (C1) ──
   def({
@@ -270,12 +337,58 @@ export const ALPHA_TOOLS = [
       'Open a Word file in WordCraft or an Excel file in GridCraft, in its own window. It opens away from the chat, like any app.',
     input: z.strictObject({ path: z.string().min(1).max(1000) }),
   }),
+  // ── Videos (V1) ──
+  def({
+    name: 'video_play',
+    tier: 'device',
+    description:
+      'Play one video in mpv, in its own window away from the chat. Give `path` for a video file in the allowed folders (find it with files_list or files_search), or `url` for an https link the user gave (YouTube and most video sites).',
+    input: z
+      .strictObject({
+        path: z.string().min(1).max(1000).optional().describe('e.g. "~/Downloads/holiday.mp4"'),
+        url: z.string().min(1).max(2000).optional().describe('e.g. "https://www.youtube.com/watch?v=…"'),
+      })
+      .refine((a) => (a.path === undefined) !== (a.url === undefined), 'give either path or url, not both'),
+  }),
+  // ── Links and web searches (T8) ──
+  def({
+    name: 'web_open',
+    tier: 'device',
+    description:
+      'Open a link or a web search in a new Chromium window, away from the chat; the screen goes to it. Give `url` for a link or a site (the user\'s own, or a site\'s well-known address), or `search` for words to search the web for. Nothing from the page comes back.',
+    input: z
+      .strictObject({
+        url: z.string().min(1).max(2000).optional().describe('e.g. "https://www.bbc.com/news" or "github.com"'),
+        search: z.string().min(1).max(300).optional().describe('e.g. "weather in Istanbul tomorrow"'),
+      })
+      .refine((a) => (a.url === undefined) !== (a.search === undefined), 'give either url or search, not both'),
+  }),
+  def({
+    name: 'web_read',
+    tier: 'read',
+    description:
+      "Read the text of one web page, to summarize it or answer about it. Give the link from the user's own message, or of a page opened with web_open. Pages that need a sign-in or JavaScript can't be read. The text comes back inside <untrusted> tags.",
+    input: z.strictObject({ url: z.string().min(1).max(2000).describe('e.g. "https://www.bbc.com/news/articles/…"') }),
+  }),
+  // ── Music (MU1) ──
+  def({
+    name: 'music_now',
+    tier: 'read',
+    description: "What music is playing (Spotify, or another player): playing or paused, the song, artist and album, and which app. Use for \"what's playing?\" or \"what song is this?\".",
+    input: z.strictObject({}),
+  }),
+  def({
+    name: 'music_control',
+    tier: 'device',
+    description: 'Play, pause or skip the music in Spotify (or the player that is open). toggle switches between playing and paused; previous goes back one song.',
+    input: z.strictObject({ action: z.enum(MUSIC_ACTIONS) }),
+  }),
   // ── Files (F1) ──
   def({
     name: 'files_list',
     tier: 'read',
     description:
-      "Files and folders in the user's allowed folders (by default ~/Documents and ~/Downloads): name, type, size and date, folders first, newest first. With `folder`, that folder's contents; with `query`, every file whose path contains it, anywhere below. Gives the paths the other file tools take.",
+      "Files and folders in the user's allowed folders (by default ~/Documents, ~/Downloads and ~/Videos): name, type, size and date, folders first, newest first. With `folder`, that folder's contents; with `query`, every file whose path contains it, anywhere below. Gives the paths the other file tools take.",
     input: z.strictObject({
       folder: z.string().min(1).max(1000).optional().describe('e.g. "~/Downloads" or "Documents/Legal"; all allowed folders when left out'),
       query: z.string().min(1).max(200).optional().describe('Part of a name, e.g. "invoice" or ".pdf"'),
@@ -336,7 +449,7 @@ export const ALPHA_TOOLS = [
     name: 'files_search',
     tier: 'read',
     description:
-      "Search the index of the user's files by what they are about, not just their name: each file has facts (type, size, dates, pages, sheets, title, author), a short description and keywords written when it was indexed, and the user's own tags. Use it for questions like \"the lease I signed last spring\", \"invoices from Hetzner\" or \"spreadsheets about the budget\". Words match as word starts, best first; with no query, the newest files matching the filters. Then use the paths with file_read, doc_read, file_show and so on.",
+      "Search the index of the user's files by what they are about or what is in them, not just their name: each file has facts (type, size, dates, pages, sheets, title, author), a short description and keywords written when it was indexed, its text, and the user's own tags; when the local embedding model is on, files close in meaning match too (\"car insurance\" finds an auto policy). Use it for questions like \"the lease I signed last spring\", \"the contract that mentions a 90-day notice period\", \"invoices from Hetzner\" or \"spreadsheets about the budget\". Put the user's describing words in query. Best first; with no query, the newest files matching the filters. With a query, a card with the best 3 and Open buttons is shown to the user; pass card: false when you are looking for a file for your own next step (to attach or play it, say). Then use the paths with file_read, doc_read, file_show and so on.",
     input: z.strictObject({
       query: z.string().min(1).max(300).optional().describe('Words to look for, e.g. "lease apartment 2026"'),
       kinds: z.array(z.enum(['pdf', 'image', 'word', 'sheet', 'text', 'other'])).max(6).optional(),
@@ -344,6 +457,7 @@ export const ALPHA_TOOLS = [
       modifiedAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, in the user\'s timezone'),
       modifiedBefore: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, not included'),
       limit: z.int().min(1).max(50).optional(),
+      card: z.boolean().optional().describe('Show the best 3 on a card with Open buttons (default true when there is a query)'),
     }),
   }),
   def({

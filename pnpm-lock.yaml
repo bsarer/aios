@@ -143,6 +143,12 @@ importers:
       nodemailer:
         specifier: ^10.1.7
         version: 10.1.7
+      qrcode-generator:
+        specifier: 2.0.4
+        version: 2.0.4
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       playwright-core:
         specifier: ^1.56.1
@@ -1389,6 +1395,9 @@ packages:
 
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
+
+  qrcode-generator@2.0.4:
+    resolution: {integrity: sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g==}
 
   quick-format-unescaped@4.0.4:
     resolution: {integrity: sha512-tYC1Q1hgyRuHgloV/YXs2w15unPVh8qfu/qCTfhTYamaw7fyhumKa2yGpdSo87vY32rIclj+4fWYQXUMs9EHvg==}
@@ -2953,6 +2962,8 @@ snapshots:
   process-warning@5.1.1: {}
 
   property-information@7.2.0: {}
+
+  qrcode-generator@2.0.4: {}
 
   quick-format-unescaped@4.0.4: {}
 

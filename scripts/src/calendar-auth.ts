@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { CalendarError, GoogleAuth, GoogleCalendar, authorizationUrl, describeCalendarError, exchangeCode, newPkce, readRedirect } from '@aios/core';
+import { CONTACTS_SCOPE, CalendarError, GoogleAuth, GoogleCalendar, OTHER_CONTACTS_SCOPE, authorizationUrl, describeCalendarError, exchangeCode, googleScopes, newPkce, readRedirect } from '@aios/core';
 import type { CalendarConfig, SecretRef } from '@aios/shared';
 
 /** The part of the keyring the sign-in uses. */
@@ -17,7 +17,7 @@ export interface TokenStore {
 }
 
 const PAGE = (text: string) =>
-  `<!doctype html><meta charset="utf-8"><title>AI OS</title><body style="font:16px system-ui;margin:3em">${text.replace(/[<>&]/g, '')}</body>`;
+  `<!doctype html><meta charset="utf-8"><title>Astra</title><body style="font:16px system-ui;margin:3em">${text.replace(/[<>&]/g, '')}</body>`;
 
 /** Opens a URL in the desktop's browser; failures are fine, the URL is printed too. */
 export function xdgOpen(url: string): void {
@@ -38,6 +38,15 @@ export interface SignInOptions {
   loginHint?: string;
 }
 
+/** What the sign-in says about Google Contacts, from the scopes Google granted. */
+export function contactsLine(scopes: string[]): string {
+  const saved = scopes.includes(CONTACTS_SCOPE);
+  const other = scopes.includes(OTHER_CONTACTS_SCOPE);
+  if (saved && other) return 'Contacts: allowed (read only), so "email Sam" can find Sam\'s address.';
+  if (saved || other) return `Contacts: only ${saved ? 'your saved contacts' : 'the people you have emailed'} allowed (read only).`;
+  return 'Contacts: not allowed. The calendar works; run this again and tick the contacts boxes to let Astra look up addresses.';
+}
+
 /** Runs the browser sign-in and stores the refresh token. Returns how many events the next week holds, as a check. */
 export async function signInToCalendar(cal: CalendarConfig, keyring: TokenStore, timeZone: string, o: SignInOptions = {}): Promise<number> {
   const log = o.log ?? console.log;
@@ -50,21 +59,23 @@ export async function signInToCalendar(cal: CalendarConfig, keyring: TokenStore,
     if (url.pathname !== '/') return void res.writeHead(404).end();
     const r = readRedirect(url, pkce.state);
     res.writeHead('code' in r ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(PAGE('code' in r ? 'AI OS is connected to your calendar. You can close this tab.' : `Sign-in did not finish: ${r.error}. Close this tab and try again.`));
+    res.end(PAGE('code' in r ? 'Astra is connected to your calendar. You can close this tab.' : `Sign-in did not finish: ${r.error}. Close this tab and try again.`));
     done(r);
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   try {
     const redirectUri = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const url = authorizationUrl({ authUrl: cal.authUrl, clientId: cal.clientId, redirectUri, pkce, loginHint: o.loginHint });
+    const url = authorizationUrl({ authUrl: cal.authUrl, clientId: cal.clientId, redirectUri, pkce, loginHint: o.loginHint, scopes: googleScopes(cal) });
     log(`Opening Google's sign-in page. If no browser opens, visit:\n\n  ${url}\n`);
     (o.openBrowser ?? xdgOpen)(url);
     const timeout = new Promise<{ error: string }>((r) => setTimeout(() => r({ error: 'timed out waiting for the browser' }), o.timeoutMs ?? 5 * 60_000).unref());
     const r = await Promise.race([answer, timeout]);
     if ('error' in r) throw new CalendarError('auth', r.error);
     const clientSecret = cal.clientSecretRef ? ((await keyring.get(cal.clientSecretRef))?.reveal() ?? null) : null;
-    const { refreshToken } = await exchangeCode({ tokenUrl: cal.tokenUrl, clientId: cal.clientId, clientSecret, code: r.code, redirectUri, verifier: pkce.verifier });
+    const { refreshToken, scopes } = await exchangeCode({ tokenUrl: cal.tokenUrl, clientId: cal.clientId, clientSecret, code: r.code, redirectUri, verifier: pkce.verifier });
     await keyring.set(cal.tokenRef, refreshToken);
+    // C3: Google lets the user untick contacts on its page; the calendar works either way.
+    if (cal.contacts && scopes.length) log(contactsLine(scopes));
   } finally {
     server.close();
   }

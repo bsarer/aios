@@ -64,6 +64,38 @@ const MIGRATIONS = [
   `ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';`,
   // T1: which reminders have been posted (item id and its time), so each fires once for its time.
   `CREATE TABLE reminders_fired (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`,
+  // F3: each file's text in the full-text index (a new body column, so file_fts is rebuilt from
+  // file_index and every file's facts are read again to fill it), and one meaning vector per file
+  // from the local embedding model, with the model's name.
+  `DROP TABLE file_fts;
+   CREATE VIRTUAL TABLE file_fts USING fts5(path UNINDEXED, name, folder, title, keywords, tags, summary, details, body, tokenize = 'unicode61 remove_diacritics 2');
+   INSERT INTO file_fts (path, name, folder, title, keywords, tags, summary, details, body)
+     SELECT path, name, folder, COALESCE(json_extract(facts, '$.title'), ''), REPLACE(COALESCE(keywords, ''), char(10), ' '), REPLACE(tags, char(10), ' '), COALESCE(summary, ''), kind, ''
+     FROM file_index;
+   UPDATE file_index SET facts_state = 'pending';
+   ALTER TABLE file_index ADD COLUMN vector_state TEXT NOT NULL DEFAULT 'pending';
+   CREATE INDEX file_index_vector ON file_index(vector_state, mtime_ms);
+   CREATE TABLE file_vectors (path TEXT PRIMARY KEY, model TEXT NOT NULL, vec BLOB NOT NULL);`,
+  // K2: each email, file, chat stretch and calendar day the knowledge base has read, so each is
+  // read once. Notes wait here (as cleaned plain text) between being read and being merged.
+  `CREATE TABLE IF NOT EXISTS knowledge_items (key TEXT PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL, at INTEGER NOT NULL, phase TEXT NOT NULL,
+                                state TEXT NOT NULL, notes TEXT, attempts INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+   CREATE INDEX IF NOT EXISTS knowledge_items_state ON knowledge_items(state, kind, at);`,
+  // K3: the order items are read in (0 first), and the hashed signals behind it: who the user
+  // writes to, and which emails and threads they replied to. No addresses or ids in the clear.
+  `ALTER TABLE knowledge_items ADD COLUMN priority INTEGER NOT NULL DEFAULT 3;
+   UPDATE knowledge_items SET priority = CASE kind WHEN 'sent' THEN 0 WHEN 'mail' THEN 3 WHEN 'file' THEN 4 WHEN 'chat' THEN 5 ELSE 6 END;
+   CREATE INDEX IF NOT EXISTS knowledge_items_pending ON knowledge_items(state, phase, priority, at);
+   CREATE TABLE IF NOT EXISTS knowledge_signals (kind TEXT NOT NULL, value TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (kind, value));`,
+  // SG1: Signal chats and messages kept on this computer (pruned after [signal] keepDays), and
+  // messages waiting for a Send click. The hash is what the click must match.
+  `CREATE TABLE IF NOT EXISTS signal_chats (chat TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, last_at INTEGER NOT NULL, unread INTEGER NOT NULL DEFAULT 0);
+   CREATE TABLE IF NOT EXISTS signal_messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, chat TEXT NOT NULL, sender TEXT NOT NULL, sender_name TEXT NOT NULL, body TEXT NOT NULL,
+                                 ts INTEGER NOT NULL, attachments INTEGER NOT NULL, mine INTEGER NOT NULL, UNIQUE (chat, sender, ts));
+   CREATE INDEX IF NOT EXISTS signal_messages_chat ON signal_messages(chat, ts);
+   CREATE TABLE IF NOT EXISTS signal_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
+                               result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX IF NOT EXISTS signal_actions_state ON signal_actions(state);`,
 ];
 
 export interface UsageRow {

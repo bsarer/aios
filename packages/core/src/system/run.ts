@@ -33,6 +33,8 @@ export const SYSTEM_COMMANDS = [
   'omarchy-theme-set',
   // S3: the chat window's place on screen (apps/hyprland.ts).
   'hyprctl',
+  // MU1: the music that is playing (music/player.ts).
+  'playerctl',
 ] as const;
 export type SystemCommand = (typeof SYSTEM_COMMANDS)[number];
 
@@ -81,7 +83,8 @@ export const runCommand: Run = (cmd, args, opts = {}) => {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, [...args], {
       shell: false,
-      env: { ...process.env, LC_ALL: 'C' },
+      // playerctl prints song names, which need UTF-8 to come through whole.
+      env: { ...process.env, LC_ALL: cmd === 'playerctl' ? 'C.UTF-8' : 'C' },
       stdio: ['ignore', capture ? 'pipe' : 'ignore', 'ignore'],
       ...(opts.signal ? { signal: opts.signal } : {}),
     });

@@ -112,7 +112,7 @@ export class AppLink {
     const p = Change.safeParse(parse(raw));
     if (!p.success || !this.valid(p.data.slug, p.data.token)) {
       this.o.audit.append({ kind: 'tool', tool: 'build_app', tier: 'write', via: 'app', decision: 'denied', reason: 'bad link request' });
-      return { ok: false, message: "AI OS didn't recognise this app. Ask for the change in the chat instead." };
+      return { ok: false, message: "Astra didn't recognise this app. Ask for the change in the chat instead." };
     }
     const { slug } = p.data;
     const audit = (entry: Record<string, unknown>) => this.o.audit.append({ kind: 'tool', tool: 'build_app', tier: 'write', via: 'app', app: slug, ...entry });
@@ -134,11 +134,11 @@ export class AppLink {
     const name = await this.o.appName(slug);
     if (!name) {
       audit({ decision: 'denied', reason: 'not a built app', requestChars: request.length });
-      return { ok: false, message: "AI OS can't find this app any more. Ask for the change in the chat instead." };
+      return { ok: false, message: "Astra can't find this app any more. Ask for the change in the chat instead." };
     }
     if (this.o.waiting(slug)) {
       audit({ decision: 'denied', reason: 'a card is already waiting', requestChars: request.length });
-      return { ok: false, message: `A Change card for ${name} is already waiting in the AI OS chat. Click it or Cancel it there first.` };
+      return { ok: false, message: `A Change card for ${name} is already waiting in the Astra chat. Click it or Cancel it there first.` };
     }
     this.recent.push(now);
     const r = await this.o.offer({ name, slug, request });
@@ -148,7 +148,7 @@ export class AppLink {
     }
     audit({ decision: 'proposed', actionId: r.card, requestChars: request.length });
     this.o.showCard(name);
-    return { ok: true, card: r.card, state: 'pending', message: 'Sent. Click Change on the card in the AI OS chat to start; this app reloads when it is done.' };
+    return { ok: true, card: r.card, state: 'pending', message: 'Sent. Click Change on the card in the Astra chat to start; this app reloads when it is done.' };
   }
 
   /** Where the card this app posted is. Only that app's own cards answer. */
@@ -158,7 +158,7 @@ export class AppLink {
     const c = this.o.card(p.data.card);
     if (!c || c.slug !== p.data.slug) return { ok: false, state: 'unknown', message: '' };
     const message = {
-      pending: 'Waiting for you to click Change on the card in the AI OS chat.',
+      pending: 'Waiting for you to click Change on the card in the Astra chat.',
       running: `Changing the app${c.step ? `: ${c.step}` : '…'}`,
       done: 'Done.',
       failed: c.result ?? "The change didn't work.",

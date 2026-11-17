@@ -1,6 +1,8 @@
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { z } from 'zod';
+import { WIDGET_KINDS, WidgetKind } from './protocol.js';
 import { MONITOR_NAME } from './window.js';
+import { appIds } from './brand.js';
 
 /**
  * Reference to a secret held in the system keyring, e.g. `keyring:openrouter`.
@@ -60,6 +62,46 @@ export const LocalModelConfig = ModelRoleConfig.extend({
   structuredOutput: z.enum(['json_schema', 'json_object']).default('json_object'),
 });
 export type LocalModelConfig = z.infer<typeof LocalModelConfig>;
+
+/**
+ * F3: an embedding model on this computer for finding files by meaning, through Ollama's native
+ * `POST /api/embed` (http://127.0.0.1:11434; returns L2-normalised vectors; checked against
+ * docs.ollama.com on 2026-11-10). It reads file text, so like [models.local] it must be on this
+ * machine: only loopback addresses are accepted. The model name is config, e.g. "embeddinggemma".
+ */
+export const EmbeddingsConfig = z.strictObject({
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    .default('http://127.0.0.1:11434')
+    .refine((u) => LOOPBACK_HOSTS.has(new URL(u).hostname), 'the embedding model must be on this computer (127.0.0.1, localhost or ::1)'),
+  model: z.string().min(1).max(200),
+  timeoutMs: z.int().positive().default(60_000),
+  /** Texts per call while indexing. */
+  batchSize: z.int().min(1).max(64).default(16),
+});
+export type EmbeddingsConfig = z.infer<typeof EmbeddingsConfig>;
+
+/**
+ * V2: voice to text in the chat, from a whisper.cpp server on this computer (`whisper-server`,
+ * `POST /inference` with a multipart `file`, `response_format=json` answers `{"text": ...}`;
+ * its own default address is 127.0.0.1:8080; checked against github.com/ggml-org/whisper.cpp
+ * examples/server on 2026-11-10). It hears the user's voice, so like [models.local] it must be on
+ * this machine: only loopback addresses are accepted. The server loads its model itself (`-m`),
+ * so no model name is needed here.
+ */
+export const SpeechConfig = z.strictObject({
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    // Not whisper-server's own 8080, which other programs often hold (it did on the real machine).
+    .default('http://127.0.0.1:8178')
+    .refine((u) => LOOPBACK_HOSTS.has(new URL(u).hostname), 'the speech model must be on this computer (127.0.0.1, localhost or ::1)'),
+  /** Whisper's language code, e.g. "en" or "tr", or "auto" to detect it each time. */
+  language: z.string().regex(/^(auto|[a-z]{2,3})$/, 'must be a language code such as "en", or "auto"').default('en'),
+  /** The longest recording, in seconds; the chat stops listening at this point. */
+  maxSeconds: z.int().min(5).max(120).default(60),
+  timeoutMs: z.int().positive().default(60_000),
+});
+export type SpeechConfig = z.infer<typeof SpeechConfig>;
 
 /** L1: jobs that can move from a cloud role to the local model, by listing them in assistant.localTasks. */
 export const LOCAL_TASKS = ['mailTriage', 'fileSummaries', 'nightlySummary'] as const;
@@ -154,6 +196,14 @@ export const CalendarConfig = z.strictObject({
     .strictObject({ start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) })
     .default({ start: '09:00', end: '18:00' }),
   apiBaseUrl: z.url({ protocol: /^https?$/ }).default('https://www.googleapis.com/calendar/v3'),
+  /**
+   * C3: the same Google sign-in also asks to read Google Contacts (contacts.readonly and
+   * contacts.other.readonly), so "email Sam" finds Sam's address. Read only. The consent page
+   * lets the user untick it; the calendar keeps working either way.
+   */
+  contacts: z.boolean().default(true),
+  /** People API v1. Checked 2026-11-15 against https://people.googleapis.com/$discovery/rest?version=v1 (revision 20261111). */
+  peopleApiBaseUrl: z.url({ protocol: /^https?$/ }).default('https://people.googleapis.com/v1'),
   authUrl: z.url({ protocol: /^https?$/ }).default('https://accounts.google.com/o/oauth2/v2/auth'),
   tokenUrl: z.url({ protocol: /^https?$/ }).default('https://oauth2.googleapis.com/token'),
 });
@@ -188,7 +238,7 @@ export type DocsConfig = z.infer<typeof DocsConfig>;
  */
 export const FilesConfig = z.strictObject({
   enabled: z.boolean().default(true),
-  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads']),
+  roots: z.array(z.string().min(1).max(500)).min(1).max(8).default(['~/Documents', '~/Downloads', '~/Videos']),
   /** Where an attachment's Save button saves unless another folder is picked on the card. */
   saveTo: z.string().min(1).max(500).default('~/Downloads'),
   /** F2: keep an index of the files (facts, summaries, tags) for files_search. */
@@ -199,6 +249,12 @@ export const FilesConfig = z.strictObject({
   summariesPerDay: z.int().min(0).max(10_000).default(200),
   /** F2: index at most this many files. */
   maxIndexedFiles: z.int().min(100).max(200_000).default(20_000),
+  /** F3: characters of each file's text kept for whole-text search; 0 turns it off. */
+  fullTextChars: z.int().min(0).max(1_000_000).default(100_000),
+  /** F3: search by meaning too, when [models.embeddings] is set. */
+  meaning: z.boolean().default(true),
+  /** F3: the least cosine similarity for a match by meaning (0 to 1; it depends on the embedding model). */
+  meaningMinScore: z.number().min(0).max(1).default(0.3),
 });
 export type FilesConfig = z.infer<typeof FilesConfig>;
 
@@ -221,6 +277,180 @@ export const BriefConfig = z.strictObject({
 });
 export type BriefConfig = z.infer<typeof BriefConfig>;
 
+/**
+ * V1: watching videos in mpv from the chat. `player` is started with options aios-core
+ * chooses, then `--`, then one absolute file path or one https link.
+ */
+export const VideoConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** mpv's command. An absolute path when the service doesn't see it on PATH. */
+  player: z.string().min(1).max(500).default('mpv'),
+  /** Play https links (YouTube and other sites mpv opens through yt-dlp). Off: only video files in `[files] roots`. */
+  links: z.boolean().default(true),
+});
+export type VideoConfig = z.infer<typeof VideoConfig>;
+
+/**
+ * T8: opening links and web searches in Chromium from the chat. `browser` is started with
+ * options aios-core chooses, then `--`, then one checked http(s) address.
+ */
+export const WebConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** The browser's command (Chromium, which the Astra package installs). An absolute path when the service doesn't see it on PATH. */
+  browser: z.string().min(1).max(500).default('chromium'),
+  /** Where web searches go: an https address with %s where the words go. */
+  search: z
+    .string()
+    .min(1)
+    .max(500)
+    .regex(/^https:\/\/[^\s]+$/, 'must be an https:// address')
+    .refine((s) => s.split('%s').length === 2, 'must contain %s once, where the search words go')
+    .default('https://www.google.com/search?q=%s'),
+  /** Let the chat read a page's text (web_read) when the user gives its link, to summarize it. */
+  read: z.boolean().default(true),
+  /** The most of a page that is read, in bytes, and the most of its text the model gets. */
+  maxBytes: z.int().min(10_000).max(10_000_000).default(2_000_000),
+  maxChars: z.int().min(1000).max(60_000).default(16_000),
+});
+export type WebConfig = z.infer<typeof WebConfig>;
+
+/**
+ * MU1: the music that is playing (Spotify, or any MPRIS player) through playerctl. `players`
+ * is playerctl's --player list, tried in order; `%any` means any other player.
+ */
+export const MusicConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  players: z
+    .array(z.string().regex(/^(%any|[A-Za-z0-9][A-Za-z0-9._-]{0,63})$/, 'a player name such as spotify, or %any'))
+    .min(1)
+    .max(8)
+    .refine((a) => a.filter((p) => p === '%any').length <= 1, '%any at most once')
+    .default(['spotify', '%any']),
+});
+export type MusicConfig = z.infer<typeof MusicConfig>;
+
+/** A phone number in international form, as Signal names an account: + and 7 to 15 digits. */
+export const SIGNAL_NUMBER = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * SG1: Signal messages through signal-cli, linked to the user's phone as a secondary device
+ * (setup's Signal step shows the QR code). `account` is the phone number setup links; until
+ * then Signal stays off. Messages are kept on this computer for `keepDays`.
+ */
+export const SignalConfig = z.strictObject({
+  enabled: z.boolean().default(false),
+  account: z.string().regex(SIGNAL_NUMBER, 'a phone number such as +905551234567').optional(),
+  /** signal-cli's command. An absolute path when the service doesn't see it on PATH. */
+  command: z.string().min(1).max(500).default('signal-cli'),
+  /** A line in the chat (and a desktop notification) when a message arrives. */
+  notify: z.boolean().default(true),
+  keepDays: z.int().min(1).max(365).default(30),
+});
+export type SignalConfig = z.infer<typeof SignalConfig>;
+
+/**
+ * W1: tiles along the bottom of the chat screen. `pinned` is where a fresh install starts;
+ * after the user pins or unpins one (/pin, /unpin or a click), their choice is kept instead.
+ */
+export const WidgetsConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  pinned: z
+    .array(WidgetKind)
+    .max(WIDGET_KINDS.length)
+    .refine((a) => new Set(a).size === a.length, 'each widget at most once')
+    .default(['checkup', 'brief', 'todos']),
+});
+export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
+
+/**
+ * K1: the knowledge base about the user, `~/.config/aios/knowledge/about-me.md`, updated in the
+ * background from new mail (triage results), calendar events, file descriptions and chat. It is
+ * notes from outside text, never memory: the chat reads it only through knowledge_read, inside
+ * <untrusted> tags, and nothing in it can call a tool, write memory or change config.
+ */
+/** K3: Gmail's inbox tabs, as its search names them (category:promotions). */
+export const GMAIL_CATEGORIES = ['promotions', 'social', 'updates', 'forums'] as const;
+export type GmailCategory = (typeof GMAIL_CATEGORIES)[number];
+const SenderPattern = z
+  .string()
+  .max(320)
+  .regex(/^([^\s@<>"]+@)?[a-z0-9-]+(\.[a-z0-9-]+)+$/i, 'must be an address such as ana@home.example or a domain such as shop.example')
+  .transform((s) => s.toLowerCase());
+
+export const KNOWLEDGE_SOURCES = ['mail', 'calendar', 'files', 'chat'] as const;
+export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
+
+export const KnowledgeConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** How often it looks for what is new. */
+  everyMinutes: z.int().min(15).max(24 * 60).default(60),
+  /** The hourly updates: "local", the local model ([models.local]); without one, code writes only Upcoming and Recent activity. "cloud": the nightly role. */
+  model: z.enum(['local', 'cloud']).default('local'),
+  sources: z.array(z.enum(KNOWLEDGE_SOURCES)).max(KNOWLEDGE_SOURCES.length).default([...KNOWLEDGE_SOURCES]),
+  /** K2/K3: the first pass reads mail (INBOX and Sent) from this many days back (about 6 months), and every indexed file. 0: no first pass. */
+  backfillDays: z.int().min(0).max(730).default(183),
+  /** K2: the first pass runs on the cloud nightly role ("cloud", the default) or the local model ("local"). */
+  backfillModel: z.enum(['local', 'cloud']).default('cloud'),
+  /** K2/K3: at most this many emails (after the filters below) and files in the first pass, newest first. */
+  backfillMaxMails: z.int().min(0).max(50_000).default(5000),
+  backfillMaxFiles: z.int().min(0).max(5000).default(300),
+  /** K2: emails and files read per run (the first pass runs every five minutes until it is done). */
+  perRun: z.int().min(1).max(500).default(40),
+  /** Calendar events this many days back and ahead. */
+  calendarDays: z.int().min(0).max(30).default(7),
+  /** One copy of the file a day is kept in knowledge/history for this many days. */
+  keepDays: z.int().min(1).max(90).default(14),
+  /**
+   * K3: mail older than the first pass. "local-overnight" (the default): read on the local model,
+   * only in the `overnight` hours, newest first. "cloud": on backfillModel's cloud role, under
+   * `dailyBudgetUsd`. "off": never.
+   */
+  olderMail: z.enum(['off', 'local-overnight', 'cloud']).default('local-overnight'),
+  /** K3: how far back older mail goes, in months before the first pass's window. */
+  olderMailMonths: z.int().min(0).max(240).default(60),
+  /** K3: the hours older mail is read in when olderMail is "local-overnight". */
+  overnight: z.strictObject({ start: HHMM, end: HHMM }).default({ start: '01:00', end: '07:00' }),
+  /** K3: Gmail tabs never read (Gmail only; other servers have no tabs). */
+  skipCategories: z.array(z.enum(GMAIL_CATEGORIES)).max(GMAIL_CATEGORIES.length).default([...GMAIL_CATEGORIES]),
+  /** K3: skip bulk and automated mail by its headers (List-Unsubscribe, Precedence: bulk, Auto-Submitted, noreply@ senders). */
+  skipAutomated: z.boolean().default(true),
+  /** K3: addresses (ana@home.example) or domains (shop.example) never read. Your own sent mail is always read. */
+  skipSenders: z.array(SenderPattern).max(500).default([]),
+  /** K3: addresses or domains always read, even when a filter above would skip them. */
+  alwaysSenders: z.array(SenderPattern).max(500).default([]),
+  /**
+   * K3: the most the knowledge base spends on the cloud model in a day (as the provider reports
+   * it), inside cost.dailyCapUsd, so reading old mail never uses up the chat's budget. 0: no cloud reading.
+   */
+  dailyBudgetUsd: z.number().min(0).max(50).default(0.5),
+  /** K4: a wiki page per person, project and organisation in knowledge/people, projects and orgs, with index.md and log.md. */
+  wiki: z.boolean().default(true),
+  /** K4: pages whose summary is rewritten per run when they get new facts (one small call each, no tools). 0: summaries are never written. */
+  pageSummariesPerRun: z.int().min(0).max(100).default(10),
+  /** K4: the check for old commitments, duplicates and pages with no links, every this many days. 0: only /knowledge check. */
+  checkEveryDays: z.int().min(0).max(90).default(7),
+});
+export type KnowledgeConfig = z.infer<typeof KnowledgeConfig>;
+
+/**
+ * P1: how the assistant talks. `name` is what it calls itself in chat; `tone` is where a fresh
+ * install starts, and /tone changes it from the chat after that (the user's own typing only:
+ * no tool can, and nothing in an email or document can). The name goes into the system prompt,
+ * so it is kept to a short run of letters, spaces, apostrophes and hyphens.
+ */
+export const PERSONALITY_TONES = ['friendly', 'playful', 'neutral', 'concise'] as const;
+export const Tone = z.enum(PERSONALITY_TONES);
+export type Tone = z.infer<typeof Tone>;
+
+export const PersonalityConfig = z.strictObject({
+  name: z
+    .string()
+    .regex(/^[\p{L}][\p{L} '-]{0,29}$/u, 'must be a short name made of letters, spaces, apostrophes or hyphens')
+    .default('Astra'),
+  tone: Tone.default('friendly'),
+});
+export type PersonalityConfig = z.infer<typeof PersonalityConfig>;
+
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM');
 
 export const AiosConfig = z.strictObject({
@@ -234,18 +464,23 @@ export const AiosConfig = z.strictObject({
     nightly: ModelRoleConfig,
     /** L1: leave out to run without a local model; the system assistant then writes its own plain text. */
     local: LocalModelConfig.optional(),
+    /** F3: leave out to search files by words only. */
+    embeddings: EmbeddingsConfig.optional(),
+    /** V2: leave out to keep the chat's microphone button off. */
+    speech: SpeechConfig.optional(),
   }),
   mail: MailConfig,
   /** C1: leave out to run without a calendar. */
   calendar: CalendarConfig.optional(),
   notifications: z
     .strictObject({
-      maxPerHour: z.int().min(1).default(6),
+      /** Off unless set: at most this many urgent-mail peeks an hour. Mail itself is never held back. */
+      maxPerHour: z.int().min(1).optional(),
       quietHours: z
         .strictObject({ start: HourMinute, end: HourMinute })
         .optional(),
     })
-    .default({ maxPerHour: 6 }),
+    .default({}),
   memory: z
     .strictObject({
       /** Token budget for one chat request: system prompt, profile, recalled notes and recent turns. */
@@ -282,13 +517,38 @@ export const AiosConfig = z.strictObject({
     timeoutSeconds: 12,
   }),
   /** F1: managing files in a few folders. */
-  files: FilesConfig.default({ enabled: true, roots: ['~/Documents', '~/Downloads'], saveTo: '~/Downloads', index: true, summaries: true, summariesPerDay: 200, maxIndexedFiles: 20_000 }),
+  files: FilesConfig.default({
+    enabled: true,
+    roots: ['~/Documents', '~/Downloads', '~/Videos'],
+    saveTo: '~/Downloads',
+    index: true,
+    summaries: true,
+    summariesPerDay: 200,
+    maxIndexedFiles: 20_000,
+    fullTextChars: 100_000,
+    meaning: true,
+    meaningMinScore: 0.3,
+  }),
   /** L1: the background system assistant on the local model. */
   assistant: AssistantConfig.prefault({}),
   /** T1: to-dos and reminders. */
   todos: TodosConfig.prefault({}),
   /** T2: the morning brief. */
   brief: BriefConfig.prefault({}),
+  /** V1: watching videos in mpv. */
+  video: VideoConfig.prefault({}),
+  /** T8: links and web searches in Chromium. */
+  web: WebConfig.prefault({}),
+  /** MU1: pausing, skipping and naming the music that is playing. */
+  music: MusicConfig.prefault({}),
+  /** SG1: Signal messages through signal-cli. */
+  signal: SignalConfig.prefault({}),
+  /** W1: tiles along the bottom of the chat screen. */
+  widgets: WidgetsConfig.prefault({}),
+  /** K1: the hourly knowledge base about the user. */
+  knowledge: KnowledgeConfig.prefault({}),
+  /** P1: the assistant's name and tone. */
+  personality: PersonalityConfig.prefault({}),
   /** S4: building apps with Claude Code. */
   builder: z
     .strictObject({
@@ -335,8 +595,8 @@ export function serializeConfig(config: AiosConfig): string {
   return stringifyToml(AiosConfig.parse(config));
 }
 
-/** Respect XDG_CONFIG_HOME, falling back to ~/.config/aios. */
+/** ~/.config/astra (respects XDG_CONFIG_HOME); ~/.config/aios for an install made before R1 (brand.ts). */
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   const base = env.XDG_CONFIG_HOME || `${env.HOME ?? ''}/.config`;
-  return `${base}/aios`;
+  return `${base}/${appIds(env).dir}`;
 }

@@ -10,16 +10,22 @@
     "setup": "tsx src/setup.ts",
     "uninstall": "tsx src/uninstall.ts",
     "e2e": "tsx src/e2e.ts",
-    "calendar-login": "tsx src/calendar-login.ts"
+    "e2e:setup": "tsx src/e2e-setup.ts",
+    "calendar-login": "tsx src/calendar-login.ts",
+    "doctor": "tsx src/doctor.ts",
+    "backup": "tsx src/backup.ts",
+    "astra": "tsx src/astra.ts"
   },
   "dependencies": {
     "@aios/core": "workspace:*",
     "@aios/shared": "workspace:*",
     "imapflow": "^2.5.5",
-    "nodemailer": "^10.1.7"
+    "nodemailer": "^10.1.7",
+    "qrcode-generator": "2.0.4",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "tsx": "^4.23.15",
-    "playwright-core": "^1.56.1"
+    "playwright-core": "^1.56.1",
+    "tsx": "^4.23.15"
   }
 }

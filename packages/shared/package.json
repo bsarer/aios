@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./protocol": "./src/protocol.ts"
+    "./protocol": "./src/protocol.ts",
+    "./audio": "./src/audio.ts"
   },
   "dependencies": {
     "smol-toml": "^1.9.1",

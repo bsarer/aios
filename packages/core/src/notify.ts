@@ -9,7 +9,7 @@ const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 
 export function desktopNotify(title: string, body: string, env: NodeJS.ProcessEnv = process.env): void {
   try {
-    const child = spawn('notify-send', ['--app-name=AI OS', escape(title.slice(0, 100)), escape(body.slice(0, 300))], { env, shell: false, stdio: 'ignore' });
+    const child = spawn('notify-send', ['--app-name=Astra', escape(title.slice(0, 100)), escape(body.slice(0, 300))], { env, shell: false, stdio: 'ignore' });
     child.once('error', () => undefined);
     child.unref();
   } catch {

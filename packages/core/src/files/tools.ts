@@ -11,6 +11,7 @@ import { type AttachmentFiles, declaredKind, extractPdfText, MAX_ATTACHMENT_BYTE
 import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool, ToolContext, ToolResult } from '../tools/registry.js';
 import { nameText, sanitize, wrapUntrusted } from '../untrusted.js';
+import { videoFormatOf } from '../video/play.js';
 import type { FileActions } from './actions.js';
 import { checkFileName, exists, type FileEntry, FilePathError, type FileRoots, KIND_TEXT, kindOf } from './roots.js';
 
@@ -26,6 +27,8 @@ export interface FileToolsOptions {
   viewer: Pick<AttachmentFiles, 'showFile'>;
   /** D1's card for Word and Excel files, when documents are on. */
   showDocument?: (path: string) => Promise<string>;
+  /** V1: video_play is there, so a video file is sent to it. */
+  videos?: boolean;
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -45,6 +48,9 @@ const neverRuns = async (): Promise<string> => {
 
 const denied =
   "Error: files can be changed only at the user's request, and not while an email or calendar event is in view. Ask them to say what to change in a new message of their own.";
+
+/** V1: a video can't be shown in the chat, but mpv plays it. */
+const playInstead = (display: string) => `${nameText(display)} is a video: it can't be shown in the chat, but you can play it. Call video_play with this path now.`;
 
 const DOC_IN_VIEW_WARNING = "Suggested while a file's or document's text was in view. Check this is what you asked for.";
 
@@ -104,6 +110,7 @@ export function fileTools(o: FileToolsOptions): RegisteredTool[] {
             if (!o.showDocument) return 'Error: Word and Excel files are turned off in config [docs].';
             return { content: await o.showDocument(f.path), audit: { path: f.path, kind: k } };
           }
+          if (k === 'other' && o.videos && (await videoFormatOf(f.path))) return { content: playInstead(f.display), audit: { path: f.path, kind: 'video' } };
           if (k !== 'pdf' && k !== 'image' && k !== 'text') return { content: `Error: this ${KIND_TEXT[k]} can't be shown in the chat; only PDFs, pictures, text, Word and Excel files can.`, audit: { path: f.path, kind: k } };
           if (f.bytes > MAX_ATTACHMENT_BYTES) return `Error: it is larger than ${sizeText(MAX_ATTACHMENT_BYTES)}, too large to show here.`;
           const card = o.viewer.showFile(f, k);
@@ -122,6 +129,7 @@ export function fileTools(o: FileToolsOptions): RegisteredTool[] {
           if (k === 'word') return `Error: ${nameText(f.display)} is a Word file; use doc_read.`;
           if (k === 'sheet') return `Error: ${nameText(f.display)} is an Excel file; use sheet_read.`;
           if (k === 'image') return `Error: ${nameText(f.display)} is a picture. You cannot see pictures; call file_show so the user can.`;
+          if (k === 'other' && o.videos && (await videoFormatOf(f.path))) return playInstead(f.display);
           if (k !== 'pdf' && k !== 'text') return `Error: ${nameText(f.display)} is not a PDF or text file, so its text can't be read.`;
           if (f.bytes > MAX_ATTACHMENT_BYTES) return `Error: it is larger than ${sizeText(MAX_ATTACHMENT_BYTES)}, too large to read here.`;
           const bytes = await readFile(f.path);

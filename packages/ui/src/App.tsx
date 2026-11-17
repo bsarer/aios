@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
+import { FeedbackButton } from './components/FeedbackButton';
+import { MailRail, useInbox } from './components/MailRail';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
 import { Icon, type IconName } from './components/ui';
+import { WidgetBar } from './components/WidgetBar';
 import { applyTheme } from './theme';
 import { useChat } from './useChat';
 
 export function App() {
   const { state, conn, send, outdated } = useChat();
+  // Calm mail alerts: new mail waits in the side rail's inbox instead of the chat.
+  const inbox = useInbox(state.items);
+  // Up/Down in the message box: the user's own messages in the chat, oldest first.
+  const earlier = useMemo(() => state.items.flatMap((i) => (i.kind === 'user' ? [i.text] : [])), [state.items]);
   const bottom = useRef<HTMLDivElement>(null);
   const working = state.status?.agent === 'working';
   // A short blip while the service restarts shows nothing; a lasting outage says what to do.
@@ -26,12 +33,15 @@ export function App() {
     onMemoryDecision: (id, decision) => send({ type: 'memory', id, decision }),
     onSend: (text) => send({ type: 'send', text }),
     onIgnoreMail: (itemId, mailId) => send({ type: 'mail_ignore', itemId, mailId }),
+    onOpenInbox: () => inbox.setOpen(true),
     onDraftSend: (id, hash) => send({ type: 'draft_send', id, hash }),
     onDraftDiscard: (id) => send({ type: 'draft_discard', id }),
     onActionConfirm: (id, hash, choice) => send({ type: 'action_confirm', id, hash, ...(choice === undefined ? {} : { choice }) }),
     onActionCancel: (id) => send({ type: 'action_cancel', id }),
     onEventConfirm: (id, hash) => send({ type: 'event_confirm', id, hash }),
     onEventDiscard: (id) => send({ type: 'event_discard', id }),
+    onSignalSend: (id, hash) => send({ type: 'signal_send', id, hash }),
+    onSignalDiscard: (id) => send({ type: 'signal_discard', id }),
     onDocChangeConfirm: (id, hash) => send({ type: 'doc_change_confirm', id, hash }),
     onDocChangeDiscard: (id) => send({ type: 'doc_change_discard', id }),
     onFileChangeConfirm: (id, hash) => send({ type: 'file_change_confirm', id, hash }),
@@ -43,6 +53,8 @@ export function App() {
     onCleanup: (id, list, n, action, hash) => send({ type: 'cleanup_action', id, list, n, action, hash }),
     onTodo: (id, todoId, action, hash) => send({ type: 'todo_action', id, todoId, action, hash }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
+    onUpdate: (id) => send({ type: 'update_start', id }),
+    onKnowledgeSave: state.status?.knowledge ? (id) => send({ type: 'knowledge_save', id }) : undefined,
   };
 
   // Braced bodies: an effect may only return a cleanup function, and newer Chromium
@@ -56,15 +68,11 @@ export function App() {
 
   // Before the first message of the session, the greeting sits mid-screen with a few starters.
   const fresh = !state.items.some((i) => i.kind === 'user');
-  // Up-arrow recall in the input: what the user sent, oldest first, repeats collapsed.
-  const history = useMemo(
-    () => state.items.flatMap((i) => (i.kind === 'user' ? [i.text] : [])).filter((t, n, all) => t !== all[n - 1]),
-    [state.items],
-  );
 
   return (
-    <div className="flex h-full flex-col">
-      <StatusStrip status={state.status} conn={conn} />
+    // While the inbox is open on a wide screen, the chat moves aside for it (styles.css).
+    <div className={`flex h-full flex-col ${inbox.open ? 'inbox-open' : ''}`}>
+      <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} mail={{ fresh: inbox.fresh, urgent: inbox.urgent }} onMail={() => inbox.setOpen(!inbox.open)} />
       {/* S7: the chat keeps its own screen; this says where apps are and how to come back. */}
       {state.status?.appsAt && (
         <div data-testid="apps-hint" className="mx-auto -mt-1 px-4 text-center text-[13px]" style={{ color: 'var(--muted)' }}>
@@ -74,7 +82,7 @@ export function App() {
       {outdated && (
         <div data-testid="outdated" role="status" className="card mx-auto mt-3 flex items-center gap-3 rounded-[14px] py-2.5 pl-4 pr-3 text-[15px]">
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: 'var(--accent)' }} />
-          AI OS was updated. Reload to see everything.
+          Astra was updated. Reload to see everything.
           <button type="button" className="btn btn-primary btn-sm" onClick={() => location.reload()}>
             Reload
           </button>
@@ -84,7 +92,7 @@ export function App() {
         <div data-testid="offline" role="status" data-tone="danger" className="card mx-auto mt-3 flex max-w-[calc(100%-24px)] items-center gap-3 rounded-[14px] px-4 py-2.5 text-[15px]">
           <span className="spin inline-block h-4 w-4 shrink-0 rounded-full border-2 border-t-transparent" style={{ borderColor: 'var(--danger)', borderTopColor: 'transparent' }} />
           <span>
-            I can't reach the AI OS service. Retrying… If this lasts, leave the chat with Super+Shift+Escape and run <code className="inset px-1.5 py-0.5 text-[13px]">journalctl --user -u aios-core -n 20</code> to see why.
+            I can't reach the Astra service. Retrying… If this lasts, leave the chat with Super+Shift+Escape and run <code className="inset px-1.5 py-0.5 text-[13px]">astra doctor</code> in a terminal to see why.
           </span>
         </div>
       )}
@@ -92,7 +100,7 @@ export function App() {
         <div className={`mx-auto flex w-[min(760px,calc(100%-24px))] flex-col gap-6 py-10 ${fresh ? 'min-h-full justify-center' : ''}`}>
           {state.items.map((item) => (
             // Everything but the two sides of the conversation lines up with the assistant's text.
-            <div key={item.id} className={item.kind === 'user' || item.kind === 'assistant' ? '' : 'pl-10'}>
+            <div key={item.id} className={item.kind === 'user' || item.kind === 'assistant' ? '' : 'pl-10 empty:hidden'}>
               <Message item={item} actions={actions} />
             </div>
           ))}
@@ -100,7 +108,17 @@ export function App() {
           <div ref={bottom} />
         </div>
       </main>
-      <Composer history={history} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} />
+      <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
+      {/* W1: pinned system features along the bottom of the screen. */}
+      <MailRail inbox={inbox} disabled={conn !== 'open'} onSend={actions.onSend} onIgnoreMail={actions.onIgnoreMail} />
+      {/* The floating Feedback button: it only sends /feedback, the same as typing it. */}
+      <FeedbackButton disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} />
+      <WidgetBar
+        widgets={state.widgets}
+        disabled={conn !== 'open'}
+        onOpen={(widget) => send({ type: 'widget_open', widget })}
+        onPin={(widget, pinned) => send({ type: 'widget_pin', widget, pinned })}
+      />
     </div>
   );
 }

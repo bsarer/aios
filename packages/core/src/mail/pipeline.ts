@@ -1,8 +1,9 @@
 /**
  * From queued mail to a chat notification (plan §5): wait out a short batch window,
- * triage the batch in one model call, then post one notification. Respects pause,
- * quiet hours and a per-hour limit by holding triaged mail and posting it later as
- * one catch-up. A failed triage keeps the mail queued and retries.
+ * triage the batch in one model call, then post one notification. Pause holds mail
+ * (no model calls) and posts it later as one catch-up. Quiet hours and the per-hour
+ * limit don't hold mail: it goes to the side rail's inbox marked `quiet`, so urgent
+ * mail doesn't peek out. A failed triage keeps the mail queued and retries.
  */
 import { randomUUID } from 'node:crypto';
 import type { ChatItem, MailRow, ModelRole } from '@aios/shared';
@@ -26,13 +27,21 @@ export interface PipelineOptions {
   isPaused: () => boolean;
   timeZone: string;
   batchWindowMs: number;
-  maxPerHour: number;
+  /** Off when unset: no hourly limit. */
+  maxPerHour?: number | undefined;
   quietHours?: { start: string; end: string } | undefined;
   /** L1: 'local' when mail triage runs on the local model. Default 'triage'. */
   role?: ModelRole;
   now?: () => number;
   newId?: () => string;
+  /** Timings for the audit log (counts and milliseconds only, never mail text). */
+  log?: (entry: MailTiming) => void;
 }
+
+export type MailTiming =
+  | { event: 'triage'; count: number; ms: number; outcome: 'ok' | 'failed' | 'cost_cap' }
+  /** `waitedMs`: from the first of these emails reaching the watcher to the notification. */
+  | { event: 'posted'; count: number; waitedMs: number };
 
 const minutes = (hhmm: string) => {
   const [h = 0, m = 0] = hhmm.split(':').map(Number);
@@ -106,13 +115,17 @@ export class MailPipeline {
       stale.forEach((e) => this.o.state.saveTriage(e.messageId, fallbackItem(e)));
       batch = batch.filter((e) => e.attempts < MAX_ATTEMPTS);
       if (!batch.length) continue;
+      const started = this.now();
+      const timed = (outcome: 'ok' | 'failed' | 'cost_cap') => this.o.log?.({ event: 'triage', count: batch.length, ms: this.now() - started, outcome });
       try {
         const items = await triage(this.o.model, batch, this.o.role);
+        timed('ok');
         batch.forEach((e, i) => this.o.state.saveTriage(e.messageId, items[i]!));
         if (this.failing || this.capped) this.o.notice('info', 'Mail summaries are working again.');
         this.failing = false;
         this.capped = false;
       } catch (err) {
+        timed(err instanceof ModelError && err.kind === 'cost_cap' ? 'cost_cap' : 'failed');
         if (err instanceof ModelError && err.kind === 'cost_cap') {
           // Mail still arrives under the cap, listed by sender and subject without a summary.
           batch.forEach((e) => this.o.state.saveTriage(e.messageId, fallbackItem(e)));
@@ -135,13 +148,16 @@ export class MailPipeline {
     const ready = this.o.state.withStatus('triaged', 200);
     if (!ready.length) return;
     const now = this.now();
-    if (inQuietHours(now, this.o.timeZone, this.o.quietHours)) return;
-    if (this.o.state.notificationsSince(now - HOUR) >= this.o.maxPerHour) return;
+    // Calm mail alerts: new mail always goes to the side rail's inbox, which never interrupts.
+    // Quiet hours and the hourly limit only keep urgent mail from peeking out (`quiet`).
+    const quiet = inQuietHours(now, this.o.timeZone, this.o.quietHours) || (this.o.maxPerHour !== undefined && this.o.state.notificationsSince(now - HOUR) >= this.o.maxPerHour);
     const rows = ready.map(toRow);
     const oldest = Math.min(...ready.map((e) => e.date ?? e.receivedAt));
     const order = { high: 0, normal: 1, low: 2 } as const;
     rows.sort((a, b) => order[a.urgency] - order[b.urgency]);
-    this.o.post({ kind: 'notification', id: this.newId(), text: headline(rows, now - oldest > CATCH_UP_AFTER_MS), at: now, mails: rows });
+    const catchUp = now - oldest > CATCH_UP_AFTER_MS;
+    this.o.post({ kind: 'notification', id: this.newId(), text: headline(rows, catchUp), at: now, mails: rows, ...(catchUp ? { catchUp: true } : {}), ...(quiet ? { quiet: true } : {}) });
+    this.o.log?.({ event: 'posted', count: ready.length, waitedMs: now - Math.min(...ready.map((e) => e.receivedAt)) });
     this.o.state.markNotified(
       ready.map((e) => e.messageId),
       now,
@@ -162,5 +178,12 @@ function toRow(e: MailEvent): MailRow {
     summary: t.summary,
     urgency: t.urgency,
     needsReply: t.needs_reply,
+    date: mailDate(e),
   };
+}
+
+/** Anyone can write a Date header: one later than arrival (plus clock skew) falls back to arrival. */
+const DATE_SKEW_MS = 5 * 60 * 1000;
+export function mailDate(e: Pick<MailEvent, 'date' | 'receivedAt'>): number {
+  return e.date !== null && Number.isFinite(e.date) && e.date > 0 && e.date <= e.receivedAt + DATE_SKEW_MS ? e.date : e.receivedAt;
 }

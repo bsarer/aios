@@ -7,7 +7,7 @@ import { MAX_ITERATIONS } from '../src/agent.js';
 import { AuditLog, redact } from '../src/audit.js';
 import { parseCommand } from '../src/commands.js';
 import { type Delta, ModelError, type ModelRequest, type ModelResult, type ToolCall } from '../src/model.js';
-import { Shell } from '../src/shell.js';
+import { Shell, type ShellOptions } from '../src/shell.js';
 import { parseNmcli, readBattery } from '../src/status/system.js';
 import { parseThemeToml } from '../src/status/theme.js';
 import { Store, startOfDay } from '../src/store.js';
@@ -55,7 +55,7 @@ function fakeModel(turns: Turn[]) {
   };
 }
 
-function setup(turns: Turn[] = []) {
+function setup(turns: Turn[] = [], extra: Partial<ShellOptions> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'aios-'));
   const store = new Store(':memory:');
   const auditPath = join(dir, 'audit.jsonl');
@@ -74,6 +74,7 @@ function setup(turns: Turn[] = []) {
     readBattery: async () => ({ percent: 80, charging: false }),
     readWifi: async () => ({ connected: true, ssid: 'home' }),
     clock: () => CLOCK,
+    ...extra,
   });
   const events: ServerEvent[] = [];
   shell.subscribe((e) => events.push(e));
@@ -188,8 +189,57 @@ describe('slash commands', () => {
 
   it('commands never reach the model', async () => {
     const { shell, model } = setup();
-    for (const c of ['/help', '/cost', '/memory', '/forget x', '/whatever']) await shell.handle({ type: 'send', text: c });
+    for (const c of ['/help', '/cost', '/memory', '/forget x', '/doctor', '/whatever']) await shell.handle({ type: 'send', text: c });
     expect(model.requests).toHaveLength(0);
+  });
+
+  it('/doctor shows the install checks written by code, or says to run astra doctor (P1, R1)', async () => {
+    const plain = setup();
+    await plain.shell.handle({ type: 'send', text: '/doctor' });
+    expect(plain.items().at(-1)).toMatchObject({ text: expect.stringContaining('astra doctor') });
+    const withDoctor = setup([], { doctor: async () => ['✓ Config: config.toml loads', '✗ Kiosk: aios.lua is missing'] });
+    await withDoctor.shell.handle({ type: 'send', text: '/doctor' });
+    expect(withDoctor.items().at(-1)).toMatchObject({ text: '✓ Config: config.toml loads\n✗ Kiosk: aios.lua is missing' });
+    expect(withDoctor.model.requests).toHaveLength(0);
+  });
+
+  it('/update shows what is new, and only the newest card’s Update click opens the terminal, even while paused (U1)', async () => {
+    const plain = setup();
+    await plain.shell.handle({ type: 'send', text: '/update' });
+    expect(plain.items().at(-1)).toMatchObject({ text: expect.stringContaining('astra update') });
+
+    let opened = 0;
+    let check: () => Promise<import('../src/update.js').UpdateCheck> = async () => ({ state: 'available', from: 'a'.repeat(40), to: 'b'.repeat(40), branch: 'origin/main', behind: 12, changes: ['Setup in a window', 'Voice in setup'] });
+    const t = setup([], { updates: { check: () => check(), open: async () => { opened++; return 'xdg-terminal-exec'; } } });
+    await t.shell.handle({ type: 'send', text: '/pause' });
+    await t.shell.handle({ type: 'send', text: '/update' });
+    const first = t.items().at(-1) as Extract<ChatItem, { kind: 'update' }>;
+    expect(first).toMatchObject({ kind: 'update', state: 'available', changes: ['Setup in a window', 'Voice in setup'], more: 10 });
+    expect(first.headline).toContain('12 changes on origin/main');
+    await t.shell.handle({ type: 'send', text: '/update' });
+    const second = t.items().at(-1) as Extract<ChatItem, { kind: 'update' }>;
+    // An older card, or a made-up id, opens nothing.
+    await t.shell.handle({ type: 'update_start', id: first.id });
+    await t.shell.handle({ type: 'update_start', id: 'update-nope' });
+    expect(opened).toBe(0);
+    await t.shell.handle({ type: 'update_start', id: second.id });
+    expect(opened).toBe(1);
+    expect(t.store.recentItems().find((i) => i.id === second.id)).toMatchObject({ state: 'started' });
+    // Once started, the same card can't start another.
+    await t.shell.handle({ type: 'update_start', id: second.id });
+    expect(opened).toBe(1);
+    expect(t.model.requests).toHaveLength(0);
+    expect(t.audits().filter((a) => a.kind === 'update').map((a) => a.event)).toEqual(['check', 'check', 'start']);
+
+    check = async () => ({ state: 'current', commit: 'c'.repeat(40), branch: 'origin/main' });
+    await t.shell.handle({ type: 'send', text: '/update' });
+    expect(t.items().at(-1)).toMatchObject({ state: 'current', headline: expect.stringContaining('up to date (ccccccc') });
+  });
+
+  it('the model has no tool that updates Astra (U1)', () => {
+    const names = ALPHA_TOOLS.map((t) => t.name);
+    expect(names.filter((n) => /^(update|self_update)$|upgrade|install|astra/i.test(n))).toEqual([]);
+    expect(JSON.stringify(ALPHA_TOOLS)).not.toMatch(/astra update|update_start|pacman/i);
   });
 });
 

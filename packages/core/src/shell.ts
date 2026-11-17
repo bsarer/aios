@@ -25,6 +25,27 @@ import { type Store, startOfDay } from './store.js';
 import type { Battery, Wifi } from './status/system.js';
 import type { SystemActions } from './system/actions.js';
 import type { ToolRegistry } from './tools/registry.js';
+import { WIDGET_TITLES, type WidgetBoard, widgetByName } from './widgets/widgets.js';
+import { type FeedbackLog, feedbackListText } from './feedback.js';
+import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
+import type { UpdateCheck } from './update.js';
+import type { MusicAction } from './music/player.js';
+import type { SignalActions } from './signal/actions.js';
+import { pickWeb } from './web/tools.js';
+
+/** MU1: /music's words, mapped by code to music_control's actions. */
+const MUSIC_WORDS: Record<string, MusicAction> = {
+  play: 'play',
+  resume: 'play',
+  pause: 'pause',
+  stop: 'pause',
+  toggle: 'toggle',
+  next: 'next',
+  skip: 'next',
+  previous: 'previous',
+  prev: 'previous',
+  back: 'previous',
+};
 
 export interface ShellOptions {
   store: Store;
@@ -60,18 +81,47 @@ export interface ShellOptions {
   documents?: Pick<DocumentFiles, 'edit'>;
   /** S7: where apps open now, for the status strip's hint. Without it, the hint is left out. */
   chatWindow?: { readonly appsAt: 'screen' | 'workspace' | null };
+  /** V2: the microphone button is on, with this longest recording. Without it, the button stays off. */
+  voice?: { maxSeconds: number };
   /** Open on a finished build's message (S4): opens the app that Build card built. */
   openBuiltApp?: (actionId: string) => Promise<void>;
   /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
   cleanup?: { act: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => Promise<void>; run: () => Promise<'nothing' | 'posted'> };
   /** T1: to-do cards' buttons. Without it, todo_action messages are ignored. */
-  todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void };
+  todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void; listCard?: () => unknown };
+  /** W1: tiles along the bottom of the chat screen. Without it, there are none and /pin says they are off. */
+  widgets?: Pick<WidgetBoard, 'current' | 'refresh' | 'setPinned' | 'pinned'>;
   /** T2: the morning brief, checked whenever AI OS is in use, and /brief. Without it, /brief says it is off. */
   brief?: { runIfDue: () => Promise<unknown>; run: () => Promise<unknown> };
+  /** V1: /play. Picks the video from the user's words; the play itself goes through the registry's video_play. */
+  video?: { pick: (text: string) => Promise<{ args: { path: string } | { url: string } } | { error: string }> };
+  /** MU1: /music says what is playing, in a line written by code; its changes go through the registry's music_control. */
+  music?: { now: () => Promise<string> };
+  /** SG1: Signal message cards' Send and Discard, and /signal's status line. Without it, signal messages are ignored and /signal says Signal is off. */
+  signal?: { actions: Pick<SignalActions, 'send' | 'discard'>; status: () => string };
+  /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
+  knowledge?: {
+    view: () => string;
+    run: () => Promise<{ by: 'model' | 'code'; error?: string } | null>;
+    /** K4: /knowledge check, written by code. */
+    check?: () => string;
+    /** K4: files a reply the user saved (their click) as a wiki page; its id, or null. */
+    save?: (text: string) => string | null;
+  };
   /** L1: the system numbers, written by code, for /checkup. */
   resources?: () => Promise<string[]>;
+  /** P1: the install checks for /doctor, written by code. Without it, /doctor says to run `pnpm doctor`. */
+  doctor?: () => Promise<string[]>;
+  /** U1: /update and its Update button. Without it, /update says to run `astra update` in a terminal. */
+  updates?: { check: () => Promise<UpdateCheck>; open: () => Promise<string> };
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
+  /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
+  personality?: Pick<Personality, 'voice' | 'tone' | 'setTone'>;
+  /** The Settings gear and /settings: opens the setup window. Without it, they say to run `astra settings`. */
+  settings?: { open: () => Promise<void> };
+  /** /feedback: the user's improvement ideas. Without it, /feedback says it is off. */
+  feedback?: Pick<FeedbackLog, 'add' | 'list' | 'path'>;
   /** Where /export writes. Default: the memory folder. */
   exportDir?: string;
   clock?: () => Date;
@@ -92,6 +142,7 @@ export class Shell {
   constructor(private readonly o: ShellOptions) {
     this.clock = o.clock ?? (() => new Date());
     this.theme = o.theme ?? {};
+    const personality = o.personality;
     this.agent = new Agent({
       model: o.model,
       tools: o.tools,
@@ -101,6 +152,7 @@ export class Shell {
       emit: (ev) => this.broadcast(ev),
       clock: this.clock,
       ...(o.memory ? { memory: o.memory } : {}),
+      ...(personality ? { voice: () => personality.voice() } : {}),
     });
     if (o.memory) o.tools.register(memoryProposeTool({ memory: o.memory, post: (item) => this.agent.post(item), clock: this.clock }));
   }
@@ -115,7 +167,8 @@ export class Shell {
 
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
-    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme });
+    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme, ...(this.o.widgets ? { widgets: this.o.widgets.current() } : {}) });
+    void this.o.widgets?.refresh();
     // T2: a chat window opening counts as AI OS being in use.
     this.briefIfDue();
     return () => this.listeners.delete(l);
@@ -141,6 +194,8 @@ export class Shell {
       costCapUsd: this.o.costCapUsd,
       model: this.o.modelName,
       ...(this.o.chatWindow?.appsAt ? { appsAt: this.o.chatWindow.appsAt } : {}),
+      ...(this.o.voice ? { voice: { maxSeconds: this.o.voice.maxSeconds } } : {}),
+      ...(this.o.knowledge?.save ? { knowledge: true as const } : {}),
     };
   }
 
@@ -194,6 +249,8 @@ export class Shell {
     if (msg.type === 'draft_send' || msg.type === 'draft_edit' || msg.type === 'draft_discard') return this.draftAction(msg);
     if (msg.type === 'event_confirm' || msg.type === 'event_discard') return this.calendarAction(msg);
     if (msg.type === 'doc_change_confirm' || msg.type === 'doc_change_discard') return this.docChangeAction(msg);
+    // SG1: the user's own click on a Signal card; the broker checks its hash and state before anything is sent. Works while paused, like Send on a draft.
+    if (msg.type === 'signal_send' || msg.type === 'signal_discard') return this.signalAction(msg);
     if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
     // The user's own click on Save, so like Send on a draft it works while paused.
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
@@ -204,8 +261,24 @@ export class Shell {
     // T1: the user's own click on a to-do row; checked against its hash and the list first. Works while paused.
     if (msg.type === 'todo_action') return this.o.todos?.act(msg.id, msg.todoId, msg.action, msg.hash);
     if (msg.type === 'action_confirm' || msg.type === 'action_cancel' || msg.type === 'action_stop') return this.systemAction(msg);
+    // W1: the user's own click on a tile, or on its pin buttons. Nothing else reaches setPinned.
+    if (msg.type === 'widget_pin') {
+      if (!this.o.widgets) return;
+      this.o.widgets.setPinned(msg.widget, msg.pinned, 'click');
+      return;
+    }
+    if (msg.type === 'widget_open') {
+      this.o.audit.append({ kind: 'widgets', event: 'open', widget: msg.widget });
+      return this.command({ name: msg.widget });
+    }
     // The user's own click on a build they started, so it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
+    // U1: the user's own click on Update; only the newest card that offered one opens the terminal. Works while paused.
+    if (msg.type === 'update_start') return this.startUpdate(msg.id);
+    // The user's own click on the gear; it runs only the fixed `astra settings`. Works while paused.
+    if (msg.type === 'settings_open') return this.openSettings('click');
+    // K4: the user's own click on Save to knowledge base. Works while paused; there is no tool for it.
+    if (msg.type === 'knowledge_save') return this.saveToKnowledge(msg.id);
     const cmd = parseCommand(msg.text);
     if (cmd) return this.command(cmd);
     if (this.paused) {
@@ -294,6 +367,17 @@ export class Shell {
     await actions.confirm(msg.id, msg.hash);
   }
 
+  /** Clicks on a Signal message card (SG1): the user's own action; the broker checks the hash and state. */
+  private async signalAction(msg: Extract<ClientMessage, { type: 'signal_send' | 'signal_discard' }>): Promise<void> {
+    const actions = this.o.signal?.actions;
+    if (!actions) return;
+    if (msg.type === 'signal_discard') {
+      actions.discard(msg.id);
+      return;
+    }
+    await actions.send(msg.id, msg.hash);
+  }
+
   /** Clicks on a file change card (F1): the user's own action; the broker checks hash, state and the file. */
   private async fileChangeAction(msg: Extract<ClientMessage, { type: 'file_change_confirm' | 'file_change_discard' }>): Promise<void> {
     const actions = this.o.fileActions;
@@ -375,9 +459,77 @@ export class Shell {
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `memory-export-${localDate(this.clock().getTime(), this.o.timeZone)}.md`);
     const summaries = dates.map((d) => f.summary(d) ?? '').join('\n');
-    writeFileSync(path, `# AI OS memory export\n\n${all}\n\n${summaries}`, { mode: 0o600 });
+    writeFileSync(path, `# Astra memory export\n\n${all}\n\n${summaries}`, { mode: 0o600 });
     this.o.audit.append({ kind: 'memory', decision: 'export' });
     return say(`Exported to ${path}`);
+  }
+
+  /**
+   * K4: Save to knowledge base on a reply. The click names the reply; its text is read from the
+   * store, so nothing else can be saved this way, and each reply is saved once.
+   */
+  private saveToKnowledge(id: string): void {
+    const save = this.o.knowledge?.save;
+    const item = this.o.store.getItem(id);
+    if (!save || item?.kind !== 'assistant' || item.streaming || item.savedToKnowledge || !item.text.trim()) return;
+    const page = save(item.text);
+    this.o.audit.append({ kind: 'knowledge', event: 'save', saved: !!page, chars: item.text.length });
+    if (!page) return void this.agent.notice('warning', 'There was nothing in that reply to save.');
+    this.patchItem({ ...item, savedToKnowledge: true });
+  }
+
+  /** U1: the newest /update card that offered Update, so an old card's button can't start one. */
+  private updateCard: Extract<ChatItem, { kind: 'update' }> | null = null;
+
+  private async offerUpdate(): Promise<void> {
+    const up = this.o.updates;
+    if (!up) return void this.agent.notice('info', 'Run `astra update` in a terminal to update Astra.');
+    const r = await up.check();
+    const base = { kind: 'update' as const, id: `update-${randomUUID()}`, changes: [] as string[], more: 0, at: this.clock().getTime() };
+    const card: Extract<ChatItem, { kind: 'update' }> =
+      r.state === 'available'
+        ? { ...base, state: 'available', headline: `A new version of Astra is ready: ${r.behind === 1 ? '1 change' : `${r.behind || 'new'} changes`} on ${r.branch}.`, changes: r.changes, more: Math.max(0, r.behind - r.changes.length), detail: 'Update opens a terminal that downloads, builds and installs it. It asks for your password to install, then restarts Astra. Your settings stay.' }
+        : r.state === 'current'
+          ? { ...base, state: 'current', headline: `Astra is up to date (${r.commit.slice(0, 7)} on ${r.branch}).` }
+          : { ...base, state: 'unavailable', headline: 'Astra can’t update itself from here.', detail: r.reason };
+    this.updateCard = card.state === 'available' ? card : null;
+    this.o.audit.append({ kind: 'update', event: 'check', state: r.state });
+    this.agent.post(card);
+  }
+
+  private async openSettings(via: 'click' | 'command'): Promise<void> {
+    const say = (level: 'info' | 'warning', text: string) => this.agent.notice(level, text);
+    if (!this.o.settings) return say('info', 'Run `astra settings` in a terminal to change your settings.');
+    try {
+      await this.o.settings.open();
+      this.o.audit.append({ kind: 'settings', event: 'open', via });
+      say('info', 'Settings opened in their own window. When you press Finish there, Astra restarts with the new settings and this chat reconnects by itself. /tone and /pin change tone and tiles right here.');
+    } catch (err) {
+      this.o.audit.append({ kind: 'settings', event: 'failed', via });
+      say('warning', `Couldn’t open settings: ${(err as Error).message}`);
+    }
+  }
+
+  private async startUpdate(id: string): Promise<void> {
+    const card = this.updateCard;
+    if (!card || card.id !== id || !this.o.updates) return;
+    this.updateCard = null;
+    let next: Extract<ChatItem, { kind: 'update' }>;
+    try {
+      const term = await this.o.updates.open();
+      this.o.audit.append({ kind: 'update', event: 'start', terminal: term });
+      next = { ...card, state: 'started', detail: 'A terminal opened. Type your password there when it asks. Astra restarts when the update is done, and this window reconnects by itself.' };
+    } catch (err) {
+      this.o.audit.append({ kind: 'update', event: 'failed' });
+      next = { ...card, state: 'failed', detail: `Couldn’t open a terminal: ${(err as Error).message}` };
+    }
+    this.o.store.saveItem(next);
+    this.broadcast({ type: 'patch', id: next.id, item: next });
+  }
+
+  /** P1: the warmer wording for code-written lines under the friendly and playful tones. */
+  private warm(friendly: string, plain: string): string {
+    return isWarm(this.o.personality?.tone() ?? 'friendly') ? friendly : plain;
   }
 
   private async command(cmd: NonNullable<ReturnType<typeof parseCommand>>): Promise<void> {
@@ -389,11 +541,11 @@ export class Shell {
       case 'pause':
         this.o.store.setSetting('paused', '1');
         this.running?.abort();
-        say('Paused. I will not call the model or any tools until you type /resume.');
+        say(this.warm("Taking a breather. I won't call the model or any tools until you type /resume.", 'Paused. I will not call the model or any tools until you type /resume.'));
         return this.pushStatus();
       case 'resume':
         this.o.store.setSetting('paused', '0');
-        say('Resumed.');
+        say(this.warm("I'm back.", 'Resumed.'));
         this.o.onResume?.();
         return this.pushStatus();
       case 'cost': {
@@ -419,14 +571,123 @@ export class Shell {
         if (!this.o.cleanup) return;
         if (this.paused) return say('I am paused, so the tidy-up suggestions wait. Type /resume to continue.');
         const r = await this.o.cleanup.run();
-        if (r === 'nothing') say('Nothing to tidy up right now: no big unused files in your folders and no idle windows.');
+        if (r === 'nothing') say(this.warm('All tidy! No big unused files in your folders and no idle windows right now.', 'Nothing to tidy up right now: no big unused files in your folders and no idle windows.'));
         return;
       }
+      case 'doctor': {
+        // Code checks only: no model call, so it works while paused too.
+        if (!this.o.doctor) return say('Run `astra doctor` in a terminal to check the install.');
+        return say((await this.o.doctor()).join('\n'));
+      }
+      case 'update':
+        // Code only, like /doctor: no model call, so it works while paused too.
+        return this.offerUpdate();
       case 'brief': {
         if (!this.o.brief) return say('The morning brief is off. Turn it on with enabled = true under [brief] in your config.');
         if (this.paused) return say('I am paused, so the brief waits. Type /resume to continue.');
         await this.o.brief.run();
         return;
+      }
+      case 'play': {
+        if (!this.o.video || !this.o.tools.has('video_play')) return say('Videos are off. Turn them on with enabled = true under [video] in your config.');
+        const picked = await this.o.video.pick(cmd.text);
+        if ('error' in picked) return say(picked.error);
+        // The user's own typed command, so nothing untrusted is in view: audited and rate limited like any device change.
+        const r = await this.o.tools.execute(
+          { id: `play-${Date.now()}`, name: 'video_play', arguments: JSON.stringify(picked.args) },
+          { signal: AbortSignal.timeout(30_000), untrustedInContext: false, userText: `/play ${cmd.text}` },
+        );
+        // Refusals (not a video, a bad link) come back as text starting with "Error:".
+        if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+        return say('path' in picked.args ? `Playing ${picked.args.path.split('/').pop()} in mpv.` : 'Playing the link in mpv. It can take a few seconds to load.');
+      }
+      case 'music': {
+        if (!this.o.music || !this.o.tools.has('music_control')) return say('Music is off. Turn it on with enabled = true under [music] in your config.');
+        const word = cmd.text.trim().toLowerCase();
+        // Shown to the user as a notice only; song names never reach the model this way.
+        if (!word) return say(await this.o.music.now());
+        const action = Object.hasOwn(MUSIC_WORDS, word) ? MUSIC_WORDS[word] : undefined;
+        if (!action) return say('Try /music, /music pause, /music play, /music next or /music previous.');
+        // The user's own typed command: audited and rate limited like any device change.
+        const r = await this.o.tools.execute(
+          { id: `music-${Date.now()}`, name: 'music_control', arguments: JSON.stringify({ action }) },
+          { signal: AbortSignal.timeout(10_000), untrustedInContext: false, userText: `/music ${cmd.text}` },
+        );
+        if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+        return say(r.content.replace(/ Say it in one short line\.$/, ''));
+      }
+      case 'signal': {
+        if (!this.o.signal) return say('Signal is off. Link your phone in the Signal step of astra settings.');
+        // Written by code; no message text or names.
+        return say(this.o.signal.status());
+      }
+      case 'web': {
+        if (!this.o.tools.has('web_open')) return say('Opening links is off. Turn it on with enabled = true under [web] in your config.');
+        const picked = pickWeb(cmd.text);
+        if ('error' in picked) return say(picked.error);
+        // The user's own typed command, so nothing untrusted is in view: audited and rate limited like any device change.
+        const r = await this.o.tools.execute(
+          { id: `web-${Date.now()}`, name: 'web_open', arguments: JSON.stringify(picked.args) },
+          { signal: AbortSignal.timeout(30_000), untrustedInContext: false, userText: `/web ${cmd.text}` },
+        );
+        if (!r.ok || r.content.startsWith('Error:')) return say(r.content.replace(/^Error: /, ''));
+        return say(r.content.replace(/ You can't see the page\. Say it in one short line\.$/, '.').replace(/\.\.$/, '.'));
+      }
+      case 'todos': {
+        if (!this.o.todos?.listCard) return say('To-dos are off. Turn them on with enabled = true under [todos] in your config.');
+        this.o.todos.listCard();
+        return;
+      }
+      case 'pin':
+      case 'unpin': {
+        const w = this.o.widgets;
+        if (!w) return say('Widgets are off. Turn them on with enabled = true under [widgets] in your config.');
+        const pinned = w.pinned();
+        const all = Object.keys(WIDGET_TITLES) as (keyof typeof WIDGET_TITLES)[];
+        if (!cmd.text.trim()) {
+          const free = all.filter((k) => !pinned.includes(k));
+          const now = pinned.length ? `Pinned now: ${pinned.join(', ')}.` : 'Nothing is pinned.';
+          return say(cmd.name === 'pin' ? `${now} ${free.length ? `You can pin: ${free.join(', ')}. For example /pin ${free[0]}.` : 'Everything is pinned.'}` : `${now} For example /unpin ${pinned[0] ?? 'todos'}.`);
+        }
+        const widget = widgetByName(cmd.text);
+        if (!widget) return say(`I can pin ${all.join(', ')}. For example /${cmd.name} todos.`);
+        return say(w.setPinned(widget, cmd.name === 'pin', 'command'));
+      }
+      case 'knowledge': {
+        const k = this.o.knowledge;
+        if (!k) return say('The knowledge base is off. Turn it on with enabled = true under [knowledge] in your config.');
+        if (cmd.check) return say(k.check ? k.check() : 'The knowledge wiki is off (wiki = false under [knowledge]).');
+        if (!cmd.update) return say(k.view());
+        if (this.paused) return say('I am paused, so the knowledge base waits. Type /resume to continue.');
+        say('Updating your knowledge base. This can take a few minutes.');
+        const r = await k.run();
+        if (!r) return say('An update is already running; type /knowledge in a minute to see it.');
+        if (r.error) say(`I couldn't reach the model this time (${r.error}), so I'll carry on at the next update. What was read so far is in the file.`);
+        return say(k.view());
+      }
+      case 'tone': {
+        const p = this.o.personality;
+        const list = TONE_NAMES.map((t) => `- ${t}: ${TONE_LINES[t]}`).join('\n');
+        if (!p) return say(`I'm friendly, and the tone can't be changed here.`);
+        if (!cmd.text.trim()) return say(`My tone is ${p.tone()}. You can pick:\n${list}\nFor example /tone playful.`);
+        const tone = toneByName(cmd.text);
+        if (!tone) return say(`I know these tones:\n${list}\nFor example /tone playful.`);
+        return say(p.setTone(tone));
+      }
+      case 'settings':
+        return this.openSettings('command');
+      case 'feedback': {
+        const f = this.o.feedback;
+        if (!f) return say('Feedback is off here.');
+        if (cmd.list) return say(feedbackListText(f.list(), f.path));
+        if (!cmd.text) {
+          const n = f.list().length;
+          return say(`Type /feedback followed by your idea, for example /feedback show the weather on the brief. ${n ? `${n} saved so far; /feedback list shows them.` : 'Nothing saved yet.'}`);
+        }
+        const r = f.add(cmd.text, this.clock());
+        if ('error' in r) return say(r.error);
+        this.o.audit.append({ kind: 'feedback', event: 'add', chars: r.text.length });
+        return say(this.warm(`Thanks, saved idea #${f.list().length}. /feedback list shows them all.`, `Saved as idea #${f.list().length}. /feedback list shows them all.`));
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

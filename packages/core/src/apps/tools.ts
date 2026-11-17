@@ -105,7 +105,7 @@ export function appTools(o: AppToolsOptions): RegisteredTool[] {
       label: 'Looking at your screens…',
       handler: async () => {
         const screens = await o.window.screens();
-        if (!screens.length) return "Screens are unknown: AI OS isn't running inside Hyprland here.";
+        if (!screens.length) return "Screens are unknown: Astra isn't running inside Hyprland here.";
         const apps = await o.scan();
         const lines = screens.map((s) => screenLine(s, apps));
         return `${screens.length} screen${screens.length === 1 ? '' : 's'}:\n${lines.join('\n')}${screens.length === 1 ? "\nWith one screen, apps open on the next workspace, beside the chat's own." : ''}`;
@@ -228,7 +228,7 @@ export function buildAppTool(o: BuildAppToolOptions): RegisteredTool {
       const took = duration(clock() - started);
       o.log.finish(ctx.id, { state: 'done', costUsd: r.costUsd, at: clock() });
       const cost = r.costUsd === null ? '' : ` About ${usd(r.costUsd)} at API prices.`;
-      finished(ctx.id, true, `${q(r.name)} is ready${r.created ? '' : ' with your changes'}.${r.summary ? ` ${r.summary}` : ''}`, `${r.name} is ready`, 'Open it from the chat, or ask AI OS to open it.');
+      finished(ctx.id, true, `${q(r.name)} is ready${r.created ? '' : ' with your changes'}.${r.summary ? ` ${r.summary}` : ''}`, `${r.name} is ready`, 'Open it from the chat, or ask Astra to open it.');
       return {
         result: `${r.created ? 'Built' : 'Changed'} ${q(r.name)} in ${took}.${r.summary ? ` ${r.summary}` : ''}${cost}`,
         audit: { app: r.desktopId, created: r.created, costUsd: r.costUsd },

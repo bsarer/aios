@@ -127,10 +127,36 @@ export class Todos {
       event === 'added' ? (todos.some((t) => t.remindAt) ? (n === 1 ? 'Reminder set' : 'Added to your list, with reminders') : 'Added to your list')
       : event === 'updated' ? 'Changed on your list'
       : event === 'done' ? (n === 1 ? 'Ticked off' : `${n} ticked off`)
+      : event === 'list' ? (n ? 'Your list' : 'Nothing open on your list')
       : n === 1 ? 'Reminder' : `${n} reminders`;
     const item: TodoItem = { kind: 'todo', id: this.o.newId?.() ?? randomUUID(), event, title: `${title}${suffix}`, rows: todos.map((t) => this.row(t)), at: this.now() };
     this.o.post(item);
     return item;
+  }
+
+  /** W1: the open items, soonest first, in the order the to-do tile shows them. */
+  upcoming(): Todo[] {
+    const key = (t: Todo) => t.remindAt ?? (t.due ? `${t.due}T99` : '9999');
+    return this.list.open().sort((a, b) => key(a).localeCompare(key(b)));
+  }
+
+  /** W1: a card with the open items and their Done buttons (a click on the to-do tile, or /todos). */
+  listCard(max = 20): TodoItem {
+    const open = this.upcoming();
+    const more = open.length > max ? ` (the first ${max} of ${open.length})` : '';
+    return this.card('list', open.slice(0, max), more);
+  }
+
+  /** W1: the next few items for the to-do tile. The text is the user's own words, as the list holds it. */
+  glance(max = 3): { lines: string[]; attention: boolean } {
+    const open = this.upcoming();
+    const c = this.clock();
+    const today = utcToLocal(c.now, c.timeZone).slice(0, 10);
+    const day = (t: Todo) => t.remindAt?.slice(0, 10) ?? t.due;
+    const lines = open.slice(0, max).map((t) => (t.text.length > 60 ? `${t.text.slice(0, 59)}…` : t.text));
+    if (open.length > max) lines.push(`+${open.length - max} more`);
+    if (!open.length) lines.push('Nothing open');
+    return { lines, attention: open.some((t) => (day(t) ?? '9999') < today) };
   }
 
   /**

@@ -1,0 +1,311 @@
+/** R2: the setup window's answers, checks and server, with fakes only. Never a real keyring, mailbox or provider. */
+import { request } from 'node:http';
+import { AiosConfig, type SecretRef } from '@aios/shared';
+import { describe, expect, it } from 'vitest';
+import providers from '../providers.json' with { type: 'json' };
+import { type FoundApps, GMAIL, SetupAnswers, buildConfig, cleanPassword, readPresets, serversFor, summarize } from '../src/onboard/answers.js';
+import { checkAiKey, checkMail } from '../src/onboard/checks.js';
+import { type Probes, findApps, whisperRunning } from '../src/onboard/probe.js';
+import { type SetupDeps, startSetupServer } from '../src/onboard/server.js';
+
+const presets = readPresets(providers as Record<string, unknown>);
+const none: FoundApps = { wordcraft: null, gridcraft: null, wordcraftCli: null, gridcraftCli: null, mpv: null, claude: null };
+const all: FoundApps = { wordcraft: '/usr/bin/wordcraft', gridcraft: '/home/j/gridcraft-0.11.1/gridcraft', wordcraftCli: '/usr/bin/wordcraft-cli', gridcraftCli: '/home/j/gridcraft-0.11.1/gridcraft-cli', mpv: '/usr/bin/mpv', claude: '/home/j/.local/bin/claude' };
+const KEY = 'sk-or-test-secret-123';
+const APP_PASSWORD = 'abcd efgh ijkl mnop';
+
+const answers = (over: Partial<Record<string, unknown>> = {}) =>
+  SetupAnswers.parse({
+    name: 'Baris',
+    timezone: 'Europe/Istanbul',
+    ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: KEY },
+    mail: { address: 'baris@gmail.com', password: APP_PASSWORD },
+    folders: ['~/Documents', '~/Downloads', '~/Pictures', '~/Music'],
+    apps: { docs: true, video: true, builder: true },
+    desktop: { autostart: true, hyprland: true, bar: true },
+    ...over,
+  });
+
+describe('R2 answers: only what needs the person is asked', () => {
+  it('knows Gmail and Google Workspace from the address, and needs servers for anything else', () => {
+    expect(serversFor('a@gmail.com', [])).toEqual(GMAIL);
+    expect(serversFor('a@googlemail.com', [])).toEqual(GMAIL);
+    expect(serversFor('a@firm.com', ['aspmx.l.google.com.', 'alt1.aspmx.l.google.com'])).toEqual(GMAIL);
+    expect(serversFor('a@firm.com', ['mx.firm.com'])).toBeNull();
+    expect(serversFor('a@notgoogle.com.evil', ['google.com.evil'])).toBeNull();
+    expect(GMAIL).toEqual({ provider: 'gmail', imap: { host: 'imap.gmail.com', port: 993 }, smtp: { host: 'smtp.gmail.com', port: 465 } });
+  });
+
+  it('drops the spaces Google shows in an app password, and only for Gmail', () => {
+    expect(cleanPassword(APP_PASSWORD, GMAIL)).toBe('abcdefghijklmnop');
+    expect(cleanPassword('pass word', null)).toBe('pass word');
+  });
+
+  it('builds a whole config from a first run: one key for every job, the address as sign-in, port 7780', () => {
+    const { config, secrets } = buildConfig(answers(), null, presets, all, GMAIL);
+    expect(config.models.chat).toMatchObject({ baseUrl: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-haiku-5.5', apiKeyRef: 'keyring:model-chat' });
+    expect(config.models.triage).toEqual(config.models.chat);
+    expect(config.models.nightly).toEqual(config.models.chat);
+    expect(config.models.chat.extraHeaders).toEqual({ 'X-Title': 'Astra' });
+    expect(config.mail).toMatchObject({ address: 'baris@gmail.com', username: 'baris@gmail.com', imap: { host: 'imap.gmail.com', port: 993, tls: true }, smtp: { host: 'smtp.gmail.com', port: 465, tls: true } });
+    expect(config.files.roots).toEqual(['~/Documents', '~/Downloads', '~/Pictures', '~/Music']);
+    expect(config.docs).toMatchObject({ enabled: true, roots: config.files.roots, wordCli: '/usr/bin/wordcraft-cli', sheetCli: '/home/j/gridcraft-0.11.1/gridcraft-cli' });
+    expect(config.video).toMatchObject({ enabled: true, player: '/usr/bin/mpv' });
+    expect(config.builder).toMatchObject({ enabled: true, command: '/home/j/.local/bin/claude' });
+    expect(config.ui).toEqual({ port: 7780, kiosk: true });
+    expect([...secrets]).toEqual([['keyring:model-chat', KEY], ['keyring:mail', 'abcdefghijklmnop']]);
+    expect(JSON.stringify(config)).not.toContain(KEY);
+    expect(JSON.stringify(config)).not.toContain('abcdefghij');
+  });
+
+  it('turns a feature off when its app is missing, whatever the tick says', () => {
+    const { config } = buildConfig(answers(), null, presets, none, GMAIL);
+    expect(config.docs.enabled).toBe(false);
+    expect(config.video.enabled).toBe(false);
+    expect(config.builder.enabled).toBe(false);
+  });
+
+  it('asks for servers and a key only when it must', () => {
+    expect(() => buildConfig(answers({ mail: { address: 'a@firm.com', password: 'p' } }), null, presets, none, null)).toThrow(/servers/);
+    const typed = buildConfig(answers({ mail: { address: 'a@firm.com', password: 'p', imap: { host: 'imap.firm.com', port: 993 }, smtp: { host: 'smtp.firm.com', port: 587 } } }), null, presets, none, null);
+    expect(typed.config.mail.smtp).toEqual({ host: 'smtp.firm.com', port: 587, tls: true });
+    expect(() => buildConfig(answers({ ai: { provider: 'openrouter', model: 'm', key: '' } }), null, presets, none, GMAIL)).toThrow(/API key/);
+  });
+
+  it('Settings keeps stored keys left empty, and every section it does not show', () => {
+    const first = buildConfig(answers(), null, presets, all, GMAIL).config;
+    const tuned = AiosConfig.parse({ ...first, personality: { ...first.personality, tone: 'playful' }, cost: { dailyCapUsd: 5 }, models: { ...first.models, speech: { baseUrl: 'http://127.0.0.1:8178' } } });
+    const again = buildConfig(answers({ ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: '' }, mail: { address: 'baris@gmail.com', password: '' }, apps: { docs: true, video: true, builder: true, voice: true } }), tuned, presets, all, GMAIL);
+    expect(again.secrets.size).toBe(0);
+    expect(again.config).toEqual(tuned);
+    // A new address needs its own password.
+    expect(() => buildConfig(answers({ mail: { address: 'other@gmail.com', password: '' } }), tuned, presets, all, GMAIL)).toThrow(/password/);
+  });
+
+  it('turns voice on only when a whisper.cpp server answers, or was set up before, and off when unticked', () => {
+    const voice = { docs: true, video: true, builder: true, voice: true };
+    expect(buildConfig(answers({ apps: voice }), null, presets, none, GMAIL).config.models.speech).toBeUndefined();
+    const on = buildConfig(answers({ apps: voice }), null, presets, { ...none, speech: true }, GMAIL).config;
+    expect(on.models.speech?.baseUrl).toBe('http://127.0.0.1:8178');
+    expect(summarize(on, presets)).toMatchObject({ apps: { voice: true } });
+    const custom = AiosConfig.parse({ ...on, models: { ...on.models, speech: { baseUrl: 'http://127.0.0.1:9000', language: 'tr' } } });
+    expect(buildConfig(answers({ apps: voice, mail: { address: 'baris@gmail.com', password: '' } }), custom, presets, none, GMAIL).config.models.speech).toMatchObject({ baseUrl: 'http://127.0.0.1:9000', language: 'tr' });
+    expect(buildConfig(answers({ mail: { address: 'baris@gmail.com', password: '' } }), custom, presets, none, GMAIL).config.models.speech).toBeUndefined();
+  });
+
+  it('tells the window about the config without any secret', () => {
+    const { config } = buildConfig(answers(), null, presets, all, GMAIL);
+    const s = JSON.stringify(summarize(config, presets));
+    expect(s).toContain('baris@gmail.com');
+    expect(s).not.toMatch(/keyring|sk-|abcd/);
+  });
+
+  it('refuses folders outside the home folder', () => {
+    expect(() => answers({ folders: ['/etc'] })).toThrow();
+    expect(() => answers({ folders: ['~/../root'] })).not.toThrow(); // resolved again inside [files] roots by F1, which refuses it
+  });
+});
+
+describe('R2 checks: each failure says what to fix', () => {
+  const fakeFetch = (status: number, body: unknown) => (async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+
+  it('tests the AI key with one tiny call and names a rejected key', async () => {
+    const calls: RequestInit[] = [];
+    const ok = (async (_u: string, init: RequestInit) => {
+      calls.push(init);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const r = await checkAiKey({ preset: presets.openrouter, baseUrl: presets.openrouter!.baseUrl, model: 'm', key: KEY, fetch: ok });
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(String(calls[0]!.body)).max_tokens).toBe(32);
+    const bad = await checkAiKey({ preset: presets.openrouter, baseUrl: presets.openrouter!.baseUrl, model: 'm', key: KEY, fetch: fakeFetch(401, { error: { message: 'No auth' } }) });
+    expect(bad).toMatchObject({ ok: false, message: 'OpenRouter rejected this key.', fix: expect.stringContaining('openrouter.ai/settings/keys') });
+    expect(JSON.stringify(bad)).not.toContain(KEY);
+    const credits = await checkAiKey({ preset: presets.openrouter, baseUrl: presets.openrouter!.baseUrl, model: 'm', key: KEY, fetch: fakeFetch(402, { error: { message: 'credits' } }) });
+    expect(credits.message).toMatch(/no credits/);
+  });
+
+  const imapFake = (fail?: unknown) => () => ({
+    connect: async () => {
+      if (fail) throw fail;
+    },
+    list: async () => [{ path: 'INBOX' }, { path: '[Gmail]/Sent Mail', specialUse: '\\Sent' }, { path: '[Gmail]/Drafts', specialUse: '\\Drafts' }],
+    logout: async () => undefined,
+  });
+
+  it('signs in to the mailbox and checks sending without sending', async () => {
+    let smtp: unknown;
+    const r = await checkMail({ address: 'b@gmail.com', password: 'x', servers: GMAIL, deps: { imap: imapFake() as never, smtpVerify: async (o) => void (smtp = o) } });
+    expect(r).toEqual({ ok: true, message: 'Signed in. Found Inbox, Sent, Drafts.' });
+    expect(smtp).toMatchObject({ host: 'smtp.gmail.com', port: 465, secure: true });
+  });
+
+  it('explains a rejected Gmail app password with the steps to make one', async () => {
+    const r = await checkMail({ address: 'b@gmail.com', password: 'wrong', servers: GMAIL, deps: { imap: imapFake(Object.assign(new Error('Authentication failed'), { authenticationFailed: true })) as never } });
+    expect(r).toMatchObject({ ok: false, message: 'Gmail did not accept this app password.', fix: expect.stringContaining('myaccount.google.com/apppasswords') });
+    const send = await checkMail({ address: 'b@gmail.com', password: 'x', servers: GMAIL, deps: { imap: imapFake() as never, smtpVerify: async () => { throw Object.assign(new Error('x'), { code: 'EAUTH' }); } } });
+    expect(send.message).toMatch(/^Reading mail works, but sending doesn't/);
+  });
+});
+
+/** A setup server on fake everything. */
+async function serve(over: Partial<SetupDeps> = {}) {
+  const stored = new Map<SecretRef, string>();
+  const written: AiosConfig[] = [];
+  const seen: { ai: string[]; mail: string[] } = { ai: [], mail: [] };
+  let done = 0;
+  let exited = 0;
+  const addonCalls: string[][] = [];
+  const deps: SetupDeps = {
+    page: async () => '<script nonce="{{NONCE}}"></script>',
+    presets,
+    readConfig: async () => written.at(-1) ?? null,
+    writeConfig: async (c) => void written.push(c),
+    keyring: { set: async (r, v) => void stored.set(r, v), get: async (r) => (stored.has(r) ? { reveal: () => stored.get(r)! } : null) },
+    look: async () => ({ name: 'Baris', timezone: 'Europe/Istanbul', folders: [{ path: '~/Documents' }], apps: { ...all, whisper: null }, ollama: [], screens: [], addons: [{ id: 'voice', label: 'Speak to Astra', blurb: 'b', installed: false }] }),
+    mx: async () => [],
+    checkAi: async (o) => (seen.ai.push(o.key), { ok: o.key === KEY, message: 'm' }),
+    checkMail: async (o) => (seen.mail.push(o.password), { ok: true, message: 'm' }),
+    installDesktop: async () => ['installed'],
+    installAddons: async (ids) => {
+      addonCalls.push(ids);
+      return 'xdg-terminal-exec';
+    },
+    done: () => void done++,
+    exit: () => void exited++,
+    ...over,
+  };
+  const s = await startSetupServer(deps, { token: 'tok' });
+  const u = new URL(s.url);
+  const send = (path: string, o: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) =>
+    new Promise<{ status: number; body: string; headers: Record<string, unknown> }>((resolve, reject) => {
+      const data = o.body === undefined ? undefined : JSON.stringify(o.body);
+      const req = request(
+        { host: '127.0.0.1', port: u.port, path, method: o.method ?? 'GET', headers: { host: u.host, ...(data ? { 'content-type': 'application/json', origin: u.origin } : {}), ...o.headers } },
+        (res) => {
+          let body = '';
+          res.on('data', (c) => (body += c));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }));
+        },
+      );
+      req.on('error', reject);
+      req.end(data);
+    });
+  return { s, send, stored, written, seen, addonCalls, done: () => done, exited: () => exited };
+}
+
+describe('R2 setup server: only its own page can drive it', () => {
+  it('listens on loopback under a token, and checks Host and Origin', async () => {
+    const t = await serve();
+    try {
+      expect(t.s.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/s\/tok\/$/);
+      const page = await t.send('/s/tok/');
+      expect(page.status).toBe(200);
+      expect(String(page.headers['content-security-policy'])).toMatch(/default-src 'none'; script-src 'nonce-[^']+'/);
+      expect(page.body).not.toContain('{{NONCE}}');
+      expect((await t.send('/s/wrong/')).status).toBe(404);
+      expect((await t.send('/s/tok/api/state', { headers: { host: 'evil.example:80' } })).status).toBe(421);
+      expect((await t.send('/s/tok/api/finish', { method: 'POST', body: {}, headers: { origin: 'https://evil.example' } })).status).toBe(403);
+      expect((await t.send('/s/tok/api/finish', { method: 'POST', body: {}, headers: { 'content-type': 'text/plain' } })).status).toBe(415);
+      expect((await t.send('/s/tok/api/nope', { method: 'POST', body: {} })).status).toBe(404);
+    } finally {
+      await t.s.close();
+    }
+  });
+
+  it('exits without saving: nothing is written and the chat isn’t opened', async () => {
+    const t = await serve();
+    try {
+      expect(JSON.parse((await t.send('/s/tok/api/exit', { method: 'POST', body: {} })).body)).toEqual({ ok: true });
+      expect((await t.send('/s/tok/api/exit', { method: 'POST', body: {}, headers: { origin: 'https://evil.example' } })).status).toBe(403);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(t.exited()).toBe(1);
+      expect(t.done()).toBe(0);
+      expect(t.written).toEqual([]);
+      expect(t.stored.size).toBe(0);
+    } finally {
+      await t.s.close();
+    }
+  });
+
+  it('finishes: keys to the keyring, the config written, nothing secret sent back, then opens the chat', async () => {
+    const t = await serve();
+    try {
+      const body = { ...answers(), ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: KEY }, mail: { address: 'baris@gmail.com', password: APP_PASSWORD } };
+      expect(JSON.parse((await t.send('/s/tok/api/open', { method: 'POST', body: {} })).body)).toMatchObject({ ok: false });
+      const r = await t.send('/s/tok/api/finish', { method: 'POST', body });
+      expect(JSON.parse(r.body)).toEqual({ ok: true, did: ['Saved your settings, and your keys in the keyring.', 'installed'] });
+      expect(t.stored.get('keyring:model-chat')).toBe(KEY);
+      expect(t.stored.get('keyring:mail')).toBe('abcdefghijklmnop');
+      expect(t.written[0]!.mail.imap.host).toBe('imap.gmail.com');
+      const state = (await t.send('/s/tok/api/state')).body;
+      expect(state).toContain('baris@gmail.com');
+      expect(state).not.toContain(KEY);
+      expect(state).not.toContain('abcdefghij');
+      await t.send('/s/tok/api/open', { method: 'POST', body: {} });
+      await new Promise((r) => setTimeout(r, 100));
+      expect(t.done()).toBe(1);
+    } finally {
+      await t.s.close();
+    }
+  });
+
+  it('tests with the stored key or password when Settings leaves them empty, and never echoes a bad body', async () => {
+    const t = await serve();
+    try {
+      await t.send('/s/tok/api/finish', { method: 'POST', body: answers() });
+      expect(JSON.parse((await t.send('/s/tok/api/test-ai', { method: 'POST', body: { provider: 'openrouter', model: 'm', key: '' } })).body).ok).toBe(true);
+      expect(t.seen.ai).toEqual([KEY]);
+      await t.send('/s/tok/api/test-mail', { method: 'POST', body: { address: 'baris@gmail.com', password: '' } });
+      expect(t.seen.mail).toEqual(['abcdefghijklmnop']);
+      // Another address never gets the stored password.
+      const other = JSON.parse((await t.send('/s/tok/api/test-mail', { method: 'POST', body: { address: 'x@gmail.com', password: '' } })).body);
+      expect(other).toMatchObject({ ok: false, message: 'Paste the app password first.' });
+      const bad = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), name: '', ai: { provider: 'openrouter', model: 'm', key: 'sk-leak-me' } } });
+      expect(bad.status).toBe(400);
+      expect(bad.body).not.toContain('sk-leak-me');
+    } finally {
+      await t.s.close();
+    }
+  });
+});
+
+describe('Add-ons from the setup window', () => {
+  it('opens the add-ons terminal only for known add-ons', async () => {
+    const t = await serve();
+    try {
+      const ok = JSON.parse((await t.send('/s/tok/api/addons', { method: 'POST', body: { ids: ['voice', 'video', 'voice'] } })).body);
+      expect(ok).toMatchObject({ ok: true, message: expect.stringContaining('password') });
+      expect(t.addonCalls).toEqual([['voice', 'video']]);
+      for (const ids of [['rm -rf ~'], [], ['voice', '--evil']]) expect((await t.send('/s/tok/api/addons', { method: 'POST', body: { ids } })).status).toBe(400);
+      expect(t.addonCalls).toHaveLength(1);
+      expect(JSON.parse((await t.send('/s/tok/api/state')).body).addons).toEqual([{ id: 'voice', label: 'Speak to Astra', blurb: 'b', installed: false }]);
+    } finally {
+      await t.s.close();
+    }
+  });
+});
+
+describe('R2 app scan: looks only', () => {
+  const probes = (files: string[], answering: boolean): Probes => ({
+    home: '/home/j',
+    path: '/usr/bin:/bin',
+    isDir: () => false,
+    isExecutable: async (f) => files.includes(f),
+    run: async () => '',
+    fetch: (async (u: string) => {
+      if (answering && String(u) === 'http://127.0.0.1:8178/') return new Response('<html>whisper.cpp</html>');
+      throw new Error('refused');
+    }) as unknown as typeof fetch,
+    mx: async () => [],
+    readFile: async () => '',
+  });
+
+  it('finds whisper-server where the README builds it, and whether it is running', async () => {
+    const built = '/home/j/.local/src/whisper.cpp/build/bin/whisper-server';
+    expect(await findApps(probes([built], true))).toMatchObject({ whisper: built, speech: true });
+    expect(await findApps(probes(['/usr/bin/whisper-server'], false))).toMatchObject({ whisper: '/usr/bin/whisper-server', speech: false });
+    expect(await findApps(probes([], false))).toMatchObject({ whisper: null, speech: false });
+    expect(await whisperRunning(probes([], true))).toBe(true);
+  });
+});

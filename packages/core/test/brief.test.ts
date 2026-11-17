@@ -183,7 +183,7 @@ describe('morning brief', () => {
   it('writes its own intro without the local model, or when it fails', async () => {
     const none = rig({ model: 'none' });
     await none.brief.run();
-    expect(none.card()).toMatchObject({ by: 'code', intro: 'Good morning, John. Today: 2 urgent emails, 3 events (the first at 09:30) and 2 things due, 1 overdue.' });
+    expect(none.card()).toMatchObject({ by: 'code', intro: 'Morning, John! Today: 2 urgent emails, 3 events (the first at 09:30) and 2 things due, 1 overdue.' });
     const fails = rig({ model: 'fails' });
     await fails.brief.run();
     expect(fails.card().by).toBe('code');
@@ -194,7 +194,7 @@ describe('morning brief', () => {
     const off = rig({ calendar: 'none', model: 'none' });
     await off.brief.run();
     expect(off.card()).toMatchObject({ calendar: 'off', events: [], free: [] });
-    expect(off.card().intro).toBe('Good morning, John. Today: 2 urgent emails and 2 things due, 1 overdue.');
+    expect(off.card().intro).toBe('Morning, John! Today: 2 urgent emails and 2 things due, 1 overdue.');
     const broken = rig({ calendar: 'error' });
     await broken.brief.run();
     expect(broken.card()).toMatchObject({ calendar: 'error', events: [] });
@@ -229,5 +229,29 @@ describe('morning brief', () => {
     await shell.handle({ type: 'send', text: '/pause' });
     await shell.handle({ type: 'send', text: '/brief' });
     expect(r.posted.filter((p) => p.kind === 'brief')).toHaveLength(1);
+  });
+});
+
+describe('brief tile (W1)', () => {
+  it('shows counts and times only, never subjects, titles or to-do text, and reads the calendar at most every ten minutes', async () => {
+    const r = rig();
+    const g = await r.brief.glance();
+    expect(g.lines[0]).toMatch(/^\d+ urgent emails?$/);
+    expect(g.lines[1]).toBe('3 events today, next 09:30');
+    expect(g.lines[2]).toBe('2 due, 1 overdue');
+    expect(g.attention).toBe(true);
+    const text = g.lines.join('\n');
+    for (const s of ['IGNORE', 'Contract', 'Standup', 'Design review', 'Call Ana', 'Pay rent', 'Cafe']) expect(text).not.toContain(s);
+    r.setNow('2026-11-07T08:05');
+    await r.brief.glance();
+    expect(r.listCalls).toHaveLength(1);
+    r.setNow('2026-11-07T10:30');
+    expect((await r.brief.glance()).lines[1]).toBe('3 events today, next 12:00');
+    expect(r.listCalls).toHaveLength(2);
+  });
+
+  it('leaves the calendar out when there is none, and says when it could not be read', async () => {
+    expect((await rig({ calendar: 'none' }).brief.glance()).lines).toHaveLength(2);
+    expect((await rig({ calendar: 'error' }).brief.glance()).lines[1]).toBe("Calendar couldn't be read");
   });
 });

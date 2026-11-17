@@ -44,8 +44,16 @@ describe('Keyring', () => {
     expect(fake.calls[0]?.stdin).toBe('sk-abc');
   });
 
+  it('R1: keeps secrets under service astra, or aios for an install made before R1', async () => {
+    const fake = fakeSecretTool();
+    await new Keyring(fake.run, 'astra').set('keyring:mail', 'x');
+    expect(fake.calls[0]?.args).toEqual(['store', '--label=Astra: mail', 'service', 'astra', 'account', 'mail']);
+    await new Keyring(fake.run, 'aios').get('keyring:mail');
+    expect(fake.calls.at(-1)?.args).toEqual(['lookup', 'service', 'aios', 'account', 'mail']);
+  });
+
   it('require() explains how to fix a missing secret', async () => {
-    await expect(new Keyring(fakeSecretTool().run).require('keyring:mail')).rejects.toThrow(/pnpm run setup/);
+    await expect(new Keyring(fakeSecretTool().run).require('keyring:mail')).rejects.toThrow(/astra setup/);
   });
 
   it('reports a missing secret-tool binary without leaking anything', async () => {

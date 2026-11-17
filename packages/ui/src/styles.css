@@ -72,6 +72,7 @@ body {
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
 .card[data-tone="danger"] { border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
 .card-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.card-head:last-child { border-bottom: 0; }
 .card-body { padding: 14px 16px; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px -16px -14px; padding: 12px 16px; border-top: 1px solid var(--line); }
 .tile { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
@@ -127,3 +128,10 @@ body {
   background: #fff;
 }
 @media (prefers-reduced-motion: reduce) { .orb-working { animation: none; } }
+
+/* Calm mail alerts: the urgent peek's time bar, and room for the inbox panel on a wide screen. */
+@keyframes peek-time { from { width: 0; } to { width: 100%; } }
+.inbox-open { transition: padding-right 0.25s ease; }
+@media (min-width: 1200px) {
+  .inbox-open { padding-right: 480px; }
+}

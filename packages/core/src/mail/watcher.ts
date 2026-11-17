@@ -12,8 +12,17 @@ import type { MailState, NewMail } from './state.js';
 
 const FOLDER = 'INBOX';
 /** After a UIDVALIDITY change, look back this far before the last check (clock skew). */
+const LOGOUT_WAIT_MS = 5000;
 const RESYNC_MARGIN_MS = 15 * 60 * 1000;
 const TRIAGE_BODY_CHARS = 2000;
+/**
+ * A check that takes longer than this means the connection died without saying so (sleep,
+ * a network change, a server that dropped IDLE): the watcher drops it and reconnects instead of
+ * waiting for the socket to time out while new mail piles up.
+ */
+const CHECK_TIMEOUT_MS = 90_000;
+/** Restart IDLE this often, so a quietly dropped connection shows up within minutes. */
+export const MAX_IDLE_MS = 4 * 60 * 1000;
 
 export interface MailboxInfo {
   uidValidity: string;
@@ -49,6 +58,8 @@ export interface WatcherOptions {
   now?: () => number;
   /** Reconnect delays in ms; the last value repeats. */
   backoffMs?: number[];
+  /** Longest a check may take before the connection is dropped and opened again. */
+  checkTimeoutMs?: number;
 }
 
 export class MailWatcher {
@@ -60,10 +71,12 @@ export class MailWatcher {
   private checking: Promise<void> = Promise.resolve();
   private readonly now: () => number;
   private readonly backoff: number[];
+  private readonly checkTimeout: number;
 
   constructor(private readonly o: WatcherOptions) {
     this.now = o.now ?? Date.now;
     this.backoff = o.backoffMs ?? [1000, 2000, 5000, 10_000, 30_000];
+    this.checkTimeout = o.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
   }
 
   start(): void {
@@ -123,13 +136,33 @@ export class MailWatcher {
 
   /** Look for new mail. Serialised: overlapping triggers (IDLE + poll) run one after another. */
   check(): Promise<void> {
-    this.checking = this.checking.then(() => this.checkOnce()).catch(() => undefined);
+    this.checking = this.checking.then(() => this.checkWithin()).catch(() => undefined);
     return this.checking;
   }
 
-  private async checkOnce(): Promise<void> {
+  /** One check, given up after `checkTimeout`: the stuck connection is closed and a new one opened. */
+  private async checkWithin(): Promise<void> {
     const source = this.source;
     if (!source) return;
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), this.checkTimeout);
+      timer.unref?.();
+    });
+    try {
+      const r = await Promise.race([this.checkOnce(source).then(() => 'done' as const), timedOut]);
+      if (r === 'timeout' && this.source === source) {
+        this.source = null;
+        this.o.onStatus('connecting', 'mailbox stopped answering');
+        // close() ends in onClose, which reconnects.
+        void source.close().catch(() => undefined);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async checkOnce(source: MailSource): Promise<void> {
     const info = await source.info();
     const now = this.now();
     const prev = this.o.state.folder(FOLDER);
@@ -140,6 +173,8 @@ export class MailWatcher {
     }
     const resync = prev.uidValidity !== info.uidValidity;
     const found = resync ? await source.fetchSince(new Date(prev.checkedAt - RESYNC_MARGIN_MS)) : await source.fetchAfter(prev.lastUid);
+    // A check that outlived its connection (timed out above) records nothing; the new one rechecks.
+    if (this.source !== source) return;
     const fresh = found.filter((m) => !this.o.state.known(m.messageId));
     const lastUid = Math.max(resync ? info.uidNext - 1 : prev.lastUid, ...found.map((m) => m.uid));
     const added = this.o.state.record(FOLDER, { uidValidity: info.uidValidity, lastUid, checkedAt: now }, fresh, now);
@@ -158,7 +193,7 @@ export class ImapMailSource implements MailSource {
   constructor(private readonly c: MailConnection) {}
 
   async open(): Promise<MailboxInfo> {
-    const client = connect(this.c, await this.c.password(), { idle: true });
+    const client = connect(this.c, await this.c.password(), { idle: true, maxIdleMs: MAX_IDLE_MS });
     this.client = client;
     client.on('close', () => this.closeCbs.forEach((cb) => cb()));
     client.on('exists', () => this.existsCbs.forEach((cb) => cb()));
@@ -223,6 +258,9 @@ export class ImapMailSource implements MailSource {
     const c = this.client;
     this.client = null;
     if (!c) return;
-    await c.logout().catch(() => c.close());
+    // LOGOUT on a dead connection would wait for the socket timeout: give it a few seconds.
+    const gaveUp = new Promise<void>((resolve) => setTimeout(resolve, LOGOUT_WAIT_MS).unref?.());
+    await Promise.race([c.logout(), gaveUp]).catch(() => undefined);
+    c.close();
   }
 }

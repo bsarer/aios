@@ -9,6 +9,7 @@ import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool, ToolResult } from '../tools/registry.js';
 import type { SystemActions } from './actions.js';
 import { type PowerProfile, type SystemControls, cleanName } from './controls.js';
+import { checkWebLink } from '../web/open.js';
 
 /** Pair cards a single scan may post. */
 export const MAX_PAIR_CARDS = 6;
@@ -64,6 +65,34 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
     case 'doc_open_app': {
       const file = String(args.path ?? '').split('/').pop() ?? '';
       return `Open ${q(cleanName(file))} in ${/\.xlsx$/i.test(file) ? 'GridCraft' : 'WordCraft'}`;
+    }
+    case 'video_play': {
+      if (typeof args.url === 'string') {
+        // The site's name only, worked out by code: what the card asks is where the video comes from.
+        let host = '';
+        try {
+          host = new URL(args.url).hostname;
+        } catch {
+          // The click checks the link again and refuses it.
+        }
+        return `Play the video at ${q(cleanName(host || 'an unreadable link'))} in mpv`;
+      }
+      return `Play ${q(cleanName(String(args.path ?? '').split('/').pop() ?? ''))} in mpv`;
+    }
+    case 'web_open': {
+      if (typeof args.search === 'string') return `Search the web in Chromium for ${q(cleanName(args.search.replace(/[\p{Cc}]/gu, ' ')))}`;
+      // The site's name only, worked out by code: what the card asks is where the link goes.
+      let host = '';
+      try {
+        host = checkWebLink(String(args.url ?? '')).hostname;
+      } catch {
+        // The click checks the link again and refuses it.
+      }
+      return `Open ${q(cleanName(host || 'an unreadable link'))} in Chromium`;
+    }
+    case 'music_control': {
+      const what: Record<string, string> = { play: 'Play the music', pause: 'Pause the music', toggle: 'Play or pause the music', next: 'Skip to the next song', previous: 'Go back to the previous song' };
+      return what[String(args.action)] ?? 'Change the music';
     }
     default:
       return `Run ${tool}`;

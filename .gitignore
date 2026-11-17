@@ -4,3 +4,4 @@ dist/
 .env
 .env.*
 dist-types/
+packaging/arch/out/

@@ -4,6 +4,11 @@
  */
 import { z } from 'zod';
 
+/** W1: the system features that can be pinned as tiles along the bottom of the chat screen. */
+export const WIDGET_KINDS = ['checkup', 'brief', 'todos'] as const;
+export const WidgetKind = z.enum(WIDGET_KINDS);
+export type WidgetKind = z.infer<typeof WidgetKind>;
+
 // ── Chat items (what the UI renders) ─────────────────────────────────────────
 
 /** One triaged email in a new-mail notification. from/subject/summary come from email: show as plain text only. */
@@ -15,6 +20,8 @@ export const MailRow = z.strictObject({
   urgency: z.enum(['low', 'normal', 'high']),
   needsReply: z.boolean(),
   ignored: z.boolean().optional(),
+  /** When the email was sent (its Date header, else when it arrived), ms. Shown in the inbox. */
+  date: z.number().optional(),
 });
 export type MailRow = z.infer<typeof MailRow>;
 
@@ -87,6 +94,8 @@ export const ChatItem = z.discriminatedUnion('kind', [
     streaming: z.boolean(),
     /** Set when generation was stopped by the user. */
     stopped: z.boolean().optional(),
+    /** K4: the user clicked Save to knowledge base on this reply. */
+    savedToKnowledge: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('tool'),
@@ -122,6 +131,10 @@ export const ChatItem = z.discriminatedUnion('kind', [
     text: z.string(),
     at: z.number(),
     mails: z.array(MailRow).optional(),
+    /** Mail held a while (away, quiet hours, the hourly limit): the chat shows one line for it. */
+    catchUp: z.boolean().optional(),
+    /** Posted in quiet hours or over `[notifications] maxPerHour` (off unless set): shown in the inbox, never peeks out. */
+    quiet: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('draft'),
@@ -186,6 +199,26 @@ export const ChatItem = z.discriminatedUnion('kind', [
     hash: z.string(),
     /** Only a confirm click moves 'pending' (or 'failed', to retry) to 'running'. */
     state: z.enum(['pending', 'running', 'done', 'discarded', 'failed']),
+    /** Outcome written by code after it ran. */
+    result: z.string().optional(),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('signal'),
+    /** SG1: a Signal message that waits for a Send click. Also the id the model sees. */
+    id: z.string(),
+    /** Who it goes to. A contact's or group's name can be chosen by them: show as plain text only. */
+    to: z.string(),
+    /** Written by code: the phone number, or "group" for a group. */
+    toDetail: z.string(),
+    /** The message, as it will be sent. */
+    text: z.string(),
+    /** Written by code: a recipient the user didn't name, a message or email in view... */
+    warnings: z.array(z.string()),
+    /** sha256 of exactly what the card shows and who it goes to; Send echoes it back. */
+    hash: z.string(),
+    /** Only a Send click moves 'pending' (or 'failed', to retry) to 'sending'. */
+    state: z.enum(['pending', 'sending', 'sent', 'discarded', 'failed']),
     /** Outcome written by code after it ran. */
     result: z.string().optional(),
     at: z.number(),
@@ -304,10 +337,36 @@ export const ChatItem = z.discriminatedUnion('kind', [
     at: z.number(),
   }),
   z.strictObject({
+    kind: z.literal('file_results'),
+    /** F3: the best files of a search. Read only; each Open shows a file in the chat's viewer. */
+    id: z.string(),
+    files: z
+      .array(
+        z.strictObject({
+          /** `<card id>-<n>`: what Open fetches (/attachments or /documents), resolved again inside the folders. */
+          id: z.string(),
+          /** The file's name and folder. Files can come from anyone: plain text only. */
+          name: z.string(),
+          folder: z.string(),
+          fileKind: z.enum(['pdf', 'image', 'word', 'sheet', 'text', 'other']),
+          /** Written by code: where the words were, or that it is close in meaning. */
+          why: z.string(),
+          /** A few words of the file's text around the match: plain text only. */
+          snippet: z.string().optional(),
+          /** Which viewer Open uses; no Open button without it. */
+          open: z.enum(['attachment', 'document']).optional(),
+          path: z.string(),
+        }),
+      )
+      .max(3),
+    at: z.number(),
+  }),
+  z.strictObject({
     kind: z.literal('todo'),
     /** T1: items just added, changed or ticked off from the user's own words, or a reminder that is due. */
     id: z.string(),
-    event: z.enum(['added', 'updated', 'done', 'reminder']),
+    /** W1: 'list' is the open items, from a click on the to-do tile or /todos. */
+    event: z.enum(['added', 'updated', 'done', 'reminder', 'list']),
     /** Written by code, e.g. "Added to your list" or "Reminder". */
     title: z.string(),
     rows: z.array(TodoRow),
@@ -337,6 +396,18 @@ export const ChatItem = z.discriminatedUnion('kind', [
     moreTodos: z.int().min(0),
     at: z.number(),
   }),
+  z.strictObject({
+    kind: z.literal('update'),
+    /** U1: /update. Written by code; changes are commit subjects from the repository: plain text only. */
+    id: z.string(),
+    state: z.enum(['available', 'current', 'unavailable', 'started', 'failed']),
+    headline: z.string(),
+    changes: z.array(z.string()),
+    /** More changes than listed. */
+    more: z.int().min(0),
+    detail: z.string().optional(),
+    at: z.number(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -352,8 +423,36 @@ export const Status = z.strictObject({
   model: z.string(),
   /** S7: where apps open now (another screen, or the next workspace), for the hint under the status strip. */
   appsAt: z.enum(['screen', 'workspace']).optional(),
+  /** V2: the microphone button's state; left out when [models.speech] is not set. */
+  voice: z.strictObject({ maxSeconds: z.int().positive() }).optional(),
+  /** K4: the knowledge base is on, so replies show Save to knowledge base. */
+  knowledge: z.literal(true).optional(),
 });
 export type Status = z.infer<typeof Status>;
+
+// ── Widgets (W1) ─────────────────────────────────────────────────────────────
+
+/**
+ * One tile along the bottom of the chat screen. Everything on it is written by code: numbers
+ * and counts, and on the to-do tile the user's own item text. No mail, invite or document text.
+ */
+export const WidgetTile = z.strictObject({
+  widget: WidgetKind,
+  title: z.string().max(40),
+  /** At most four short lines; plain text only. */
+  lines: z.array(z.string().max(120)).max(4),
+  /** 'attention' when something wants a look (urgent mail, overdue to-do, a drive almost full); 'off' when the feature is turned off. */
+  tone: z.enum(['normal', 'attention', 'off']),
+});
+export type WidgetTile = z.infer<typeof WidgetTile>;
+
+export const Widgets = z.strictObject({
+  /** In the order the user pinned them. */
+  pinned: z.array(WidgetKind),
+  /** Tiles for the pinned widgets, same order. */
+  tiles: z.array(WidgetTile),
+});
+export type Widgets = z.infer<typeof Widgets>;
 
 export const Theme = z.record(z.string(), z.string());
 export type Theme = z.infer<typeof Theme>;
@@ -372,6 +471,9 @@ export const ClientMessage = z.discriminatedUnion('type', [
   /** C1: the confirm button on a calendar card, echoing the card's hash. */
   z.strictObject({ type: z.literal('event_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('event_discard'), id: z.string().max(100) }),
+  /** SG1: Send on a Signal message card, echoing the card's hash. */
+  z.strictObject({ type: z.literal('signal_send'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('signal_discard'), id: z.string().max(100) }),
   /** D2: Save on a document change card, echoing the card's hash. */
   z.strictObject({ type: z.literal('doc_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('doc_change_discard'), id: z.string().max(100) }),
@@ -399,10 +501,20 @@ export const ClientMessage = z.discriminatedUnion('type', [
     action: z.enum(['done', 'reopen', 'remove', 'snooze']),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
+  /** W1: a click on a pinned tile; opens its full card in the chat, like the matching command. */
+  z.strictObject({ type: z.literal('widget_open'), widget: WidgetKind }),
+  /** W1: the user's own click pinning or unpinning a tile. */
+  z.strictObject({ type: z.literal('widget_pin'), widget: WidgetKind, pinned: z.boolean() }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */
   z.strictObject({ type: z.literal('app_open'), actionId: z.string().max(100) }),
+  /** U1: Update on an /update card; opens a terminal running astra update, nothing else. */
+  z.strictObject({ type: z.literal('update_start'), id: z.string().max(100) }),
+  /** The gear in the status strip: opens the setup window on the current settings, nothing else. */
+  z.strictObject({ type: z.literal('settings_open') }),
+  /** K4: Save to knowledge base on an assistant reply; names the reply, never its text. */
+  z.strictObject({ type: z.literal('knowledge_save'), id: z.string().max(100) }),
   z.strictObject({
     type: z.literal('draft_edit'),
     id: z.string().max(100),
@@ -416,12 +528,13 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
   z.strictObject({ type: z.literal('status'), status: Status }),
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
+  z.strictObject({ type: z.literal('widgets'), widgets: Widgets }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
@@ -432,14 +545,16 @@ export interface ChatState {
   items: ChatItem[];
   status: Status | null;
   theme: Theme;
+  /** W1: null until the server says (or when widgets are off). */
+  widgets: Widgets | null;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {} };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':
@@ -453,5 +568,7 @@ export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
       return { ...state, status: ev.status };
     case 'theme':
       return { ...state, theme: ev.theme };
+    case 'widgets':
+      return { ...state, widgets: ev.widgets };
   }
 }

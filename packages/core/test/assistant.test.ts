@@ -232,6 +232,18 @@ function monitorRig(o: { model?: ReturnType<typeof fakeLocal> | null; config?: P
 }
 
 describe('the resource monitor', () => {
+  it('gives the checkup tile short numbers written by code, and flags one past its threshold (W1)', async () => {
+    const r = monitorRig();
+    await r.tick();
+    await r.tick();
+    const g = await r.monitor.glance();
+    expect(g).toEqual({ lines: ['Memory 50% used', 'CPU 10%', `Home ${bytesText(200 * GB)} free`], attention: false });
+    r.reader.disk = { ...r.reader.disk, freeBytes: 2 * GB };
+    expect((await r.monitor.glance()).attention).toBe(true);
+    // Process names (chosen by programs) never reach the tile.
+    expect((await r.monitor.glance()).lines.join(' ')).not.toContain(HOSTILE);
+  });
+
   it('posts one memory alert after two low samples, adds the local model\'s advice, and marks it when memory is back', async () => {
     const r = monitorRig();
     await r.tick();
@@ -636,7 +648,7 @@ describe('in the chat', () => {
     await shell.handle({ type: 'send', text: '/checkup' });
     const texts = store.recentItems().flatMap((i) => (i.kind === 'notice' ? [i.text] : []));
     expect(texts[0]).toBe('Memory: 8.0 GB of 16.0 GB available.');
-    expect(texts[1]).toMatch(/^Nothing to tidy up right now/);
+    expect(texts[1]).toMatch(/^All tidy!/);
     expect(runs).toBe(1);
     await shell.handle({ type: 'cleanup_action', id: 'c1', list: 'file', n: 1, action: 'trash', hash: 'a'.repeat(64) });
     expect(acts).toEqual([['c1', 'file', 1, 'trash', 'a'.repeat(64)]]);

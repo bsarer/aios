@@ -7,6 +7,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { CONTACTS_SCOPES } from '../contacts/google.js';
 import { CALENDAR_SCOPE, CalendarError } from './google.js';
 
 const b64url = (b: Buffer) => b.toString('base64url');
@@ -22,13 +23,18 @@ export function newPkce(): Pkce {
   return { verifier, challenge: b64url(createHash('sha256').update(verifier).digest()), state: b64url(randomBytes(24)) };
 }
 
-export function authorizationUrl(o: { authUrl: string; clientId: string; redirectUri: string; pkce: Pkce; loginHint?: string | undefined }): string {
+/** What the Google sign-in asks for: calendar events, and read-only contacts when `[calendar] contacts` is on (C3). */
+export function googleScopes(o: { contacts?: boolean }): string[] {
+  return [CALENDAR_SCOPE, ...(o.contacts ? CONTACTS_SCOPES : [])];
+}
+
+export function authorizationUrl(o: { authUrl: string; clientId: string; redirectUri: string; pkce: Pkce; loginHint?: string | undefined; scopes?: string[] }): string {
   const u = new URL(o.authUrl);
   const params: Record<string, string> = {
     client_id: o.clientId,
     redirect_uri: o.redirectUri,
     response_type: 'code',
-    scope: CALENDAR_SCOPE,
+    scope: (o.scopes ?? [CALENDAR_SCOPE]).join(' '),
     code_challenge: o.pkce.challenge,
     code_challenge_method: 'S256',
     state: o.pkce.state,

@@ -86,10 +86,10 @@ export class AttachmentError extends Error {}
  * Text of a PDF, from a worker thread with a memory cap and a time limit, so a hostile
  * PDF can neither hang nor exhaust the service. pdf.js never runs scripts in a PDF.
  */
-export function extractPdfText(bytes: Buffer, opts: { signal?: AbortSignal; timeoutMs?: number; maxPages?: number } = {}): Promise<{ text: string; pages: number; readPages: number }> {
+export function extractPdfText(bytes: Buffer, opts: { signal?: AbortSignal; timeoutMs?: number; maxPages?: number; maxChars?: number } = {}): Promise<{ text: string; pages: number; readPages: number }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./pdf-text-worker.mjs', import.meta.url), {
-      workerData: { data: new Uint8Array(bytes), maxPages: opts.maxPages ?? PDF_MAX_PAGES, maxChars: MAX_ATTACHMENT_CHARS * 2 },
+      workerData: { data: new Uint8Array(bytes), maxPages: opts.maxPages ?? PDF_MAX_PAGES, maxChars: opts.maxChars ?? MAX_ATTACHMENT_CHARS * 2 },
       resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32 },
       stdout: true,
       stderr: true,
@@ -129,6 +129,8 @@ export interface AttachmentFilesOptions {
   saveTo?: string;
   /** F1: told about each file the Save click wrote (the F2 index). */
   onSaved?: (path: string, source: { mailId: string; n: number }) => void;
+  /** F3: viewer cards that live inside another card (a file search's results), by id. */
+  innerItem?: (id: string) => ChatItem | null;
   clock?: () => number;
 }
 
@@ -184,7 +186,7 @@ export class AttachmentFiles {
 
   /** The bytes behind a card, checked again by their signature. Null when there is no such card or file. */
   async file(itemId: string): Promise<{ bytes: Buffer; mime: string } | { error: string } | null> {
-    const item = this.o.store.getItem(itemId);
+    const item = this.o.store.getItem(itemId) ?? this.o.innerItem?.(itemId) ?? null;
     if (!item || item.kind !== 'attachment' || item.fileKind === 'other') return null;
     if (item.path !== undefined) return this.diskFile(item as AttachmentItem & { path: string; fileKind: AttachmentKind });
     if (item.mailId === undefined || item.n === undefined) return null;

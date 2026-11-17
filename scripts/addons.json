@@ -1,0 +1,47 @@
+{
+  "_comment": "Add-ons Astra can install for its features (astra addons, and setup's Add-ons step). packages are Arch package names, checked with pacman -Si in CI (.github/workflows/package.yml). bins say an add-on is installed. Model names are the defaults Astra pulls (ollama.com/library, 2026-11-15); whisper.cpp is built from its release tag (github.com/ggml-org/whisper.cpp, v1.9.5; flags checked in examples/server/server.cpp) with the model from huggingface.co/ggerganov/whisper.cpp. signal-cli is not in Arch's repositories, so it is upstream's native build (github.com/AsamK/signal-cli releases, no Java needed, x86_64), checked by its SHA-256.",
+  "video": {
+    "label": "Videos",
+    "blurb": "Play your videos and YouTube links in mpv.",
+    "packages": ["mpv", "yt-dlp"],
+    "bins": ["mpv"]
+  },
+  "music": {
+    "label": "Music controls",
+    "blurb": "Pause, play and skip Spotify and other players.",
+    "packages": ["playerctl"],
+    "bins": ["playerctl"]
+  },
+  "local": {
+    "label": "Private local AI",
+    "blurb": "Ollama on this computer, for system checks, the morning brief and finding files by meaning. About 3 GB.",
+    "packages": ["ollama"],
+    "bins": ["ollama"],
+    "systemService": "ollama.service",
+    "pull": ["qwen3:4b", "embeddinggemma"]
+  },
+  "voice": {
+    "label": "Speak to Astra",
+    "blurb": "whisper.cpp turns your voice into text on this computer. Builds in a few minutes, about 150 MB.",
+    "packages": ["cmake", "gcc", "make", "git", "curl"],
+    "bins": [],
+    "whisper": {
+      "repo": "https://github.com/ggml-org/whisper.cpp",
+      "tag": "v1.9.5",
+      "modelUrl": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+      "model": "ggml-base.en.bin",
+      "port": 8178
+    }
+  },
+  "signal": {
+    "label": "Signal",
+    "blurb": "Read your Signal messages and reply from Astra, linked to your phone like Signal Desktop. About 120 MB.",
+    "packages": ["curl", "tar"],
+    "bins": [],
+    "signalCli": {
+      "version": "0.14.9",
+      "url": "https://github.com/AsamK/signal-cli/releases/download/v0.14.9/signal-cli-0.14.9-Linux-native.tar.gz",
+      "sha256": "a8fab78b5e8053abf3db5725272957ad11d1745b9a16848ddb2ace4743dfa5d5"
+    }
+  }
+}

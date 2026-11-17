@@ -4,14 +4,53 @@ A full-screen chat that acts as the desktop on Omarchy. See [AIOS_ALPHA_PLAN.md]
 
 ## Status
 
-A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. D3 (the Edit button on documents) is in review. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review.
+A0 (repo, rules, test mail), A1 (model adapter and bake-off, default model Claude Haiku 5.5), A2 (chat UI and core shell), A3 (memory), A4 (mail reading, watcher and triage), A5 (replies and approvals), A6 (kiosk), A7 (hardening), S1 (system controls), S2 (email attachments), S3 (starting apps) and S4 (building apps) are merged. S5 (changing apps from inside them) is merged. C1 (Google Calendar) is merged. D1 (reading Word and Excel files) is merged. D2 (editing Word and Excel files) is merged. D3 (the Edit button on documents) is in review. F1 (managing files from the chat) is merged. F2 (file search by metadata) is merged. S6 (one screen for AI OS) is merged, and S7 (AI OS always full screen, apps elsewhere, the AI button in the top bar) is in review. L1 (the local system assistant on Ollama) is in review. F3 (finding files by describing them: whole text, meaning, a results card) is in review. P1 (install.sh, doctor, backup and restore) and R1 (the Astra package) are in review. Changes are listed in [CHANGELOG.md](CHANGELOG.md); to help, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Install, upgrade and restore
+
+AI OS is becoming **Astra**: the same program as an Arch package with an `astra`
+command. An existing AI OS install (only `~/.config/aios`) keeps its names, service and port 7777;
+a new install is Astra, in `~/.config/astra` and `~/.local/share/astra`, on port 7780.
+
+**Arch package** (Omarchy 4, as yourself, in the desktop session):
+
+```sh
+git clone https://github.com/bsarer/aios.git && cd aios
+packaging/arch/build.sh                         # makes packaging/arch/out/astra-<version>-1-<arch>.pkg.tar.zst
+sudo pacman -U packaging/arch/out/astra-*.pkg.tar.zst
+astra                                           # the first time, opens setup in a window
+```
+
+Setup asks only what it can't find out: your name, an AI key (tested before you go on), your
+email and its password (Gmail and Google Workspace need no servers; make an app password at
+myaccount.google.com/apppasswords), the folders Astra may use and the desktop parts it may
+change. `astra settings` opens the same window to change any answer; an empty key field keeps
+the stored key. `astra setup --terminal` asks the same questions in the terminal.
+
+The package only puts the program in `/usr/lib/astra`, `/usr/bin/astra` and a launcher entry;
+nothing in your home folder changes until `astra setup`. Tagged releases also carry the package
+(CI builds it on every `v*` tag). After a `nodejs` major update, reinstall the package so its
+database module matches.
+
+**Add-ons:** setup's Add-ons step installs what features need, or run `astra addons` to see them and `astra addons --voice --video --music --local` to install (one password). Voice builds whisper.cpp for you and runs it on this computer only.
+
+**Update:** type `/update` in the chat and press Update, or run `astra update` (`--check` only looks). It pulls the checkout the package was built in, builds, installs (sudo asks for your password) and restarts Astra; your settings, keys and data stay. **Stop:** `astra stop` closes the chat and stops Astra until you open it from the app menu, run `astra`, or log in again.
+
+**From source** (for development): `./install.sh --check`, then `./install.sh`, which installs
+the newest release tag into `~/.local/share/astra/app` and runs setup; run it again to upgrade
+(`--ref main` or a tag installs that instead).
+
+- **Check:** `astra doctor` (or `/doctor` in the chat; `pnpm doctor` in a checkout) checks the config, the service and the Node it points at, the chat page, the `astra.lua` line in `hyprland.lua`, that the service sees the desktop session, the `omarchy-*` commands Astra uses, the AI button on the top bar and that each keyring secret is stored (never shown). Each problem comes with a one-line fix. Run it after every Omarchy update; most fixes are `astra setup --kiosk`.
+- **Back up:** `astra backup` stops the service for a moment and writes `~/astra-backup-<date>.tar.gz` (readable only by you) with the config and memory and the data folder (database, audit log, built apps), without an installed copy, the chat's browser profile or caches. **Keyring secrets are never in it**, and it holds your mail cache and memory: keep it private. An AI OS install writes `~/aios-backup-<date>.tar.gz`.
+- **Restore:** `astra restore <file>` (or `./install.sh --restore <file>`) checks every entry first (only plain files and folders inside the app's own folders), moves what is there now to `*.before-restore-<date>` instead of deleting it, and unpacks. An AI OS backup goes back as AI OS, an Astra one as Astra. Then `astra setup` asks for the secrets again; `astra doctor` says which are missing.
+- **Uninstall:** `astra uninstall` removes the service, kiosk and stored secrets and asks about the config; `--purge` also deletes the config, memory and data after one question. `sudo pacman -R astra` removes the program.
 
 ## Mail
 
 - **Ask about mail:** "anything from Sara this week?" uses `mail_search`, `mail_read` and `mail_thread` over INBOX and Sent. They are read-only, and every result reaches the model sanitized and wrapped in `<untrusted>` tags.
 - **New mail:** an IDLE connection (plus a poll every `[mail] pollIntervalSeconds`, default 30) queues new INBOX messages in SQLite, keyed by Message-ID. Reconnects and server restarts cause no duplicates or gaps. The first run starts from "now" rather than triaging the existing mailbox.
 - **Triage:** after a short batch window (`batchWindowSeconds`, default 20), one model call with no tools classifies the batch. One notification follows: urgent mail first, low-priority mail in a digest line, with Read, Draft reply and Ignore buttons.
-- **Holding mail back:** while paused, during `[notifications] quietHours`, or over `maxPerHour` (default 6), mail is held and posted later as one "While you were away" catch-up. When the model is down, it retries every minute. After 5 failed attempts the mail is posted with a plain summary instead of being dropped.
+- **Holding mail back:** while paused, mail is held and posted later as one "While you were away" catch-up. During `[notifications] quietHours` or over `maxPerHour` (off unless you set it), mail still goes to the side rail's inbox at once, but urgent mail doesn't peek out. When the model is down, it retries every minute. After 5 failed attempts the mail is posted with a plain summary instead of being dropped.
 - **Replying:** "reply to Sara saying Thursday works" (or **Draft reply** on a notification) saves a draft to your Drafts folder and shows it as a card with **Send**, **Edit** and **Discard**. Nothing is sent until you click Send. The click carries a hash of exactly what the card shows, and only that text is sent, once, over SMTP. Editing gives the draft a new hash, so an earlier approval no longer matches. Discard deletes the draft and sends nothing. After sending, a copy goes to Sent (set `[mail] saveSentCopy = false` for servers that file sent mail themselves, such as Gmail).
 - **No sending without you:** the model cannot send. Its `mail_send_draft` calls are refused in code and logged, and while email text is in its context it is not even offered write-tier tools. A draft whose recipient came from neither your message nor the email being answered is flagged on its card. If the app stops mid-send, the draft is marked "check your Sent folder" and is never resent on its own.
 - **Attachments:** "open the PDF from Lena" shows a card with **Open**, which shows the file full screen in the chat (Esc or **Close** goes back). PDFs, text files (`.txt`, `.csv`, `.md`) and pictures (PNG, JPEG, GIF, WebP) open, up to 25 MB each. Questions like "what does the contract say?" are answered from a PDF's or text file's text, which reaches the model the same way as an email body: sanitized, wrapped in `<untrusted>` tags and hidden again from your next message on. The model never sees pictures.
@@ -104,6 +143,15 @@ Google Calendar, through its REST API with plain `fetch` (no Google SDK), signed
 
 AI OS asks only for `calendar.events` (see and change events), not calendar settings or sharing. Google shows an "unverified app" warning for a personal project like this; that's expected. **While the consent screen is in "Testing", Google expires the sign-in after 7 days**, and the chat will then say to run `pnpm calendar:login`. To stop that, set the consent screen's publishing status to **In production**; for your own use it stays unverified. Settings: `[calendar]` `clientId`, `calendarId` (default `primary`), `defaultMinutes`, `workday`.
 
+### Contacts
+
+With the calendar signed in, Astra can also look people up in your **Google Contacts** (read only), so "email Sam" finds Sam's address and "what's Sara's number?" just answers. It uses the same Google sign-in: no second login and no new settings to fill in.
+
+- **How:** `contacts_find` searches your saved contacts and the people Gmail saved because you emailed them ("other contacts"), by name, address, number or company. Saved contacts come first. When several people could be meant, the chat asks which one before drafting. Drafts still show the usual card, and nothing is sent without your click.
+- **Read only:** Astra asks Google only for `contacts.readonly` and `contacts.other.readonly`. It can't add, change or delete a contact.
+- **Outside text:** Gmail names an "other contact" with whatever the sender put in their From line, so contact text reaches the model like an email does: sanitized and inside `<untrusted>` tags. Only plain addresses and phone numbers are kept. After a lookup, calendar, file and system changes aren't offered for that reply.
+- **Turning it on:** enable the **People API** in the same Google Cloud project as the calendar, then run `astra calendar-login` (or `pnpm calendar:login`) once and leave the contacts boxes ticked on Google's page. Untick them and the calendar works as before. `[calendar] contacts = false` stops Astra asking at all.
+
 ## Word and Excel files
 
 The chat reads, summarizes and shows `.docx` and `.xlsx` files from your document folders (D1), using the command-line tools of [WordCraft](https://github.com/storytold/wordcraft) and [GridCraft](https://github.com/storytold/gridcraft), open-source word processor and spreadsheet apps (MIT OR Apache-2.0). Since D2 it can also change them and create new ones, always through a card you click.
@@ -119,7 +167,7 @@ The chat reads, summarizes and shows `.docx` and `.xlsx` files from your documen
 
 ## Files
 
-The chat looks after files in your folders (F1), by default `~/Documents` and `~/Downloads`.
+The chat looks after files in your folders (F1), by default `~/Documents`, `~/Downloads` and `~/Videos` (V1 added `~/Videos`).
 
 - **Look around:** "what's in Downloads", "find the lease PDF", "how big is report.pdf", "show me photo.png", "what does notes.txt say". PDFs, pictures and text files open in the chat's viewer; Word and Excel files use the document card.
 - **Change things:** "rename it to lease-2026.pdf", "copy the invoice to Documents/Taxes", "make a folder Taxes in Documents", "write a note called packing with passport and charger", "make a new budget spreadsheet in Documents/Home". Each shows a card; nothing changes until you click it. Nothing is ever replaced or deleted: a taken name, or a file that changed after the card appeared, stops the change and the card says why.
@@ -130,6 +178,16 @@ The chat looks after files in your folders (F1), by default `~/Documents` and `~
   - **What's in it:** each file's type, size, dates, pages or sheets, and title and author where the file has them, plus a one-line description and keywords. The index finds new and changed files within seconds.
   - **Descriptions:** written by the triage model, about $0.001 a file, at most 200 a day (the rest wait for the next day). They stop at your daily cost cap and while paused.
   - **Tags:** "tag it taxes 2026" adds your own tags (on a card).
+- **Find files by describing them (F3):** "the contract that mentions a 90-day notice period", "my car insurance". Search now also looks through each file's text (up to 100,000 characters: all of a Word or text file, the first 100 pages of a PDF, the first cells of up to 5 sheets), and, with a local embedding model, by meaning, so "car insurance" finds a file that says "auto policy".
+  - **Results card:** each search shows the best 3 files with their folder, why each matched (where your words were, a few words from the text, or "close in meaning") and an **Open** button that shows the file in the chat.
+  - **Search by meaning** needs Ollama and an embedding model on this computer: `ollama pull embeddinggemma`, then in `config.toml`:
+    ```toml
+    [models.embeddings]
+    model = "embeddinggemma"   # any Ollama embedding model; baseUrl defaults to http://127.0.0.1:11434
+    ```
+    Files are embedded in the background after their text is read; `/reindex` shows how many are searchable by meaning. Changing the model embeds everything again. Without it, or while Ollama is off, search works by words.
+  - **Settings:** `[files]` `fullTextChars` (100000; 0 turns whole-text search off), `meaning` (true), `meaningMinScore` (0.3: raise it if unrelated files show up, lower it if close ones are missed; it depends on the model).
+  - The first start after updating reads every file again to fill in their text; descriptions you already have are kept.
   - **`/reindex`:** reads everything again and says how far the index is.
   - **Safety:** descriptions are written from files that can come from anyone, so they reach the chat as outside text, and the model that writes them has no tools.
 
@@ -144,6 +202,85 @@ Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`
 - **Morning brief (T2):** the first time you use AI OS each day after 06:00 (outside quiet hours), one card lists urgent mail since the last brief, today's events and free time, and what is due today or overdue. `/brief` shows it any time. With the local model (below) it writes two friendly lines on top, without a cloud call; without it, the lines are written by code. It only shows things; nothing on it changes anything.
 
 Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
+
+Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"friendly"` default, `"playful"`, `"neutral"`, `"concise"`). Type `/tone` in the chat to see it and `/tone playful` to change it; the change applies to the next reply and is kept.
+
+Settings: the ⚙ gear at the right of the status strip, or `/settings` in the chat, opens the setup window on your current settings (the same as `astra settings` in a terminal). Change what you like and press Finish; Astra restarts with the new settings and the chat reconnects by itself. `/tone` and `/pin` change the tone and the tiles right in the chat.
+
+Message history: in the message box, Up brings back what you sent before (messages and commands, newest first) and Down goes forward again, back to what you were typing. Up and Down only do this on the first and last line, so they still move the cursor within a long message. Nothing new is stored: the list is your messages in the chat plus what you sent since the page loaded.
+
+Ideas (`/feedback`): type `/feedback` followed by an improvement idea to save it, and `/feedback list` to see them all, numbered with their date. They are kept as one JSON line each (`{"at": ..., "text": ...}`) in `feedback.jsonl` in the config folder, so `astra backup` keeps them; they never reach the model, and there is no tool that adds one. The floating **Feedback** button at the bottom right does the same without a command: pick Idea, Problem or I like, type, and press Enter or Save. It is saved through `/feedback` exactly as if you had typed it (as `Idea: …`, `Problem: …` or `Like: …`), and "See what I've saved" shows the list.
+
+## Videos
+
+"Play holiday.mp4 from Downloads" or "watch this: https://www.youtube.com/watch?v=…" plays the video in mpv, on another screen or the next workspace, like any app. Files must be videos in your allowed folders (`[files] roots`, which now include `~/Videos` by default; if your config lists its own `roots`, add `"~/Videos"` there); links must be `https://` links to a site by name (no IP addresses, local names or ports). YouTube and most sites need `yt-dlp` installed next to mpv. A link that comes from an email, invite or document never starts by itself: a card asks you first.
+
+`/play` plays your newest video without asking the model; `/play recording` plays the newest one with "recording" in its name, and `/play https://…` a link.
+
+Settings: `[video]` `enabled` (default true), `player` (default `"mpv"`), `links` (default true; false plays files only).
+
+## Links and web searches
+
+"Open bbc.com", "go to github.com" or "search the web for cheap flights to Ankara" opens a new Chromium window, on another screen or the next workspace like any app, and the screen goes with it. Chromium comes with the Astra package. Links must be `http://` or `https://` (a site's name alone gets `https://`); nothing on this computer (`localhost`, `127.x`) and no user names or passwords in links. Opening a page sends nothing from it back to the chat. A link or search that comes from an email, invite or document never opens by itself: a card names the site and asks you first.
+
+Summaries: "summarize https://www.bbc.com/news/…" or, after opening a page, "summarize that page" reads it. Astra fetches the page itself, not through your browser, so pages behind a sign-in can't be read, and it can't see tabs you opened yourself: send their link. It reads only a link from your own message (or a page it opened for you), never one an email, document or page gives. It reads only public sites, never this computer or your local network, at most 2 MB of each. Page text is outside text like an email: while it is in view, changes wait for a click on a card.
+
+`/web bbc.com` opens a link and `/web cheap flights to Ankara` searches, without asking the model.
+
+Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `search` (default `"https://www.google.com/search?q=%s"`; any https address with `%s` where the words go, such as `"https://duckduckgo.com/?q=%s"`), `read` (default true; false turns summaries off), `maxBytes` (default 2000000), `maxChars` (default 16000, the most of a page's text the AI gets).
+
+## Music
+
+"Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which the Astra package installs (from source: `sudo pacman -S playerctl`; `astra doctor` says when it is missing). `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
+
+Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
+
+## Signal
+
+"Any Signal messages?", "what did Sam say on Signal?" and "tell Sam I'm running late on Signal" work once Astra is linked to your phone, the way Signal Desktop is: your phone stays the main device, and you can unlink Astra from it at any time (Signal → Settings → Linked devices). Link it in the **Signal** step of `astra setup` (or `astra settings`): press **Link your phone** and scan the QR code with Signal on your phone.
+
+Astra talks to Signal through [signal-cli](https://github.com/AsamK/signal-cli), which comes as Astra's Signal add-on (setup's Add-ons step, or `astra addons --signal`). signal-cli isn't in Arch's repositories, so the add-on downloads upstream's native build (no Java needed; x86_64 only), checks its SHA-256 against the one in `scripts/addons.json` and puts the one program in Astra's data folder (`~/.local/share/astra/signal-cli/`). Astra keeps the messages that arrive while it runs for `keepDays` on this computer and puts a line in the chat (and a desktop notification) when one arrives, held in quiet hours and while paused. A reply is a card with **Send** and **Discard**: nothing goes out until you press Send, and the card warns when you didn't name the person or a message or email was in view. Names and messages are outside text (anyone can message you or call themselves anything), so they reach the model only inside `<untrusted>` tags and count like an email: while one is in view, Astra can't change settings, write memory or send anything. `/signal` says whether Signal is connected and how many messages are unread.
+
+Settings: `[signal]` `enabled` and `account` (set by setup when you link), `command` (setup sets it to the signal-cli it found; default `signal-cli`), `notify` (default true), `keepDays` (default 30). Attachments, reactions, calls and stories aren't shown yet.
+
+## Voice
+
+Click the 🎙 button next to the message box, or press **Ctrl+M**, and talk (V2). The button turns red while it listens. Your words appear as you talk: the sentence you're saying shows in grey under the box, and each time you pause it joins the message box, after anything you'd already typed. Click 🎙 or press Ctrl+M again when you're done. Read it, fix it if needed, and press Enter: voice never sends anything by itself. **Esc** cancels and puts the box back as it was. A recording stops by itself after 60 seconds. The words trail your voice by a second or two, more on a slow computer.
+
+The speech is turned into text by [whisper.cpp](https://github.com/ggml-org/whisper.cpp) running on this computer, so your voice never leaves it and it costs nothing. The audio is kept in memory only until the words come back; it is never saved, and the audit log records only that a recording happened and how long it was. `/pause` turns the microphone off too.
+
+Set it up:
+
+1. Build whisper.cpp's server (needs `cmake` and a C++ compiler: `sudo pacman -S --needed cmake base-devel`):
+   ```sh
+   git clone https://github.com/ggml-org/whisper.cpp ~/.local/src/whisper.cpp
+   cd ~/.local/src/whisper.cpp
+   cmake -B build && cmake --build build -j --config Release
+   sh ./models/download-ggml-model.sh base.en      # about 150 MB; "small.en" is slower but more accurate, "base" for other languages
+   ```
+2. Run it on this computer only, and keep it running with a user service, `~/.config/systemd/user/whisper-server.service`:
+   ```ini
+   [Unit]
+   Description=whisper.cpp server for AI OS voice
+   [Service]
+   ExecStart=%h/.local/src/whisper.cpp/build/bin/whisper-server -m %h/.local/src/whisper.cpp/models/ggml-base.en.bin --host 127.0.0.1 --port 8178
+   Restart=on-failure
+   [Install]
+   WantedBy=default.target
+   ```
+   then `systemctl --user daemon-reload && systemctl --user enable --now whisper-server`. No `--convert` or ffmpeg is needed: the chat sends 16 kHz WAV.
+3. Astra: open `astra settings`; the Apps step shows whisper.cpp as Running, with voice ticked. Save. (AI OS, or by hand: add to `~/.config/aios/config.toml` and restart, `pnpm kiosk:restart`.)
+   ```toml
+   [models.speech]
+   # baseUrl = "http://127.0.0.1:8178"   (the default, matching the service above; only this computer's addresses are accepted)
+   # language = "en"                      (or "tr", or "auto" to detect it each time; use a model without ".en" for other languages)
+   # maxSeconds = 60
+   ```
+4. The first time you click 🎙, Chromium asks whether AI OS may use the microphone. Choose **Allow**; it remembers, for AI OS's own window only. If you chose Block, open the window's menu (⋮), then **Site settings**, and allow the microphone there.
+
+Without `[models.speech]` the button stays greyed out. If the server isn't running, the chat says so under the message box. If you hear nothing back, check the microphone isn't muted ("unmute the microphone").
+
+Omarchy's own dictation (Voxtype, Super+Ctrl+X) also works in the message box; the 🎙 button is AI OS's own, works without it, and never types into another window.
 
 ## System assistant (local model)
 
@@ -243,9 +380,25 @@ fixtures/documents.ts  pretend WordCraft/GridCraft tools and sample documents, 2
 evals             model bake-off: tasks, runner, report
 ```
 
+## Dependencies added in SG1
+
+`qrcode-generator` 2.0.4 (MIT, by Kazuhiko Arase, no dependencies, last release 2025-08) draws the QR code the setup window shows for linking Signal; it runs only in the setup scripts. signal-cli itself is a separate program (GPL-3.0, actively maintained by AsamK; v0.14.9; its native build needs no Java), started by Astra without a shell and reached over its JSON-RPC mode on stdin and stdout; checked against signal-cli's man pages and wiki on 2026-11-15. It ships as Astra's Signal add-on (`scripts/addons.json`, `astra addons --signal`): upstream's release tarball, pinned to v0.14.9 and checked by SHA-256, since signal-cli is only in the AUR.
+
+## Dependencies added in R1
+
+No new npm packages. The package build uses Arch's own `nodejs`, `pnpm`, `node-gyp`, `python`, `gcc` and `make` (makedepends; better-sqlite3 is compiled against the system Node), and the package depends on `nodejs`, `libsecret`, `chromium`, `jq`, `curl`, `bash` and `hyprland`, all in Arch's official repositories. CI adds the official `archlinux:base-devel` container image and GitHub's own `actions/upload-artifact@v7` and `actions/download-artifact@v8` (MIT, maintained by GitHub); releases are created with the `gh` CLI that GitHub's runners include.
+
+## Dependencies added in V2
+
+None in the code. whisper.cpp's `whisper-server` is a separate program (MIT licence, actively maintained by ggml-org), reached over its own `/inference` endpoint on 127.0.0.1 through the model adapter; checked against the repository's examples/server on 2026-11-10. The browser records with the Web Audio API and writes the WAV itself.
+
 ## Dependencies added in L1
 
 None in the code. Ollama is a separate program (MIT licence, actively maintained), reached over its OpenAI-compatible API on 127.0.0.1 through the same model adapter; checked against docs.ollama.com on 2026-11-01. The Trash follows the freedesktop.org Trash specification with Node's own file functions.
+
+## Dependencies added in F3
+
+None. Whole-text search uses SQLite's FTS5; search by meaning calls Ollama's own `/api/embed` (a separate program, MIT licence, actively maintained) on 127.0.0.1 through the model adapter, checked against docs.ollama.com on 2026-11-10. Vectors are compared in plain TypeScript.
 
 ## Dependencies added in F2
 

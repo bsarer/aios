@@ -1,4 +1,4 @@
-import type { ChatItem, MailRow } from '@aios/shared/protocol';
+import type { ChatItem } from '@aios/shared/protocol';
 import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import { AttachmentViewer } from './AttachmentViewer';
@@ -45,6 +45,8 @@ export interface MessageActions {
   /** Sends a chat message as if typed; only ever with text the UI wrote, never mail content. */
   onSend: (text: string) => void;
   onIgnoreMail: (itemId: string, mailId: string) => void;
+  /** Opens the side rail's inbox panel. */
+  onOpenInbox: () => void;
   /** Send echoes the hash of what the card shows; the server sends only that. */
   onDraftSend: (id: string, hash: string) => void;
   onDraftDiscard: (id: string) => void;
@@ -55,6 +57,9 @@ export interface MessageActions {
   /** A calendar change (C1) happens only on this click, which echoes the card's hash. */
   onEventConfirm: (id: string, hash: string) => void;
   onEventDiscard: (id: string) => void;
+  /** SG1: a Signal message goes out only on this click, which echoes the card's hash. */
+  onSignalSend: (id: string, hash: string) => void;
+  onSignalDiscard: (id: string) => void;
   /** A document change (D2) is saved only on this click, which echoes the card's hash. */
   onDocChangeConfirm: (id: string, hash: string) => void;
   onDocChangeDiscard: (id: string) => void;
@@ -73,6 +78,10 @@ export interface MessageActions {
   onCleanup: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => void;
   /** T1: a button on one row of a to-do card, echoing that row's hash. */
   onTodo: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void;
+  /** U1: Update on an /update card; opens a terminal running astra update. */
+  onUpdate: (id: string) => void;
+  /** K4: Save to knowledge base on a reply; names the reply. Left out when the knowledge base is off. */
+  onKnowledgeSave?: ((id: string) => void) | undefined;
 }
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
@@ -486,7 +495,118 @@ function EventCard({ item, actions }: { item: EventItem; actions: MessageActions
   );
 }
 
+type SignalItem = Extract<ChatItem, { kind: 'signal' }>;
+
+const SIGNAL_STATE_TEXT: Record<SignalItem['state'], string> = {
+  pending: '',
+  sending: 'Sending…',
+  sent: '✓ Sent on Signal.',
+  discarded: 'Discarded. Nothing was sent.',
+  failed: '',
+};
+
+/** A Signal message waiting for a Send click (SG1). Names can be chosen by the people themselves: plain text only. */
+function SignalCard({ item, actions }: { item: SignalItem; actions: MessageActions }) {
+  const open = item.state === 'pending' || item.state === 'failed';
+  return (
+    <Card data-kind="signal" data-state={item.state} icon="chat" title="Send on Signal?" badge={open ? { text: item.state === 'failed' ? "Didn't send" : NEEDS_OK, tone: item.state === 'failed' ? 'danger' : 'warning' } : false}>
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span data-testid="signal-to" className="font-medium break-words">
+          {item.to}
+        </span>
+        {item.toDetail !== item.to && (
+          <span data-testid="signal-to-detail" className="text-sm" style={{ color: 'var(--muted)' }}>
+            {item.toDetail}
+          </span>
+        )}
+      </div>
+      <div data-testid="signal-text" className="inset mt-3 whitespace-pre-wrap break-words px-3.5 py-3 text-[15px]">
+        {item.text}
+      </div>
+      {item.warnings.map((w) => (
+        <div key={w} data-testid="signal-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          {w}
+        </div>
+      ))}
+      {item.state === 'failed' && item.result && (
+        <div data-testid="signal-state" className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.result}
+        </div>
+      )}
+      {open ? (
+        <CardActions>
+          <button type="button" data-testid="signal-send" className="btn btn-primary" onClick={() => actions.onSignalSend(item.id, item.hash)}>
+            {item.state === 'failed' ? 'Try again: Send' : 'Send'}
+          </button>
+          <button type="button" data-testid="signal-discard" className="btn btn-quiet" onClick={() => actions.onSignalDiscard(item.id)}>
+            Discard
+          </button>
+        </CardActions>
+      ) : (
+        <div data-testid="signal-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.result ?? SIGNAL_STATE_TEXT[item.state]}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 type DocumentItem = Extract<ChatItem, { kind: 'document' }>;
+type FileResultsItem = Extract<ChatItem, { kind: 'file_results' }>;
+type FileResultRow = FileResultsItem['files'][number];
+
+const RESULT_KIND: Record<FileResultRow['fileKind'], string> = { pdf: 'PDF', image: 'Picture', word: 'Word document', sheet: 'Excel spreadsheet', text: 'Text file', other: 'File' };
+
+/** F3: the best files of a search, why each matched, and Open. Names, folders and snippets come from files: plain text only. */
+function FileResultsCard({ item, actions }: { item: FileResultsItem; actions: MessageActions }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const row = open === null ? undefined : item.files[open];
+  return (
+    <Card data-kind="file_results" icon="folder" title={item.files.length === 1 ? 'Best match' : `Best ${item.files.length} matches`}>
+      <ol className="flex flex-col gap-3">
+        {item.files.map((r, n) => (
+          <li key={r.id} data-testid="file-result" className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div data-testid="file-result-name" className="break-all font-medium">
+                {r.name}
+              </div>
+              <div className="break-all text-sm" style={{ color: 'var(--muted)' }}>
+                {RESULT_KIND[r.fileKind]} in {r.folder}
+              </div>
+              <div data-testid="file-result-why" className="text-sm">
+                {r.why}
+              </div>
+              {r.snippet && (
+                <div data-testid="file-result-snippet" className="mt-1 text-sm italic" style={{ color: 'var(--muted)' }}>
+                  “{r.snippet}”
+                </div>
+              )}
+            </div>
+            {r.open && (
+              <button type="button" data-testid="file-result-open" className="btn btn-secondary btn-sm" onClick={() => setOpen(n)}>
+                Open
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
+      {row?.open === 'attachment' && (row.fileKind === 'pdf' || row.fileKind === 'text' || row.fileKind === 'image') && (
+        <AttachmentViewer item={{ kind: 'attachment', id: row.id, name: row.name, fileKind: row.fileKind, path: row.path, at: item.at }} onClose={() => setOpen(null)} />
+      )}
+      {row?.open === 'document' && (row.fileKind === 'word' || row.fileKind === 'sheet') && (
+        <DocumentViewer
+          item={{ kind: 'document', id: row.id, name: row.name, fileKind: row.fileKind, path: row.path, at: item.at }}
+          onClose={() => setOpen(null)}
+          onEdit={() => {
+            setOpen(null);
+            actions.onDocumentEdit(row.id);
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
 
 /** A Word or Excel file the user can open (D1) or edit in its app (D3). File names can come from anyone: plain text only. */
 function DocumentCard({ item, actions }: { item: DocumentItem; actions: MessageActions }) {
@@ -653,6 +773,40 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
   );
 }
 
+/** U1: /update's card. All text is written by code, except the changes: commit subjects, shown as plain text. */
+function UpdateCard({ item, actions }: { item: Extract<ChatItem, { kind: 'update' }>; actions: MessageActions }) {
+  const tone = item.state === 'failed' ? 'danger' : item.state === 'available' || item.state === 'started' ? 'accent' : 'muted';
+  return (
+    <Card data-kind="update" data-state={item.state} icon="download" tone={tone} title="Update" badge={item.state === 'available' ? { text: 'Available' } : false}>
+      <div data-testid="update-headline" className="font-medium">
+        {item.headline}
+      </div>
+      {item.changes.length > 0 && (
+        <ul className="mt-2 list-disc pl-5 text-[15px]">
+          {item.changes.map((c, i) => (
+            <li key={i} className="break-words">
+              {c}
+            </li>
+          ))}
+          {item.more > 0 && <li style={{ color: 'var(--muted)' }}>and {item.more} more</li>}
+        </ul>
+      )}
+      {item.detail && (
+        <div data-testid="update-detail" className="mt-2 text-[15px]" style={{ color: item.state === 'failed' ? 'var(--danger)' : undefined }}>
+          {item.detail}
+        </div>
+      )}
+      {item.state === 'available' && (
+        <CardActions>
+          <button type="button" data-testid="update-start" className="btn btn-primary" onClick={() => actions.onUpdate(item.id)}>
+            Update
+          </button>
+        </CardActions>
+      )}
+    </Card>
+  );
+}
+
 const RESOURCE_TITLE = { disk: 'Drive space', memory: 'Memory', cpu: 'Processor' } as const;
 
 /** L1: a resource alert. Headline and details are written by code; advice by the local model. Plain text only. */
@@ -762,44 +916,21 @@ function CleanupCard({ item, actions }: { item: CleanupItem; actions: MessageAct
 const URGENCY_COLOR = { high: 'var(--danger)', normal: 'var(--accent)', low: 'var(--muted)' } as const;
 
 /** Mail-derived text (from, subject, summary) is rendered as plain text, never Markdown or HTML. */
+/**
+ * New mail waits in the side rail's inbox (MailRail.tsx), not in the chat. Only mail that was held
+ * a while (away, quiet hours, the hourly limit) leaves one line here, written by code, that opens
+ * the inbox. Ordinary new mail shows nothing in the chat.
+ */
 function MailNotification({ item, actions }: { item: Extract<ChatItem, { kind: 'notification' }>; actions: MessageActions }) {
-  const rows = item.mails ?? [];
-  const main = rows.filter((r) => r.urgency !== 'low');
-  const low = rows.filter((r) => r.urgency === 'low');
-  const row = (r: MailRow) => (
-    <li key={r.id} data-testid="mail-row" data-urgency={r.urgency} className={`py-2 ${r.ignored ? 'opacity-40' : ''}`}>
-      <div className="flex items-baseline gap-2">
-        <span style={{ color: URGENCY_COLOR[r.urgency] }}>●</span>
-        <span className="font-medium">{r.from.replace(/\s*<[^>]*>$/, '')}</span>
-        <span style={{ color: 'var(--muted)' }}>· {r.subject}</span>
-      </div>
-      <div className="ml-5 text-[15px]">{r.summary}</div>
-      {!r.ignored && (
-        <div className="ml-5 mt-2 flex flex-wrap gap-2">
-          <button type="button" data-testid="mail-read" className="btn btn-secondary btn-sm" onClick={() => actions.onSend(`Read email ${r.id}`)}>
-            Read
-          </button>
-          <button type="button" data-testid="mail-draft-reply" className="btn btn-secondary btn-sm" onClick={() => actions.onSend(`Draft a reply to email ${r.id}`)}>
-            Draft reply
-          </button>
-          <button type="button" data-testid="mail-ignore" className="btn btn-secondary btn-sm" onClick={() => actions.onIgnoreMail(item.id, r.id)}>
-            Ignore
-          </button>
-        </div>
-      )}
-    </li>
-  );
+  if (!item.catchUp) return null;
   return (
-    <Card data-kind="notification" icon="mail" title={item.text}>
-      {main.length > 0 && <ul className="-my-2">{main.map(row)}</ul>}
-      {low.length > 0 && (
-        // Low priority mail keeps its buttons, so each one can still be read, answered or opened.
-        <div data-testid="mail-digest" className="mt-2 text-sm">
-          <div style={{ color: 'var(--muted)' }}>Low priority</div>
-          <ul>{low.map(row)}</ul>
-        </div>
-      )}
-    </Card>
+    <div data-kind="notification" className="flex items-center gap-3 text-sm" style={{ color: 'var(--muted)' }}>
+      <span className="h-px flex-1" style={{ background: 'var(--line)' }} />
+      <button type="button" data-testid="mail-catch-up" className="inline-flex items-center gap-2 rounded-full border px-3 py-1" style={{ color: 'var(--fg)', background: 'var(--surface)', borderColor: 'var(--line)' }} onClick={actions.onOpenInbox}>
+        <Icon name="mail" size={14} /> {item.text} <span style={{ color: 'var(--accent)' }}>· Open inbox</span>
+      </button>
+      <span className="h-px flex-1" style={{ background: 'var(--line)' }} />
+    </div>
   );
 }
 
@@ -827,6 +958,7 @@ function TodoCard({ item, actions }: { item: TodoItem; actions: MessageActions }
   );
   return (
     <Card data-kind="todo" data-event={item.event} icon="todo" tone={item.event === 'reminder' ? 'warning' : 'accent'} title={item.title} badge={item.event === 'reminder' ? { text: 'Reminder', tone: 'warning' } : false}>
+      {item.rows.length > 0 && (
       <ul className="-my-1.5">
         {item.rows.map((r) => (
           <li key={r.todoId} data-testid="todo-row" data-state={r.state} className={`py-1.5 ${r.state === 'removed' ? 'opacity-50' : ''}`}>
@@ -855,6 +987,7 @@ function TodoCard({ item, actions }: { item: TodoItem; actions: MessageActions }
           </li>
         ))}
       </ul>
+      )}
     </Card>
   );
 }
@@ -969,6 +1102,19 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
               <Markdown>{item.text}</Markdown>
             </div>
             {item.stopped && <div className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>Stopped</div>}
+            {!item.streaming && actions.onKnowledgeSave && item.text.trim() && (
+              <div className="mt-1 text-sm">
+                {item.savedToKnowledge ? (
+                  <span data-testid="knowledge-saved" style={{ color: 'var(--muted)' }}>
+                    ✓ Saved to knowledge base
+                  </span>
+                ) : (
+                  <button type="button" data-testid="knowledge-save" className="btn btn-quiet btn-sm -ml-3 opacity-70 hover:opacity-100" onClick={() => actions.onKnowledgeSave?.(item.id)}>
+                    Save to knowledge base
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       );
@@ -1006,12 +1152,16 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <ActionCard item={item} actions={actions} />;
     case 'event':
       return <EventCard item={item} actions={actions} />;
+    case 'signal':
+      return <SignalCard item={item} actions={actions} />;
     case 'doc_change':
       return <DocChangeCard item={item} actions={actions} />;
     case 'file_change':
       return <FileChangeCard item={item} actions={actions} />;
     case 'resource_alert':
       return <ResourceAlert item={item} />;
+    case 'update':
+      return <UpdateCard item={item} actions={actions} />;
     case 'cleanup':
       return <CleanupCard item={item} actions={actions} />;
     case 'todo':
@@ -1022,6 +1172,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <AttachmentCard item={item} actions={actions} />;
     case 'document':
       return <DocumentCard item={item} actions={actions} />;
+    case 'file_results':
+      return <FileResultsCard item={item} actions={actions} />;
     case 'build_result':
       return (
         <div data-kind="build_result" data-ok={item.ok} data-tone={item.ok ? undefined : 'danger'} className="card flex items-center gap-3 px-4 py-3">

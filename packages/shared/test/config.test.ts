@@ -58,9 +58,13 @@ describe('config schema', () => {
       defaultMinutes: 30,
       workday: { start: '09:00', end: '18:00' },
       apiBaseUrl: 'https://www.googleapis.com/calendar/v3',
+      contacts: true,
+      peopleApiBaseUrl: 'https://people.googleapis.com/v1',
       authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenUrl: 'https://oauth2.googleapis.com/token',
     });
+    // C3: contacts ride on the same sign-in, on unless turned off.
+    expect(parseConfig(`${valid}\n[calendar]\nclientId = "x"\ncontacts = false\n`).calendar?.contacts).toBe(false);
     expect(() => parseConfig(`${valid}\n[calendar]\nclientId = "x"\nclientSecret = "GOCSPX-plain"\n`)).toThrow(ConfigError);
     expect(() => parseConfig(`${valid}\n[calendar]\nclientId = "x"\ntokenRef = "1//refresh-token-value"\n`)).toThrow(ConfigError);
   });
@@ -85,7 +89,7 @@ describe('config schema', () => {
   });
 
   it('honours XDG_CONFIG_HOME', () => {
-    expect(configDir({ XDG_CONFIG_HOME: '/x', HOME: '/home/j' })).toBe('/x/aios');
-    expect(configDir({ HOME: '/home/j' })).toBe('/home/j/.config/aios');
+    expect(configDir({ XDG_CONFIG_HOME: '/x', HOME: '/home/j' })).toBe('/x/astra');
+    expect(configDir({ HOME: '/home/j' })).toBe('/home/j/.config/astra');
   });
 });

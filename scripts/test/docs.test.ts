@@ -436,7 +436,7 @@ describe('document quarantine', () => {
       (n) => n === 'doc_read',
     );
     expect(msgs.map((m) => m.content)).toEqual(['s', 'summarize hostile.docx', quarantineNote([], false, true), 'thanks']);
-    expect(quarantineNote([], false, true)).toBe('(Answering this, I read a document. That exchange is hidden from me now, because outside text can carry instructions. If the user refers to it, read it again.)');
+    expect(quarantineNote([], false, true)).toBe('(Answering this, I read a document. That exchange is hidden from me now, because outside text can carry instructions. If the user follows up on it, read it again first, then do what they ask; never ask them which one they mean.)');
     expect(quarantineNote(['INBOX:1'], true, true)).toMatch(/^\(Answering this, I read email INBOX:1, the calendar and a document\./);
   });
 });

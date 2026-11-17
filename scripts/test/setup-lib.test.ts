@@ -1,3 +1,4 @@
+import { AiosConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import { type Prompter, collectSetup, secretRefs } from '../src/setup-lib.js';
 
@@ -56,6 +57,25 @@ describe('collectSetup', () => {
     const { config, secrets } = await collectSetup(rerun, first, providers);
     expect(config).toEqual(first);
     expect([...secrets.keys()]).toEqual(['keyring:mail']); // test-stack password is a fixed test value
+  });
+
+  it('R1: a re-run keeps the sections setup does not ask about (folders, screen, tone, speech)', async () => {
+    const { config: first } = await collectSetup(scripted(firstRun), null, providers);
+    expect(first.ui.port).toBe(7780);
+    const tuned = AiosConfig.parse({
+      ...first,
+      files: { ...first.files, roots: ['~/Documents', '~/Videos', '~/Music', '~/Pictures'] },
+      personality: { ...first.personality, tone: 'playful' },
+      screen: { ...first.screen, monitor: 'DP-2' },
+      models: { ...first.models, speech: { baseUrl: 'http://127.0.0.1:8178' } },
+    });
+    const rerun = scripted([
+      ['first name', ''], ['Timezone', ''], ['GreenMail', true],
+      ['[chat] Provider', ''], ['[chat] Model name', ''], ['[chat] API key', ''],
+      ['for triage', true], ['for nightly', true], ['Ollama', false], ['Google Calendar', false],
+    ]);
+    const { config } = await collectSetup(rerun, tuned, providers);
+    expect(config).toEqual(tuned);
   });
 
   it('adds a Google Calendar with its client secret in the keyring, and keeps it on a re-run', async () => {

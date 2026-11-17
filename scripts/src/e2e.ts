@@ -8,12 +8,13 @@
  * live status values, memory cards and, with the GreenMail stack up, new-mail
  * notifications, the reply flow and opening attachments; C1: the calendar against a pretend
  * Google Calendar (fixtures/calendar.ts); D1: Word and Excel files through pretend WordCraft and
- * GridCraft tools (fixtures/documents.ts). Never touches real accounts or keys.
+ * GridCraft tools (fixtures/documents.ts); V2: the microphone button, with Chromium's fake microphone
+ * and a pretend whisper.cpp server. Never touches real accounts or keys.
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -28,6 +29,7 @@ import { makeDocFixture } from '../../fixtures/documents.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
+import { type WavInfo, encodeWav, readWav } from '@aios/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
@@ -405,7 +407,21 @@ async function main(): Promise<void> {
   if (shots) mkdirSync(shots, { recursive: true });
   // S4: a built app trying the network would hit /probe; its policy must stop it first.
   let probeHits = 0;
+  // V2: the pretend whisper.cpp server keeps the format of each recording it was sent.
+  const heard: (WavInfo | null)[] = [];
   const mock = createServer((req, res) => {
+    if (req.url === '/inference' && req.method === 'POST') {
+      void (async () => {
+        const parts: Buffer[] = [];
+        for await (const c of req) parts.push(c as Buffer);
+        const body = Buffer.concat(parts);
+        const at = body.indexOf('RIFF');
+        heard.push(at < 0 ? null : readWav(new Uint8Array(body.subarray(at))));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ text: ' Remind me to buy milk tomorrow.\n' }));
+      })();
+      return;
+    }
     if (req.url?.startsWith('/probe')) {
       probeHits++;
       res.writeHead(200, { 'access-control-allow-origin': '*', 'content-type': 'text/plain' });
@@ -544,6 +560,7 @@ async function main(): Promise<void> {
       `[assistant.monitor]\nenabled = false\n[assistant.review]\nenabled = false\nminFileMb = 1\n` +
       // T2: the brief is due from midnight here, so it comes at boot whatever time the test runs.
       `[brief]\nafter = "00:00"\n` +
+      `[models.speech]\nbaseUrl = "http://127.0.0.1:${mockPort}"\nmaxSeconds = 10\n` +
       `[ui]\nport = ${port}\nkiosk = false\n`,
   );
 
@@ -585,9 +602,13 @@ async function main(): Promise<void> {
   process.on('exit', () => {
     if (core?.pid && core.exitCode === null) process.kill(-core.pid, 'SIGTERM');
   });
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
+  // V2: Chromium's fake microphone, allowed for the chat page only, playing 3 s of tone then 1 s of quiet, looped.
+  const fakeMic = join(tmp, 'fake-mic.wav');
+  writeFileSync(fakeMic, encodeWav(Float32Array.from({ length: 4 * 48_000 }, (_, i) => (i < 3 * 48_000 ? 0.3 * Math.sin((2 * Math.PI * 220 * i) / 48_000) : 0)), 48_000));
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium', args: ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${fakeMic}`] });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.context().grantPermissions(['microphone'], { origin: `http://127.0.0.1:${port}` });
     // Newer Chromium returns a Promise from scrollIntoView(); mimic it so effects that leak the return value fail here.
     await page.addInitScript(`{
       const orig = Element.prototype.scrollIntoView;
@@ -620,15 +641,6 @@ async function main(): Promise<void> {
     check('cost in status strip updates', await waitFor(async () => (await page.getByTestId('cost').innerText()) !== costBefore), `${costBefore} → ${await page.getByTestId('cost').innerText()}`);
     await shot(page, '2-chat');
 
-    // Up in the empty box brings back the last message; Down returns to what was typed (empty).
-    await input.press('ArrowUp');
-    check('Up recalls the previous message', (await input.inputValue()) === 'hello', await input.inputValue());
-    await input.press('ArrowDown');
-    check('Down goes back to the empty box', (await input.inputValue()) === '', await input.inputValue());
-    await input.fill('half typed');
-    await input.press('ArrowUp');
-    check('Up leaves a message being typed alone', (await input.inputValue()) === 'half typed', await input.inputValue());
-    await input.fill('');
 
     // 3. now() tool round trip.
     await input.fill('what time is it?');
@@ -656,6 +668,10 @@ async function main(): Promise<void> {
     await input.fill('/cost');
     await input.press('Enter');
     check('/cost reports spend', await waitFor(async () => /Today: \$0\.\d{4} across \d+ model calls/.test(await page.locator('[data-kind="notice"]').last().innerText())));
+    // U1: a checkout isn't a package, so /update says how to update instead of offering a button.
+    await input.fill('/update');
+    await input.press('Enter');
+    check('/update explains why it can’t update a checkout, with no Update button', await waitFor(async () => (await page.locator('[data-kind="update"][data-state="unavailable"]').count()) === 1 && (await page.locator('[data-testid="update-start"]').count()) === 0));
     await shot(page, '5-commands');
     await input.fill('/resume');
     await input.press('Enter');
@@ -783,7 +799,7 @@ async function main(): Promise<void> {
     check('the card says what it made', await waitFor(async () => (await buildCard.getAttribute('data-state')) === 'done' && (await buildCard.innerText()).includes('Built “Pomodoro” in less than a minute. A 25-minute focus timer. About $0.31 at API prices.')), await buildCard.innerText());
     const builtMsg = page.locator('[data-kind="build_result"]').last();
     check('a message says it is ready, with Open', (await builtMsg.getAttribute('data-ok')) === 'true' && (await builtMsg.innerText()).includes('“Pomodoro” is ready. A 25-minute focus timer.') && (await builtMsg.getByTestId('build-open').count()) === 1);
-    check('a desktop notification says it is ready', notified().includes('--app-name=AI OS|Pomodoro is ready|'), notified());
+    check('a desktop notification says it is ready', notified().includes('--app-name=Astra|Pomodoro is ready|'), notified());
     const appDir = join(tmp, 'data', 'aios', 'apps', 'pomodoro');
     check('Claude Code ran in the app folder, restricted, with the request on stdin', fakeState('claude-cwd') === appDir && fakeState('claude-args').includes('--restricted') && fakeState('claude-stdin') === 'a pomodoro timer', fakeState('claude-cwd'));
     await shot(page, 's4-built');
@@ -819,28 +835,48 @@ async function main(): Promise<void> {
     check('a failed build says why on the card and in a message', await waitFor(async () => (await diceCard.getAttribute('data-state')) === 'failed' && (await failMsg.getAttribute('data-ok')) === 'false' && (await failMsg.innerText()).includes("Building “Dice” didn't work: it reached its $1 spending cap before finishing.")), await failMsg.innerText());
     check('a failed build has no Open button, and a notification says it failed', (await failMsg.getByTestId('build-open').count()) === 0 && notified().includes("Building Dice didn't work|"), notified());
     await shot(page, 's4-failed');
-    // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification.
+    // 8. Mail (needs `pnpm test:stack:up`): new mail becomes one triaged notification, shown in the side rail's inbox.
     if (await mailStackUp()) {
       check('status strip shows mail connected', await waitFor(async () => (await page.getByTestId('mail-state').getAttribute('title')) === 'Mail: connected', 15_000));
       const stamp = Date.now();
       await deliverTestMail(`E2E urgent ${stamp}`);
       await deliverTestMail(`E2E normal ${stamp}`);
-      const note = page.locator('[data-kind="notification"]').last();
-      check('new mail posts one notification', await waitFor(async () => (await note.count()) > 0 && (await note.getByTestId('mail-row').count()) === 2, 40_000));
-      check('notification headline counts urgent mail', (await note.innerText()).includes('2 new emails. 1 looks urgent. 1 low-priority.'));
-      check('low-priority mail keeps its buttons', (await note.getByTestId('mail-digest').getByTestId('mail-read').count()) === 1);
+      // Calm mail alerts: new mail waits in the side rail's inbox, and only urgent mail peeks out.
+      const inbox = page.getByTestId('inbox');
+      const openInbox = async () => {
+        if (!(await inbox.isVisible())) await page.getByTestId('rail-mail').click();
+        await inbox.waitFor({ state: 'visible' });
+      };
+      check('new mail shows a count on the rail', await waitFor(async () => (await page.getByTestId('rail-mail').getAttribute('data-fresh')) === '2', 40_000));
+      check('the status strip counts the urgent mail', (await page.getByTestId('mail-count').innerText()).includes('2 · 1 urgent'));
+      check('the urgent mail peeks out beside the rail', await waitFor(async () => (await page.getByTestId('mail-peek').count()) === 1 && (await page.getByTestId('mail-peek').innerText()).includes(`E2E urgent ${stamp}`)));
+      check('new mail puts nothing in the chat', (await page.locator('[data-kind="notification"]').count()) === 0);
+      await shot(page, '8-mail-peek');
+      await page.getByTestId('peek-open').click();
+      await inbox.waitFor({ state: 'visible' });
+      check('the inbox lists the urgent email under Needs you, low priority folded', (await inbox.getByTestId('mail-row').count()) === 1 && (await inbox.getByTestId('mail-needs').innerText()).includes(`E2E urgent ${stamp}`));
+      check('opening the inbox clears the rail count', await waitFor(async () => (await page.getByTestId('rail-mail').getAttribute('data-fresh')) === '0'));
+      await inbox.getByTestId('mail-low-show').click();
+      check('low-priority mail keeps its buttons', (await inbox.getByTestId('mail-digest').getByTestId('mail-read').count()) === 1);
+      await sleep(400); // the chat moving aside for the panel
+      await shot(page, '8b-inbox');
+      await page.keyboard.press('Escape');
+      check('Esc closes the inbox', await waitFor(async () => (await inbox.count()) === 0));
       await input.fill('why was that low-priority email low?');
       await input.press('Enter');
       check('the chat finds the low-priority email from the notification', await waitFor(async () => (await lastAssistant().innerText()).includes(`The low-priority one is: E2E normal ${stamp}`), 15_000));
-      await shot(page, '8-mail-notification');
-      await note.getByTestId('mail-ignore').last().click();
-      check('Ignore greys out the row', await waitFor(async () => (await note.getByTestId('mail-ignore').count()) === 1));
-      await note.getByTestId('mail-read').first().click();
+      await openInbox();
+      await inbox.getByTestId('mail-low-show').click();
+      await inbox.getByTestId('mail-ignore').last().click();
+      check('Ignore greys out the row', await waitFor(async () => (await inbox.getByTestId('mail-ignore').count()) === 1));
+      await inbox.getByTestId('mail-read').first().click();
+      check('Read closes the inbox', await waitFor(async () => (await inbox.count()) === 0));
       check('Read opens the email through mail_read', await waitFor(async () => (await lastAssistant().innerText()).includes(`That email is about: E2E urgent ${stamp}`), 15_000));
       await shot(page, '9-mail-read');
 
       // 9. Reply flow (A5): Draft reply → card → Edit → Send transmits exactly the shown text; Discard sends nothing.
-      await note.getByTestId('mail-draft-reply').first().click();
+      await openInbox();
+      await inbox.getByTestId('mail-draft-reply').first().click();
       const draft = page.locator('[data-kind="draft"]').last();
       check('Draft reply shows a pending draft card', await waitFor(async () => (await draft.getAttribute('data-state')) === 'pending', 15_000));
       check('draft is addressed to the sender', (await draft.getByTestId('draft-to-text').innerText()) === 'sara.kaya@northwind.example');
@@ -858,7 +894,8 @@ async function main(): Promise<void> {
       check('the edited text is what was sent', sent.length === 1 && sent[0]!.replace(/\r\n/g, '\n').trimEnd() === edited, JSON.stringify(sent));
       await shot(page, '12-draft-sent');
 
-      await note.getByTestId('mail-draft-reply').first().click();
+      await openInbox();
+      await inbox.getByTestId('mail-draft-reply').first().click();
       const second = page.locator('[data-kind="draft"]').last();
       check('a second draft card appears', await waitFor(async () => (await page.locator('[data-kind="draft"]').count()) === 2 && (await second.getAttribute('data-state')) === 'pending', 15_000));
       await second.getByTestId('draft-discard').click();
@@ -977,6 +1014,12 @@ async function main(): Promise<void> {
     await input.fill('find the file about the office lease');
     await input.press('Enter');
     check('files_search finds the report by what it says', await waitFor(async () => (await lastAssistant().innerText()).includes('report.docx'), 15_000));
+    // F3: the search also posts a card with the best files, why each matched, and Open.
+    const results = page.locator('[data-kind="file_results"]').last();
+    check('the results card shows the report with a reason and Open', await waitFor(async () => (await results.count()) === 1 && (await results.getByTestId('file-result-name').first().innerText()).includes('report.docx'), 15_000));
+    check('each row says why it matched', (await results.getByTestId('file-result-why').first().innerText()).length > 0);
+    check('the report opens from the card', (await results.getByTestId('file-result-open').count()) >= 1);
+    await shot(page, '16b-file-results');
     await input.fill('/reindex');
     await input.press('Enter');
     check('/reindex says how far the index is', await waitFor(async () => (await page.locator('body').innerText()).includes('Reading your files again in the background'), 10_000));
@@ -997,6 +1040,8 @@ async function main(): Promise<void> {
     check('the reminder card repeats the checked time', await waitFor(async () => (await todoCard.count()) === 1 && /Call Ana[^]*Reminder: Tomorrow, .*16:00/.test(await todoCard.innerText()), 10_000));
     const todosFile = join(tmp, 'config', 'aios', 'todos.md');
     check('the reminder is in todos.md', existsSync(todosFile) && readFileSync(todosFile, 'utf8').includes(`- [ ] Call Ana · remind ${calDay(1)} 16:00`));
+    // W1: the to-do tile at the bottom, used further down.
+    const todoTile = page.locator('[data-testid="widget"][data-widget="todos"]');
     await todoCard.getByTestId('todo-done').click();
     check('Done ticks it off in the file', await waitFor(async () => readFileSync(todosFile, 'utf8').includes('- [x] Call Ana')));
     check('the morning brief came at boot with today\'s events', (await page.locator('[data-kind="brief"]').count()) >= 1 && (await page.locator('[data-kind="brief"]').first().getByTestId('brief-intro').innerText()).includes('John'));
@@ -1004,6 +1049,143 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('/brief shows it again', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) >= 2, 10_000));
     await shot(page, '16-todos-brief');
+    // W1: pinned tiles along the bottom: checkup, the brief and to-dos by default; a click opens the full card.
+    const tiles = page.getByTestId('widget');
+    check('three widgets are pinned at the bottom', (await tiles.count()) === 3 && (await tiles.evaluateAll((els) => els.map((e) => e.getAttribute('data-widget')).join(','))) === 'checkup,brief,todos');
+    check('tiles show only their names until opened', (await tiles.evaluateAll((els) => els.map((e) => (e as unknown as { innerText: string }).innerText.replace(/[^A-Za-z-]+/g, ' ').trim()).join(','))) === 'Checkup,Today,To-dos');
+    const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
+    const row = await box('[data-testid="widgets"]');
+    const composer = await box('[data-testid="composer"]');
+    check('the tiles line up with the chat column', Math.abs(row.x - composer.x) < 1 && Math.abs(row.x + row.width - (composer.x + composer.width)) < 1, `${row.x}+${row.width} vs ${composer.x}+${composer.width}`);
+    const briefs = await page.locator('[data-kind="brief"]').count();
+    await page.locator('[data-testid="widget"][data-widget="brief"]').getByTestId('widget-open').click();
+    check('clicking the brief tile shows the brief', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) === briefs + 1, 10_000));
+    await todoTile.getByTestId('widget-open').click();
+    check('clicking the to-do tile shows the list', await waitFor(async () => (await page.locator('[data-kind="todo"][data-event="list"]').count()) === 1));
+    await shot(page, 'w1-widgets');
+    await todoTile.hover();
+    await shot(page, 'w1-widgets-hover');
+    await todoTile.getByTestId('widget-unpin').click();
+    check('× unpins a tile', await waitFor(async () => (await tiles.count()) === 2));
+    await page.reload();
+    check('unpinning lasts across a reload', await waitFor(async () => (await page.getByTestId('widget').count()) === 2));
+    await page.getByTestId('widget-add').click();
+    await page.locator('[data-testid="widget-pin"][data-widget="todos"]').click();
+    check('+ pins it again', await waitFor(async () => (await page.getByTestId('widget').count()) === 3));
+    // An overdue item (written by hand, as the user may) turns the to-do and Today buttons amber after the next refresh.
+    writeFileSync(todosFile, `${readFileSync(todosFile, 'utf8')}- [ ] Renew passport · due ${calDay(-2)}\n`);
+    await page.reload();
+    check('an overdue to-do turns its button amber, with a dot', await waitFor(async () => (await todoTile.getAttribute('data-tone')) === 'attention' && (await todoTile.getByTestId('widget-dot').count()) === 1));
+    await shot(page, 'w1-widgets-attention');
+    await input.fill('/unpin checkup');
+    await input.press('Enter');
+    check('/unpin takes a tile off', await waitFor(async () => (await page.locator('[data-testid="widget"][data-widget="checkup"]').count()) === 0));
+    await input.fill('/pin checkup');
+    await input.press('Enter');
+    check('/pin puts it back at the end', await waitFor(async () => (await page.getByTestId('widget').last().getAttribute('data-widget')) === 'checkup'));
+    // K1: /knowledge update writes the knowledge base (code only here: no local model) and shows it.
+    await input.fill('/knowledge update');
+    await input.press('Enter');
+    const knowledgeFile = join(tmp, 'config', 'aios', 'knowledge', 'about-me.md');
+    check('/knowledge update writes and shows the knowledge base', await waitFor(async () => existsSync(knowledgeFile) && (await page.locator('[data-kind="notice"]').last().innerText()).includes('# About John'), 10_000));
+    check('the knowledge base has its sections and the user\'s own', existsSync(knowledgeFile) && /## Upcoming[^]*## Recent activity[^]*## My notes/.test(readFileSync(knowledgeFile, 'utf8')));
+    // K4: Save to knowledge base on a reply files it as a wiki page, once, and says so.
+    const save = page.locator('[data-kind="assistant"]').last().getByTestId('knowledge-save');
+    check('replies have Save to knowledge base', await waitFor(async () => (await save.count()) === 1));
+    await save.click();
+    const savedDir = join(tmp, 'config', 'aios', 'knowledge', 'saved');
+    check('Save files the reply as a saved answer page', await waitFor(async () => existsSync(savedDir) && readdirSync(savedDir).length === 1 && (await page.locator('[data-kind="assistant"]').last().getByTestId('knowledge-saved').count()) === 1));
+    check('the wiki index lists it', existsSync(join(tmp, 'config', 'aios', 'knowledge', 'index.md')) && readFileSync(join(tmp, 'config', 'aios', 'knowledge', 'index.md'), 'utf8').includes('## Saved answers (1)'));
+    await input.fill('/knowledge check');
+    await input.press('Enter');
+    check('/knowledge check shows the check, written by code', await waitFor(async () => (await page.locator('[data-kind="notice"]').last().innerText()).startsWith('Checked ')));
+    // V2: the microphone shows the words while the user talks, after what was typed, and sends nothing.
+    // The fake microphone plays fake-mic.wav: 3 seconds of tone (talking), 1 second of quiet (a pause), looped.
+    const mic = page.getByTestId('mic');
+    const userMessages = await page.locator('[data-kind="user"]').count();
+    const sentence = 'Remind me to buy milk tomorrow.';
+    check('the microphone button is on with [models.speech]', await waitFor(async () => (await mic.count()) === 1 && (await mic.isEnabled())));
+    await input.fill('Note:');
+    await mic.click();
+    check('the microphone listens', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    check('it says it is listening', (await page.getByTestId('voice-status').innerText()).includes('Listening'));
+    check('words show in grey while still talking', await waitFor(async () => (await page.getByTestId('voice-interim').count()) === 1 && (await page.getByTestId('voice-interim').innerText()).includes(sentence.replace(/\.$/, '')), 8000));
+    await shot(page, 'v2-listening');
+    check('a finished piece joins the text box at a pause, while still listening', await waitFor(async () => (await input.inputValue()).startsWith(`Note: ${sentence}`) && (await mic.getAttribute('data-state')) === 'listening', 8000), await input.inputValue());
+    await mic.click();
+    check('stopping finishes the last piece', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle' && (await page.getByTestId('voice-interim').count()) === 0));
+    check('only the spoken words were added, after the typed text', new RegExp(`^Note: (${sentence.replace(/\./g, '\\.')} ?)+$`).test(await input.inputValue()), await input.inputValue());
+    check('every piece reached the speech model as 16 kHz mono 16-bit WAV of speech, never silence alone', heard.length >= 2 && heard.every((h) => h?.sampleRate === 16_000 && h.channels === 1 && h.bitsPerSample === 16 && h.seconds > 0.4 && h.seconds < 8), JSON.stringify(heard));
+    await sleep(500);
+    check('nothing was sent by voice', (await page.locator('[data-kind="user"]').count()) === userMessages && (await agentState.innerText()).toLowerCase().includes('idle'));
+    await shot(page, 'v2-words');
+    const kept = await input.inputValue();
+    await mic.click();
+    check('the button listens again', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    await sleep(4500);
+    await page.keyboard.press('Escape');
+    check('Esc cancels and puts the text box back as it was', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle') && (await input.inputValue()) === kept, await input.inputValue());
+    const afterCancel = heard.length;
+    await sleep(2000);
+    check('nothing more goes to the speech model after Esc', heard.length === afterCancel && (await input.inputValue()) === kept);
+    await page.keyboard.press('Control+m');
+    check('Ctrl+M starts listening', await waitFor(async () => (await mic.getAttribute('data-state')) === 'listening'));
+    await sleep(2000);
+    await page.keyboard.press('Control+m');
+    check('Ctrl+M stops and adds the words', await waitFor(async () => (await mic.getAttribute('data-state')) === 'idle' && (await input.inputValue()).length > kept.length));
+    await input.fill('');
+
+    // Up/Down bring back what was sent, commands included, like a shell; the half-typed text comes back last.
+    await input.fill('/cost');
+    await input.press('Enter');
+    await input.fill('/help');
+    await input.press('Enter');
+    check('the box is empty after sending', await waitFor(async () => (await input.inputValue()) === ''));
+    await input.fill('half typed');
+    await input.press('ArrowUp');
+    check('Up brings back the last command', await waitFor(async () => (await input.inputValue()) === '/help'), await input.inputValue());
+    await input.press('ArrowUp');
+    check('Up again goes further back', await waitFor(async () => (await input.inputValue()) === '/cost'), await input.inputValue());
+    await input.press('ArrowDown');
+    await input.press('ArrowDown');
+    check('Down past the newest gives the half-typed text back', await waitFor(async () => (await input.inputValue()) === 'half typed'), await input.inputValue());
+    // Wait for the recalled text to settle before replacing it, so a late render can't put it back.
+    await input.fill('');
+    check('the box clears', await waitFor(async () => (await input.inputValue()) === ''));
+    await input.fill('first line\nsecond line');
+    await sleep(100);
+    await input.press('ArrowUp');
+    await sleep(100);
+    check('Up on the second line of a message moves the cursor, not the text', (await input.inputValue()) === 'first line\nsecond line', JSON.stringify(await input.inputValue()));
+    await input.fill('');
+
+    // The floating Feedback button saves through /feedback, the same as typing it; Esc closes the card.
+    const lastNotice = () => page.locator('[data-kind="notice"]').last().innerText();
+    const fbCard = () => page.getByTestId('feedback-card').count();
+    const dock = await page.getByTestId('feedback').boundingBox();
+    const composerBox = await page.getByTestId('composer').boundingBox();
+    check('the Feedback button floats clear of the message box', !!dock && !!composerBox && (dock.x >= composerBox.x + composerBox.width || dock.y + dock.height <= composerBox.y), JSON.stringify({ dock, composerBox }));
+    await page.getByTestId('feedback').click();
+    check('the Feedback button opens its card, with the text box ready', await waitFor(async () => (await fbCard()) === 1 && (await page.getByTestId('feedback-text').evaluate((el: { ownerDocument: { activeElement: unknown } }) => el === el.ownerDocument.activeElement))));
+    await shot(page, 'feedback-card');
+    await page.keyboard.press('Escape');
+    check('Esc closes the card without stopping anything', await waitFor(async () => (await fbCard()) === 0));
+    await page.getByTestId('feedback').click();
+    await page.getByTestId('feedback-kind-problem').click();
+    await page.getByTestId('feedback-text').fill('The brief opened twice\nafter a restart');
+    await page.getByTestId('feedback-text').press('Enter');
+    check('saving shows thanks and the chat confirms it', await waitFor(async () => (await page.getByTestId('feedback-saved').count()) === 1 && /idea #1\b/.test(await lastNotice())), await lastNotice());
+    await shot(page, 'feedback-saved');
+    check('the card closes by itself after saving', await waitFor(async () => (await fbCard()) === 0, 4000));
+    await page.getByTestId('feedback').click();
+    await page.getByTestId('feedback-list').click();
+    check('"See what I\'ve saved" lists it, kind and line break kept', await waitFor(async () => (await lastNotice()).includes('Problem: The brief opened twice\nafter a restart')), await lastNotice());
+
+    // The gear opens settings; this checkout has no /usr/bin/astra, so it says to use a terminal.
+    check('the Settings gear is in the status strip', (await page.getByTestId('settings').count()) === 1);
+    await page.getByTestId('settings').click();
+    check('the gear answers in the chat', await waitFor(async () => /settings/i.test(await lastNotice())), await lastNotice());
+
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

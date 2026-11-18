@@ -33,8 +33,11 @@ export const sentAt = (r: InboxRow) => r.date ?? r.at;
  * The row's time: the clock today, else the day too. All mail in one notification used to share
  * the notification's time; each row now shows its own email's.
  */
-export function rowTime(r: InboxRow, now: number): string {
-  const t = new Date(sentAt(r));
+export const rowTime = (r: InboxRow, now: number): string => timeLabel(sentAt(r), now);
+
+/** A time for the rail's panels: the clock today, else the day too. */
+export function timeLabel(at: number, now: number): string {
+  const t = new Date(at);
   const time = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (t.toDateString() === new Date(now).toDateString()) return time;
   return `${t.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;

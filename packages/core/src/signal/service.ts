@@ -1,9 +1,13 @@
 /**
- * SG1: keeps Signal running while Astra runs. signal-cli's messages go into the inbox; a new
- * one from someone else puts a line written by code in the chat ("New Signal message from
- * Sam.") and a desktop notification, held in quiet hours and while paused. Contacts and
- * groups are synced from signal-cli at start and every six hours. Nothing here reaches a model.
+ * SG1: keeps Signal running while Astra runs. signal-cli's messages go into the inbox; new ones
+ * from someone else are posted as a notification for the side rail (like calm mail alerts: the
+ * chat shows nothing) with a desktop notification whose line is written by code ("New Signal
+ * message from Sam."). In quiet hours and while paused they still reach the rail, marked quiet,
+ * with no desktop notification and no peek. Contacts and groups are synced from signal-cli at
+ * start and every six hours. Nothing here reaches a model: chat items are only shown.
  */
+import { randomUUID } from 'node:crypto';
+import type { ChatItem, SignalRow } from '@aios/shared/protocol';
 import type { AuditLog } from '../audit.js';
 import { inQuietHours } from '../mail/pipeline.js';
 import { auditChat } from './actions.js';
@@ -21,13 +25,14 @@ export interface SignalServiceOptions {
   timeZone: string;
   quietHours?: { start: string; end: string } | undefined;
   isPaused: () => boolean;
-  /** A line in the chat, written by code. */
-  notice: (text: string) => void;
+  /** Shows a chat item (the side rail reads the notification's `signals`). */
+  post: (item: ChatItem) => void;
   desktop: (title: string, body: string) => void;
   spawn?: SignalRpcOptions['spawn'];
   clock?: () => number;
-  /** How long new messages are gathered into one line. Default 8 s. */
+  /** How long new messages are gathered into one notification. Default 8 s. */
   batchMs?: number;
+  newId?: () => string;
 }
 
 /** A sender's or group's name for a line written by code: one line, no tags, short. */
@@ -105,15 +110,28 @@ export class SignalService {
     }
   }
 
-  /** Posts the gathered messages as one line, unless paused or in quiet hours (they stay unread). */
+  /**
+   * Posts the gathered messages to the side rail as one notification. Paused or in quiet hours
+   * they still go there, marked quiet: no desktop notification and no peek.
+   */
   flush(): void {
     this.batchTimer = null;
     const batch = this.pending;
     this.pending = [];
-    if (!batch.length || this.o.isPaused() || inQuietHours(this.clock(), this.o.timeZone, this.o.quietHours)) return;
-    const text = newMessagesLine(batch, (chat) => this.o.inbox.chat(chat)?.name ?? '');
-    this.o.notice(`${text} Ask me what they said, or reply from here.`);
-    this.o.desktop('Signal', text);
+    if (!batch.length) return;
+    const now = this.clock();
+    const quiet = this.o.isPaused() || inQuietHours(now, this.o.timeZone, this.o.quietHours);
+    const chatName = (chat: string) => this.o.inbox.chat(chat)?.name ?? '';
+    const text = newMessagesLine(batch, chatName);
+    this.o.post({
+      kind: 'notification',
+      id: this.o.newId?.() ?? randomUUID(),
+      text,
+      at: now,
+      signals: batch.map((m) => signalRow(m, chatName)),
+      ...(quiet ? { quiet: true } : {}),
+    });
+    if (!quiet) this.o.desktop('Signal', text);
   }
 
   /** For /signal: one plain line, written by code. */
@@ -132,11 +150,26 @@ export class SignalService {
   }
 }
 
+/** The chat's or sender's name as code shows it: the saved name, else the Signal name, else the number. */
+function displayName(m: SignalMessage, chatName: (chat: string) => string): string {
+  if (m.kind === 'group') return plainName(chatName(m.chat) || m.groupName || 'a group');
+  return plainName(chatName(m.chat) || m.fromName || (m.from.startsWith('+') ? m.from : 'someone'));
+}
+
+/** Text for the rail, shown as plain text only: one line, no control characters. */
+const preview = (s: string, max: number) => s.replace(/[\u0000-\u001F\u007F\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/** One message as the side rail shows it (exported for tests). */
+export function signalRow(m: SignalMessage, chatName: (chat: string) => string): SignalRow {
+  const sender = m.kind === 'group' ? plainName(m.fromName || (m.from.startsWith('+') ? m.from : 'someone')) : '';
+  return { id: `${m.chat}|${m.from}|${m.ts}`, chat: m.chat, kind: m.kind, name: displayName(m, chatName), sender, text: preview(m.text, 300), attachments: m.attachments, date: m.ts };
+}
+
 /** "New Signal message from Sam." / "3 new Signal messages from Sam and Family." Written by code. */
 export function newMessagesLine(batch: SignalMessage[], chatName: (chat: string) => string): string {
   const who: string[] = [];
   for (const m of batch) {
-    const name = plainName(m.kind === 'group' ? chatName(m.chat) || m.groupName || 'a group' : chatName(m.chat) || m.fromName || (m.from.startsWith('+') ? m.from : 'someone'));
+    const name = displayName(m, chatName);
     if (!who.includes(name)) who.push(name);
   }
   const names = who.length <= 3 ? (who.length > 1 ? `${who.slice(0, -1).join(', ')} and ${who.at(-1)!}` : who[0]!) : `${who.slice(0, 2).join(', ')} and ${who.length - 2} others`;

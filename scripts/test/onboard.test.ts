@@ -309,3 +309,32 @@ describe('R2 app scan: looks only', () => {
     expect(await whisperRunning(probes([], true))).toBe(true);
   });
 });
+
+describe('R2 window: no old setup pages come back', () => {
+  it('gives each run a new, empty profile, removes the old kept one, and removes it after', async () => {
+    const { mkdtemp, mkdir, writeFile, readdir, stat } = await import('node:fs/promises');
+    const { existsSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { OLD_PROFILE, freshProfile, removeProfile } = await import('../src/onboard/window.js');
+    const root = await mkdtemp(join(tmpdir(), 'aios-window-'));
+    const data = join(root, 'data');
+    const temp = join(root, 'tmp');
+    await mkdir(join(data, OLD_PROFILE, 'Default', 'Sessions'), { recursive: true });
+    await writeFile(join(data, OLD_PROFILE, 'Default', 'Sessions', 'Tabs_1'), 'http://127.0.0.1:39073/s/old/');
+    await mkdir(temp);
+
+    const a = await freshProfile(data, temp);
+    const b = await freshProfile(data, temp);
+    expect(existsSync(join(data, OLD_PROFILE))).toBe(false);
+    expect(a).not.toBe(b);
+    expect(a.startsWith(join(temp, 'astra-setup-'))).toBe(true);
+    expect(await readdir(a)).toEqual([]);
+    expect((await stat(a)).mode & 0o777).toBe(0o700);
+
+    await writeFile(join(a, 'Local State'), '{}');
+    await removeProfile(a);
+    expect(existsSync(a)).toBe(false);
+    expect(existsSync(b)).toBe(true);
+  });
+});

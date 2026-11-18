@@ -37,11 +37,11 @@ export function mailTools(mail: Pick<MailClient, 'search' | 'read' | 'thread'>):
       def: toolByName('mail_search')!,
       label: 'Searching mail…',
       untrustedOutput: true,
-      async handler(args) {
+      async handler(args, ctx) {
         const { query, since, limit } = args as { query: string; since?: string; limit?: number };
         const sinceDate = since ? new Date(`${since}T00:00:00Z`) : undefined;
         if (sinceDate && Number.isNaN(sinceDate.getTime())) return 'Error: since must be a date like 2026-10-19.';
-        const found = await mail.search(query, { limit: limit ?? 10, ...(sinceDate ? { since: sinceDate } : {}) });
+        const found = await mail.search(query, { limit: limit ?? 10, signal: ctx.signal, ...(sinceDate ? { since: sinceDate } : {}) });
         if (!found.length) return 'No messages found.';
         return `${found.length} message(s), newest first. Use the id with mail_read or mail_thread.\n\n${found.map((m) => `id: ${m.id}\n${summaryBlock(m)}`).join('\n\n')}`;
       },
@@ -50,9 +50,9 @@ export function mailTools(mail: Pick<MailClient, 'search' | 'read' | 'thread'>):
       def: toolByName('mail_read')!,
       label: 'Reading the email…',
       untrustedOutput: true,
-      async handler(args) {
+      async handler(args, ctx) {
         const { id } = args as { id: string };
-        const m = await mail.read(id);
+        const m = await mail.read(id, ctx.signal);
         return m ? `id: ${m.id}\n${messageBlock(m, 8000)}` : `Error: no message with id ${id}.`;
       },
     },
@@ -60,9 +60,9 @@ export function mailTools(mail: Pick<MailClient, 'search' | 'read' | 'thread'>):
       def: toolByName('mail_thread')!,
       label: 'Reading the thread…',
       untrustedOutput: true,
-      async handler(args) {
+      async handler(args, ctx) {
         const { id } = args as { id: string };
-        const msgs = await mail.thread(id);
+        const msgs = await mail.thread(id, { signal: ctx.signal });
         if (!msgs.length) return `Error: no message with id ${id}.`;
         return `${msgs.length} message(s), oldest first.\n\n${msgs.map((m) => `id: ${m.id}\n${messageBlock(m, 1500)}`).join('\n\n')}`;
       },

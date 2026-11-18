@@ -78,6 +78,18 @@ export interface ToolRegistryOptions {
   /** At most this many device-tier changes per window. Default 10 a minute (plan §4). */
   deviceLimit?: { max: number; windowMs: number };
   clock?: () => number;
+  /** How long a call may run. Default 15 s. */
+  timeoutMs?: number;
+}
+
+/** `work`, or a rejection as soon as `signal` aborts, whichever comes first. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal, why: () => string): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error(why()));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error(why()));
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 const UNTRUSTED_REFUSAL =
@@ -191,8 +203,9 @@ export class ToolRegistry {
     const run = tier === 'write' ? tool.propose! : asCard ? tool.confirmWhenUntrusted! : tool.handler;
     const started = Date.now();
     try {
-      const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(TOOL_TIMEOUT_MS)]);
-      const r = await run(parsed.data, { ...ctx, signal });
+      const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(this.opts.timeoutMs ?? TOOL_TIMEOUT_MS)]);
+      // A handler that never looks at the signal still can't hold the turn: stop waiting for it.
+      const r = await untilAborted(run(parsed.data, { ...ctx, signal }), signal, () => (ctx.signal.aborted ? 'Stopped.' : `that took longer than ${Math.round((this.opts.timeoutMs ?? TOOL_TIMEOUT_MS) / 1000)} seconds, so I stopped waiting for it.`));
       const { content, audit: extra } = typeof r === 'string' ? { content: r, audit: undefined } : r;
       log({
         decision: proposing ? 'proposed' : 'allowed',

@@ -140,6 +140,20 @@ export class Store {
       .run(item.id, JSON.stringify(item), item.at);
   }
 
+  /**
+   * At startup: a tool step or reply that was still running when Astra stopped can never
+   * finish, so it shows as failed (a tool) or stopped (a reply) instead of running forever.
+   */
+  recoverItems(): number {
+    const tools = this.db
+      .prepare(`UPDATE items SET json = json_set(json, '$.state', 'failed') WHERE json_extract(json, '$.kind') = 'tool' AND json_extract(json, '$.state') = 'running'`)
+      .run().changes;
+    const replies = this.db
+      .prepare(`UPDATE items SET json = json_set(json, '$.streaming', json('false'), '$.stopped', json('true')) WHERE json_extract(json, '$.kind') = 'assistant' AND json_extract(json, '$.streaming') = 1`)
+      .run().changes;
+    return tools + replies;
+  }
+
   getItem(id: string): ChatItem | null {
     const row = this.db.prepare('SELECT json FROM items WHERE id = ?').get(id) as { json: string } | undefined;
     if (!row) return null;
@@ -185,7 +199,7 @@ export class Store {
       return { role: r.role as 'user' | 'system', content: r.content ?? '' };
     });
     const firstUser = msgs.findIndex((m) => m.role === 'user');
-    return firstUser < 0 ? [] : msgs.slice(firstUser);
+    return firstUser < 0 ? [] : answerEveryToolCall(msgs.slice(firstUser));
   }
 
   /** User messages and assistant replies with text in [from, to), oldest first. No tool calls or tool results. */
@@ -239,4 +253,30 @@ export function startOfDay(now: number, timeZone: string): number {
     .reduce<Record<string, number>>((a, p) => (p.type === 'literal' ? a : { ...a, [p.type]: Number(p.value) }), {});
   const sinceMidnight = ((parts.hour ?? 0) * 3600 + (parts.minute ?? 0) * 60 + (parts.second ?? 0)) * 1000 + (now % 1000);
   return now - sinceMidnight;
+}
+
+/** What the model is told for a tool call whose result was never saved (Astra stopped mid-call). */
+export const UNFINISHED_TOOL_RESULT = 'Error: Astra stopped before this finished, so there is no result.';
+
+/**
+ * Every assistant tool call followed by its result, as the API requires. A restart in the middle
+ * of a call leaves the call without one, and every later request would be refused.
+ */
+export function answerEveryToolCall(msgs: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i]!;
+    out.push(m);
+    if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
+    const answered = new Set<string>();
+    while (msgs[i + 1]?.role === 'tool') {
+      const t = msgs[++i] as Extract<ChatMessage, { role: 'tool' }>;
+      answered.add(t.toolCallId);
+      out.push(t);
+    }
+    for (const call of m.toolCalls) {
+      if (!answered.has(call.id)) out.push({ role: 'tool', toolCallId: call.id, name: call.name, content: UNFINISHED_TOOL_RESULT });
+    }
+  }
+  return out;
 }

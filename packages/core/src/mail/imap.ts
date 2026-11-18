@@ -279,12 +279,26 @@ export class MailClient {
     return path;
   }
 
-  /** Runs fn with the folder selected read-only. Null when the folder doesn't exist on this server. */
-  private async inFolder<T>(folder: Folder, fn: (client: ImapFlow) => Promise<T>): Promise<T | null> {
+  /**
+   * Runs fn with the folder selected read-only. Null when the folder doesn't exist on this server.
+   * When `signal` aborts (the tool's time ran out, or Stop), the connection is dropped so the
+   * command and its folder lock end now and the next call opens a fresh one.
+   */
+  private async inFolder<T>(folder: Folder, fn: (client: ImapFlow) => Promise<T>, signal?: AbortSignal): Promise<T | null> {
+    signal?.throwIfAborted();
+    let dropped = false;
+    const drop = () => {
+      dropped = true;
+      const c = this.client;
+      this.client = null;
+      c?.close();
+    };
+    signal?.addEventListener('abort', drop, { once: true });
     try {
       const path = await this.mailboxOf(folder);
       if (!path) return null;
       const client = await this.connection();
+      if (dropped) throw signal?.reason ?? new Error('stopped');
       const lock = await client.getMailboxLock(path, { readOnly: true });
       try {
         return await fn(client);
@@ -292,12 +306,15 @@ export class MailClient {
         lock.release();
       }
     } catch (err) {
+      if (dropped) throw new Error('The mail server took too long to answer, so I stopped waiting.', { cause: err });
       throw new Error(describeMailError(err), { cause: err });
+    } finally {
+      signal?.removeEventListener('abort', drop);
     }
   }
 
   /** Newest first, across INBOX and Sent. */
-  async search(query: string, opts: { since?: Date; limit: number }): Promise<MessageSummary[]> {
+  async search(query: string, opts: { since?: Date; limit: number; signal?: AbortSignal }): Promise<MessageSummary[]> {
     const found: MessageSummary[] = [];
     for (const folder of FOLDERS) {
       await this.inFolder(folder, async (client) => {
@@ -315,7 +332,7 @@ export class MailClient {
         for await (const msg of client.fetch(newest.join(','), { uid: true, envelope: true, internalDate: true }, { uid: true })) {
           found.push(summaryOf(folder, msg));
         }
-      });
+      }, opts.signal);
     }
     return found.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)).slice(0, opts.limit);
   }
@@ -344,10 +361,10 @@ export class MailClient {
     return found.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
   }
 
-  async read(id: string): Promise<FullMessage | null> {
+  async read(id: string, signal?: AbortSignal): Promise<FullMessage | null> {
     const ref = parseMailId(id);
     if (!ref) return null;
-    return this.inFolder(ref.folder, (client) => readFull(client, ref.folder, ref.uid));
+    return this.inFolder(ref.folder, (client) => readFull(client, ref.folder, ref.uid), signal);
   }
 
   /**
@@ -369,24 +386,48 @@ export class MailClient {
     });
   }
 
-  /** The thread `id` belongs to: every message sharing its root, oldest first. */
-  async thread(id: string, limit = 20): Promise<FullMessage[]> {
-    const msg = await this.read(id);
-    if (!msg) return [];
+  /**
+   * The thread `id` belongs to: every message sharing its root, oldest first. On Gmail that is
+   * one search by its thread id (X-GM-THRID) per folder; elsewhere a header search for each
+   * Message-ID it names, which Gmail answers far too slowly to use.
+   */
+  async thread(id: string, opts: { limit?: number; signal?: AbortSignal } = {}): Promise<FullMessage[]> {
+    const { limit = 20, signal } = opts;
+    const ref = parseMailId(id);
+    if (!ref) return [];
+    const first = await this.inFolder(
+      ref.folder,
+      async (client) => {
+        const msg = await readFull(client, ref.folder, ref.uid);
+        if (!msg || !client.capabilities.has('X-GM-EXT-1')) return msg ? { msg, gmailThread: null } : null;
+        const t = await client.fetchOne(String(ref.uid), { uid: true, threadId: true }, { uid: true });
+        return { msg, gmailThread: (t && t.threadId) || null };
+      },
+      signal,
+    );
+    if (!first) return [];
+    const { msg, gmailThread } = first;
     const ids = new Set([...msg.references, msg.inReplyTo, msg.messageId].filter((x): x is string => !!x));
-    const members = new Map<string, string>(); // mail id -> folder:uid
+    const members = new Set<string>([msg.id]);
     for (const folder of FOLDERS) {
-      await this.inFolder(folder, async (client) => {
-        for (const mid of ids) {
-          const or = [{ header: { 'message-id': mid } }, { header: { references: mid } }, { header: { 'in-reply-to': mid } }];
-          const uids = (await client.search({ or }, { uid: true })) || [];
-          for (const uid of uids) members.set(mailId(folder, uid), mailId(folder, uid));
-        }
-      });
+      await this.inFolder(
+        folder,
+        async (client) => {
+          if (gmailThread) {
+            for (const uid of (await client.search({ threadId: gmailThread }, { uid: true })) || []) members.add(mailId(folder, uid));
+            return;
+          }
+          for (const mid of ids) {
+            const or = [{ header: { 'message-id': mid } }, { header: { references: mid } }, { header: { 'in-reply-to': mid } }];
+            for (const uid of (await client.search({ or }, { uid: true })) || []) members.add(mailId(folder, uid));
+          }
+        },
+        signal,
+      );
     }
-    const out: FullMessage[] = [];
-    for (const m of [...members.keys()].slice(0, limit)) {
-      const full = await this.read(m);
+    const out: FullMessage[] = [msg];
+    for (const m of [...members].filter((m) => m !== msg.id).slice(0, limit - 1)) {
+      const full = await this.read(m, signal);
       if (full) out.push(full);
     }
     return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));

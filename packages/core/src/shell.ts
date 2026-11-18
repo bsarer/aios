@@ -225,6 +225,7 @@ export class Shell {
       ...(this.o.chatWindow?.appsAt ? { appsAt: this.o.chatWindow.appsAt } : {}),
       ...(this.o.voice ? { voice: { maxSeconds: this.o.voice.maxSeconds } } : {}),
       ...(this.o.knowledge?.save ? { knowledge: true as const } : {}),
+      ...(this.o.signal ? { signal: true as const } : {}),
     };
   }
 

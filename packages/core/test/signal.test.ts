@@ -514,6 +514,9 @@ describe('Signal in the chat (SG1)', () => {
     off.subscribe((ev) => ev.type === 'item' && ev.item.kind === 'notice' && offSaid.push(ev.item.text));
     await off.handle({ type: 'send', text: '/signal' });
     expect(offSaid.at(-1)).toMatch(/Signal is off/);
+    // The status tells the screen Signal is linked, so the side rail shows its button before any message.
+    expect(shell.status().signal).toBe(true);
+    expect(off.status().signal).toBeUndefined();
   });
 
   it('the prompt tells the model it can never send', () => {

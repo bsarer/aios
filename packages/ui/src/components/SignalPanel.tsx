@@ -26,7 +26,7 @@ import {
 const SOLID = { background: 'color-mix(in srgb, var(--bg) 95%, var(--fg))' } as const;
 
 export interface Signals {
-  /** False until a Signal message has come in on this screen: the rail shows no button. */
+  /** True when Signal is linked (from core's status) or a Signal message is in this chat: the rail shows its button. */
   shown: boolean;
   chats: SignalChatRow[];
   fresh: number;
@@ -37,7 +37,7 @@ export interface Signals {
   dismissPeek: () => void;
 }
 
-export function useSignals(items: ChatItem[], quietUntil: number): Signals {
+export function useSignals(items: ChatItem[], quietUntil: number, linked = false): Signals {
   const [openedAt] = useState(() => Date.now());
   const [now, setNow] = useState(openedAt);
   const [seenAt, setSeenAt] = useState(() => loadSignalSeenAt(openedAt));
@@ -52,7 +52,7 @@ export function useSignals(items: ChatItem[], quietUntil: number): Signals {
   }, []);
 
   const chats = useMemo(() => signalChats(items, Math.max(now, Date.now())), [items, now]);
-  const shown = useMemo(() => hasSignal(items), [items]);
+  const shown = useMemo(() => linked || hasSignal(items), [items, linked]);
   const { fresh } = signalCounts(chats, seenAt);
 
   const setOpen = useCallback(

@@ -454,6 +454,8 @@ export const Status = z.strictObject({
   voice: z.strictObject({ maxSeconds: z.int().positive() }).optional(),
   /** K4: the knowledge base is on, so replies show Save to knowledge base. */
   knowledge: z.literal(true).optional(),
+  /** SG1: Signal is linked, so the side rail shows its Signal button even before a message comes in. */
+  signal: z.literal(true).optional(),
 });
 export type Status = z.infer<typeof Status>;
 

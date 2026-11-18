@@ -25,6 +25,31 @@ export const MailRow = z.strictObject({
 });
 export type MailRow = z.infer<typeof MailRow>;
 
+/** A Signal chat: "+905551234567", "u:<uuid>" (no number shared) or "g:<group id>". Checked by code before it is shown or sent back. */
+export const SIGNAL_CHAT_ID = /^(\+[1-9]\d{6,14}|u:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|g:[A-Za-z0-9+/_-]{8,120}={0,2})$/i;
+
+/**
+ * SG1: one new Signal message in a notification, for the side rail. name, sender and text are
+ * chosen by whoever wrote them: show as plain text only. The chat id is checked by code, and is
+ * the only part a button sends back ("Read my Signal chat <id>").
+ */
+export const SignalRow = z.strictObject({
+  /** The chat, the sender and signal-cli's timestamp: one per message. */
+  id: z.string().max(400),
+  chat: z.string().regex(SIGNAL_CHAT_ID),
+  kind: z.enum(['person', 'group']),
+  /** The person's or group's name, one short line. */
+  name: z.string().max(80),
+  /** Who wrote it, in a group; empty for a person's own chat. */
+  sender: z.string().max(80),
+  /** The start of the message, one line. */
+  text: z.string().max(300),
+  attachments: z.int().min(0),
+  /** When it was sent, ms. */
+  date: z.number(),
+});
+export type SignalRow = z.infer<typeof SignalRow>;
+
 /** L1: one file the morning review suggests removing. Names come from anywhere: plain text only. */
 export const CleanupFile = z.strictObject({
   n: z.int().min(1),
@@ -127,10 +152,12 @@ export const ChatItem = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('notification'),
     id: z.string(),
-    /** Written by code, never by a model; mail-derived text only appears in `mails`. */
+    /** Written by code, never by a model; mail-derived text only appears in `mails`, Signal text only in `signals`. */
     text: z.string(),
     at: z.number(),
     mails: z.array(MailRow).optional(),
+    /** SG1: new Signal messages, shown in the side rail beside the inbox. */
+    signals: z.array(SignalRow).optional(),
     /** Mail held a while (away, quiet hours, the hourly limit): the chat shows one line for it. */
     catchUp: z.boolean().optional(),
     /** Posted in quiet hours or over `[notifications] maxPerHour` (off unless set): shown in the inbox, never peeks out. */

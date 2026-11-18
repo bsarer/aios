@@ -16,6 +16,7 @@ import {
   saveSeenAt,
   senderName,
 } from '../inbox';
+import { SignalPanel, SignalPeek, SignalRailButton, type Signals } from './SignalPanel';
 
 /**
  * Calm mail alerts. New mail waits on the right edge instead of landing in the chat:
@@ -121,12 +122,28 @@ interface RailProps {
   disabled: boolean;
   onSend: (text: string) => void;
   onIgnoreMail: (itemId: string, mailId: string) => void;
+  /** SG1: Signal's button and panel, once a Signal message has come in. */
+  signals?: Signals;
 }
 
-export function MailRail({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
-  const { fresh, urgent, open, setOpen, quietUntil, toggleQuiet, peek } = inbox;
+export function MailRail({ inbox, disabled, onSend, onIgnoreMail, signals }: RailProps) {
+  const { fresh, urgent, open: mailOpen, setOpen: setMailOpen, quietUntil, toggleQuiet, peek } = inbox;
+  const signalOpen = signals?.open ?? false;
+  const open = mailOpen || signalOpen;
+  // One panel at a time: opening one closes the other.
+  const setOpen = useCallback(
+    (v: boolean) => {
+      if (!v) signals?.setOpen(false);
+      setMailOpen(v);
+    },
+    [signals, setMailOpen],
+  );
+  const openSignal = (v: boolean) => {
+    if (v) setMailOpen(false);
+    signals?.setOpen(v);
+  };
   const quiet = quietUntil > 0;
-  const hot = urgent > 0 && !open;
+  const hot = urgent > 0 && !mailOpen;
   const label = fresh ? `Inbox: ${fresh} new${urgent ? `, ${urgent} urgent` : ''}` : 'Inbox';
 
   useEffect(() => {
@@ -146,13 +163,13 @@ export function MailRail({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
           data-testid="rail-mail"
           data-fresh={fresh}
           aria-label={label}
-          aria-expanded={open}
+          aria-expanded={mailOpen}
           title={`${label} (Esc closes it)`}
-          onClick={() => setOpen(!open)}
+          onClick={() => setOpen(!mailOpen)}
           className="relative flex h-10 w-10 items-center justify-center rounded-full transition-colors"
           style={{
-            color: hot ? 'var(--warning)' : fresh || open ? 'var(--fg)' : 'var(--muted)',
-            background: hot ? 'color-mix(in srgb, var(--warning) 16%, transparent)' : fresh || open ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+            color: hot ? 'var(--warning)' : fresh || mailOpen ? 'var(--fg)' : 'var(--muted)',
+            background: hot ? 'color-mix(in srgb, var(--warning) 16%, transparent)' : fresh || mailOpen ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
             boxShadow: hot ? '0 0 0 1px color-mix(in srgb, var(--warning) 45%, transparent), 0 0 18px color-mix(in srgb, var(--warning) 30%, transparent)' : undefined,
           }}
         >
@@ -167,13 +184,14 @@ export function MailRail({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
             </span>
           )}
         </button>
+        {signals?.shown && <SignalRailButton signals={signals} quiet={quiet} onToggle={() => openSignal(!signalOpen)} />}
         <span className="h-px w-5" style={{ background: 'var(--border)' }} />
         <button
           type="button"
           data-testid="rail-quiet"
           aria-pressed={quiet}
           aria-label={quiet ? `Quiet until ${clock(quietUntil)}. Click to end it.` : 'Quiet for 1 hour'}
-          title={quiet ? `Quiet until ${clock(quietUntil)}: urgent mail waits here without peeking out. Click to end it.` : 'Quiet for 1 hour: urgent mail waits here without peeking out.'}
+          title={quiet ? `Quiet until ${clock(quietUntil)}: urgent mail${signals?.shown ? ' and Signal messages wait' : ' waits'} here without peeking out. Click to end it.` : `Quiet for 1 hour: urgent mail${signals?.shown ? ' and Signal messages wait' : ' waits'} here without peeking out.`}
           onClick={toggleQuiet}
           className="flex h-10 w-10 items-center justify-center rounded-full"
           style={{ color: quiet ? 'var(--fg)' : 'var(--muted)', background: quiet ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent' }}
@@ -209,7 +227,11 @@ export function MailRail({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
         </div>
       )}
 
-      {open && <InboxPanel inbox={inbox} disabled={disabled} onSend={onSend} onIgnoreMail={onIgnoreMail} />}
+      {/* A mail peek goes first; a Signal peek waits until it is gone. */}
+      {signals && !peek && !open && <SignalPeek signals={signals} onOpen={() => openSignal(true)} />}
+
+      {mailOpen && <InboxPanel inbox={inbox} disabled={disabled} onSend={onSend} onIgnoreMail={onIgnoreMail} />}
+      {signals && signalOpen && <SignalPanel signals={signals} disabled={disabled} onSend={onSend} />}
     </>
   );
 }

@@ -305,7 +305,7 @@ async function main(): Promise<void> {
       timeZone: config.user.timezone,
       quietHours: config.notifications.quietHours,
       isPaused,
-      notice: (text) => shell?.agent.notice('info', text),
+      post: (item) => shell?.agent.post(item),
       desktop: (title, body) => desktopNotify(title, body),
     });
     const actions = new SignalActions({ store, rpc: service.rpc, inbox, audit, show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)) });

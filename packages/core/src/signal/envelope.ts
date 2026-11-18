@@ -9,7 +9,7 @@
  * text is only ever shown to a model sanitized inside <untrusted source="signal"> (tools.ts).
  * Chat ids are checked here, so only plain numbers, uuids and base64 group ids get through.
  */
-import { SIGNAL_NUMBER } from '@aios/shared';
+import { SIGNAL_CHAT_ID, SIGNAL_NUMBER } from '@aios/shared';
 import { z } from 'zod';
 
 export const SIGNAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,7 +17,7 @@ const GROUP_ID = /^[A-Za-z0-9+/_-]{8,120}={0,2}$/;
 
 /** A chat: "+905551234567", "u:<uuid>" (no number shared) or "g:<group id>". */
 export type ChatId = string;
-export const CHAT_ID = /^(\+[1-9]\d{6,14}|u:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|g:[A-Za-z0-9+/_-]{8,120}={0,2})$/i;
+export const CHAT_ID = SIGNAL_CHAT_ID;
 
 export function personChat(number: string | null | undefined, uuid: string | null | undefined): ChatId | null {
   if (number && SIGNAL_NUMBER.test(number)) return number;

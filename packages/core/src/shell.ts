@@ -167,11 +167,40 @@ export class Shell {
 
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
-    l({ type: 'hello', userName: this.o.userName, items: this.o.store.recentItems(), status: this.status(), theme: this.theme, ...(this.o.widgets ? { widgets: this.o.widgets.current() } : {}) });
+    l(this.hello());
     void this.o.widgets?.refresh();
     // T2: a chat window opening counts as AI OS being in use.
     this.briefIfDue();
     return () => this.listeners.delete(l);
+  }
+
+  private hello(): ServerEvent {
+    const clearedAt = this.o.store.clearedAt;
+    return {
+      type: 'hello',
+      userName: this.o.userName,
+      items: this.o.store.recentItems(),
+      status: this.status(),
+      theme: this.theme,
+      ...(this.o.widgets ? { widgets: this.o.widgets.current() } : {}),
+      ...(clearedAt === null ? {} : { clearedAt }),
+    };
+  }
+
+  /**
+   * Clear: the user's own click or /clear. Every open chat starts again with the greeting, and the
+   * model's context starts after it. Nothing is deleted. Works while paused; not mid-reply.
+   */
+  private clearChat(via: 'click' | 'command'): void {
+    if (this.running) {
+      this.agent.notice('info', 'Still working on the last request. Press Esc to stop it, then Clear.');
+      return;
+    }
+    this.o.store.clearChat(this.clock().getTime());
+    this.o.audit.append({ kind: 'chat', event: 'clear', via });
+    const hello = this.hello();
+    this.broadcast(hello);
+    this.greet();
   }
 
   /** T2: posts today's brief if it is due; never in the way of anything else. */
@@ -277,6 +306,8 @@ export class Shell {
     if (msg.type === 'update_start') return this.startUpdate(msg.id);
     // The user's own click on the gear; it runs only the fixed `astra settings`. Works while paused.
     if (msg.type === 'settings_open') return this.openSettings('click');
+    // The user's own click on Clear. Works while paused; there is no tool for it.
+    if (msg.type === 'chat_clear') return this.clearChat('click');
     // K4: the user's own click on Save to knowledge base. Works while paused; there is no tool for it.
     if (msg.type === 'knowledge_save') return this.saveToKnowledge(msg.id);
     const cmd = parseCommand(msg.text);
@@ -676,6 +707,8 @@ export class Shell {
       }
       case 'settings':
         return this.openSettings('command');
+      case 'clear':
+        return this.clearChat('command');
       case 'feedback': {
         const f = this.o.feedback;
         if (!f) return say('Feedback is off here.');

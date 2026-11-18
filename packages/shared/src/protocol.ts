@@ -540,6 +540,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('update_start'), id: z.string().max(100) }),
   /** The gear in the status strip: opens the setup window on the current settings, nothing else. */
   z.strictObject({ type: z.literal('settings_open') }),
+  /** The chat's Clear button: the screen and the model's context start again. Same as typing /clear. */
+  z.strictObject({ type: z.literal('chat_clear') }),
   /** K4: Save to knowledge base on an assistant reply; names the reply, never its text. */
   z.strictObject({ type: z.literal('knowledge_save'), id: z.string().max(100) }),
   z.strictObject({
@@ -555,7 +557,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional() }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
@@ -574,14 +576,16 @@ export interface ChatState {
   theme: Theme;
   /** W1: null until the server says (or when widgets are off). */
   widgets: Widgets | null;
+  /** When the chat was last cleared: mail notifications from before it feed the inbox only. */
+  clearedAt: number | null;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':

@@ -14,6 +14,7 @@ export type Command =
   | { name: 'doctor' }
   | { name: 'update' }
   | { name: 'settings' }
+  | { name: 'clear' }
   | { name: 'brief' }
   | { name: 'play'; text: string }
   | { name: 'music'; text: string }
@@ -61,6 +62,9 @@ export function parseCommand(text: string): Command | null {
     case 'settings':
     case 'setup':
       return { name: 'settings' };
+    case 'clear':
+    case 'new':
+      return { name: 'clear' };
     case 'brief':
       return { name: 'brief' };
     case 'play':
@@ -118,6 +122,7 @@ export const HELP_TEXT = [
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
   '/settings  open the settings window (the gear at the top does the same); /tone and /pin change tone and tiles here',
   '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',
+  '/clear   clear the chat and start a new conversation (the Clear button at the top does the same; /new too)',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Up and Down bring back what you sent, Esc stops a reply.',
 ].join('\n');

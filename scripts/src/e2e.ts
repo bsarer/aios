@@ -1186,6 +1186,20 @@ async function main(): Promise<void> {
     await page.getByTestId('settings').click();
     check('the gear answers in the chat', await waitFor(async () => /settings/i.test(await lastNotice())), await lastNotice());
 
+    // Clear (the status strip's button, /clear): the chat starts again with the greeting and starters,
+    // stays cleared after a reload, and the button hides until there is something to clear.
+    check('the Clear button is in the status strip', (await page.getByTestId('clear-chat').count()) === 1);
+    await shot(page, 'clear-before');
+    await page.getByTestId('clear-chat').click();
+    check('Clear leaves only the greeting and the starters', await waitFor(async () => (await page.locator('[data-kind="user"]').count()) === 0 && (await page.getByTestId('starters').count()) === 1 && /(Hello|Morning|Afternoon|Evening), John/.test(await chat.innerText())));
+    check('the Clear button hides on a fresh chat', (await page.getByTestId('clear-chat').count()) === 0);
+    await shot(page, 'clear-after');
+    await page.reload();
+    check('the chat stays cleared after a reload', await waitFor(async () => (await page.getByTestId('starters').count()) === 1) && (await page.locator('[data-kind="user"]').count()) === 0 && !(await chat.innerText()).includes('token by token'));
+    await input.fill('what time is it?');
+    await input.press('Enter');
+    check('the Clear button comes back once you write', await waitFor(async () => (await page.getByTestId('clear-chat').count()) === 1));
+
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();
     await sleep(2000);

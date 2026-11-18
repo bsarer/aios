@@ -85,6 +85,12 @@ const PATHS = {
   cross: <path d="M6 6l12 12M18 6 6 18" />,
   arrowUp: <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />,
   chat: <path d="M4 5h16v11H9l-5 4z" />,
+  erase: (
+    <>
+      <path d="m7 20-3.3-3.3a1.5 1.5 0 0 1 0-2.1L13.6 4.7a1.5 1.5 0 0 1 2.1 0l4.6 4.6a1.5 1.5 0 0 1 0 2.1L11.7 20z" />
+      <path d="M8.5 9.8 15.2 16.5M7 20h13" />
+    </>
+  ),
   download: <path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" />,
   mic: (
     <>

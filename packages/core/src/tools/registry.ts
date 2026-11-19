@@ -95,6 +95,10 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal, why: () => strin
 const UNTRUSTED_REFUSAL =
   'Error: this cannot run while text from an email or another outside source is in the conversation. Ask the user to request it in a new message of their own.';
 
+/** What the model gets back for a call it already made in this reply. */
+export const REPEAT_NOTE =
+  'You already made this exact call earlier in this reply; its result is above and has not changed. Do not call it again. Answer the user now with what you have, and if it does not answer the question, say plainly what you could not find.';
+
 /**
  * Executes tool calls with argument validation, risk-tier enforcement, a timeout and an
  * audit entry for every call. Only registered tools are offered to the model.
@@ -133,12 +137,26 @@ export class ToolRegistry {
     return this.tools.has(name);
   }
 
+  /** The tool's risk tier, or undefined for a name that isn't registered. */
+  tier(name: string): ToolDefinition['tier'] | undefined {
+    return this.tools.get(name)?.def.tier;
+  }
+
   returnsUntrusted(name: string): boolean {
     return this.tools.get(name)?.untrustedOutput === true;
   }
 
   label(name: string): string {
     return this.tools.get(name)?.label ?? `Running ${name}…`;
+  }
+
+  /**
+   * The model asked for exactly the same call again in one reply (same tool, same arguments).
+   * It is not run again; the model is told to answer with what it has. Audited like any call.
+   */
+  skipRepeat(call: ToolCall): ToolOutcome {
+    this.audit.append({ kind: 'tool', tool: call.name, tier: this.tools.get(call.name)?.def.tier ?? 'unknown', callId: call.id, decision: 'skipped', reason: 'repeat of an earlier call in this reply' });
+    return { ok: true, content: REPEAT_NOTE, label: this.label(call.name) };
   }
 
   async execute(call: ToolCall, ctx: ToolContext): Promise<ToolOutcome> {

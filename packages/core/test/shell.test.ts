@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatItem, ServerEvent } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
-import { MAX_ITERATIONS } from '../src/agent.js';
+import { z } from 'zod';
+import { MAX_ITERATIONS, callKey } from '../src/agent.js';
 import { AuditLog, redact } from '../src/audit.js';
 import { parseCommand } from '../src/commands.js';
 import { type Delta, ModelError, type ModelRequest, type ModelResult, type ToolCall } from '../src/model.js';
@@ -83,6 +84,18 @@ function setup(turns: Turn[] = [], extra: Partial<ShellOptions> = {}) {
   return { shell, store, model, events, items, audits };
 }
 
+/** A read-tier look-up and a device-tier change, for the repeat guard. */
+const lookupTool = () => ({
+  def: { name: 'lookup', tier: 'read' as const, description: 'look', input: z.strictObject({ timezone: z.string().optional() }) },
+  label: 'Looking…',
+  handler: async () => 'looked up',
+});
+const changeTool = () => ({
+  def: { name: 'change', tier: 'device' as const, description: 'change', input: z.strictObject({}) },
+  label: 'Changing…',
+  handler: async () => 'changed',
+});
+
 const kinds = (items: ChatItem[]) => items.map((i) => (i.kind === 'tool' ? `tool:${i.state}` : i.kind));
 
 describe('agent loop', () => {
@@ -120,12 +133,60 @@ describe('agent loop', () => {
     ]);
   });
 
-  it('stops after the iteration limit', async () => {
-    const loop = Array.from({ length: MAX_ITERATIONS + 1 }, (_, i) => ({ toolCalls: [{ id: `c${i}`, name: 'now', arguments: '{}' }] }));
-    const { shell, items, model } = setup(loop);
+  it('stops after the iteration limit, and asks for an answer on the last round', async () => {
+    // Different arguments each round, so the repeat guard doesn't step in.
+    const loop = Array.from({ length: MAX_ITERATIONS + 1 }, (_, i) => ({ toolCalls: [{ id: `c${i}`, name: 'now', arguments: `{"timezone":"Zone/${i}"}` }] }));
+    const { shell, items, model } = setup(loop, { tools: new ToolRegistry(new AuditLog(join(mkdtempSync(join(tmpdir(), 'aios-')), 'a.jsonl'))).register(lookupTool()) });
     await shell.handle({ type: 'send', text: 'loop' });
     expect(model.requests).toHaveLength(MAX_ITERATIONS);
+    expect(model.requests.slice(0, -1).map((r) => r.toolChoice)).toEqual(Array(MAX_ITERATIONS - 1).fill('auto'));
+    expect(model.requests.at(-1)!.toolChoice).toBe('none');
     expect(items().at(-1)).toMatchObject({ kind: 'notice', level: 'warning' });
+  });
+
+  // The "do I have any appointments tomorrow?" loop: the same look-ups again and again.
+  it('does not run the same call twice in one reply, and makes the model answer', async () => {
+    const { shell, items, model, audits } = setup([
+      { toolCalls: [{ id: 'c1', name: 'now', arguments: '{}' }] },
+      { toolCalls: [{ id: 'c2', name: 'now', arguments: ' {} ' }] },
+      { text: ['It is 09:14.'] },
+    ]);
+    await shell.handle({ type: 'send', text: 'what time is it' });
+    // One step shown, then the answer; the repeat isn't shown as a step.
+    expect(kinds(items())).toEqual(['user', 'tool:done', 'assistant']);
+    expect(model.requests.map((r) => r.toolChoice)).toEqual(['auto', 'auto', 'none']);
+    const fed = model.requests[2]!.messages.at(-1) as { role: string; toolCallId: string; content: string };
+    expect(fed).toMatchObject({ role: 'tool', toolCallId: 'c2' });
+    expect(fed.content).toContain('already made this exact call');
+    // Still audited, as skipped.
+    expect(audits().filter((a) => a.kind === 'tool').map((a) => [a.tool, a.decision])).toEqual([
+      ['now', 'allowed'],
+      ['now', 'skipped'],
+    ]);
+  });
+
+  it('counts arguments in any order as the same call, but other arguments as a new one', () => {
+    expect(callKey('mail_search', '{"query":"dentist","limit":5}')).toBe(callKey('mail_search', '{"limit":5,"query":" dentist "}'));
+    expect(callKey('mail_search', '{"query":"dentist"}')).not.toBe(callKey('mail_search', '{"query":"doctor"}'));
+    expect(callKey('knowledge_read', '')).toBe(callKey('knowledge_read', '{}'));
+    expect(callKey('x', 'not json')).toBe('x not json');
+  });
+
+  it('runs a look-up again after a change in the same reply', async () => {
+    const audit = new AuditLog(join(mkdtempSync(join(tmpdir(), 'aios-')), 'a.jsonl'));
+    const tools = new ToolRegistry(audit).register(lookupTool()).register(changeTool());
+    const { shell, model } = setup(
+      [
+        { toolCalls: [{ id: 'c1', name: 'lookup', arguments: '{}' }] },
+        { toolCalls: [{ id: 'c2', name: 'change', arguments: '{}' }] },
+        { toolCalls: [{ id: 'c3', name: 'lookup', arguments: '{}' }] },
+        { text: ['Done.'] },
+      ],
+      { tools },
+    );
+    await shell.handle({ type: 'send', text: 'add it and show me' });
+    expect(model.requests.map((r) => r.toolChoice)).toEqual(['auto', 'auto', 'auto', 'auto']);
+    expect((model.requests[3]!.messages.at(-1) as { content: string }).content).toBe('looked up');
   });
 
   it('Esc stops generation mid-stream and keeps the partial text', async () => {

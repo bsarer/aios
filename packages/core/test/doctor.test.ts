@@ -34,6 +34,8 @@ smtp = { host = "127.0.0.1", port = 3025, tls = false }
 enabled = false
 [docs]
 enabled = false
+[calendar]
+clientId = "1234-abc.apps.googleusercontent.com"
 `;
 const UNIT = `[Service]\nWorkingDirectory=/home/john/.local/share/aios/app/packages/core\nExecStart=/usr/bin/node --import tsx src/main.ts\n`;
 
@@ -56,7 +58,7 @@ function healthy() {
     ['systemctl --user show-environment', { code: 0, stdout: 'HOME=/home/john\nWAYLAND_DISPLAY=wayland-1\nHYPRLAND_INSTANCE_SIGNATURE=abc\n' }],
     ['secret-tool', { code: 2, stdout: '' }],
   ]);
-  const secrets = new Set(['keyring:mail', 'keyring:model-chat']);
+  const secrets = new Set(['keyring:mail', 'keyring:model-chat', 'keyring:calendar-google']);
   const asked: string[] = [];
   let up = true;
   const probes: DoctorProbes = {
@@ -81,8 +83,19 @@ describe('doctor', () => {
     const h = healthy();
     const checks = await runDoctor(h.probes);
     expect(checks.filter((c) => c.status !== 'ok')).toEqual([]);
-    expect(checks.map((c) => c.name)).toEqual(['Config', 'Service', 'Service paths', 'Chat page', 'Kiosk', 'Desktop session', 'Omarchy commands', 'Top bar button', 'Keyring']);
-    expect(h.asked.sort()).toEqual(['keyring:mail', 'keyring:model-chat']);
+    expect(checks.map((c) => c.name)).toEqual(['Config', 'Service', 'Service paths', 'Chat page', 'Kiosk', 'Desktop session', 'Omarchy commands', 'Top bar button', 'Keyring', 'Calendar']);
+    expect([...new Set(h.asked)].sort()).toEqual(['keyring:calendar-google', 'keyring:mail', 'keyring:model-chat']);
+  });
+
+  // C1: the appointments loop came from an install with no [calendar].
+  it('says when no calendar is connected, or it is not signed in, and where to fix it', async () => {
+    const h = healthy();
+    h.files.set(join(HOME, '.config', 'astra', 'config.toml'), CONFIG.replace(/\[calendar\][^\n]*\n[^\n]*\n/, ''));
+    expect((await byName(h.probes)).Calendar).toMatchObject({ status: 'warn', detail: expect.stringContaining('no calendar connected'), fix: expect.stringContaining('astra settings') });
+    const g = healthy();
+    g.secrets.delete('keyring:calendar-google');
+    const checks = await byName(g.probes);
+    expect(checks.Calendar).toMatchObject({ status: 'warn', fix: 'run `astra calendar-login`' });
   });
 
   it('finds what an Omarchy update can break, each with a fix', async () => {

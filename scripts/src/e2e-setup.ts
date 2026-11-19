@@ -149,6 +149,12 @@ async function main(): Promise<void> {
 
     check((await heading(page))?.includes('calendar'), 'the calendar step');
     check((await page.textContent('#next')) === 'Skip for now', 'the calendar can be skipped');
+    await page.fill('#cal-id', 'not-a-client-id');
+    check((await page.textContent('#next')) === 'Next', 'typing a Client ID connects a calendar');
+    await page.click('#next');
+    check(((await page.textContent('#err')) ?? '').includes('Client ID') && (await heading(page))?.includes('calendar'), 'a wrong Client ID is caught on the page');
+    await page.fill('#cal-id', '');
+    check((await page.textContent('#next')) === 'Skip for now', 'clearing it skips the calendar again');
     await next(page);
     check((await page.isChecked('[id="f-~/Documents"]')) && !(await page.isChecked('[id="f-~/Projects"]')), 'usual folders start ticked');
     await page.check('[id="f-~/Projects"]');

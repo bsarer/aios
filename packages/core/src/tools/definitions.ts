@@ -101,7 +101,7 @@ export const ALPHA_TOOLS = [
     name: 'knowledge_read',
     tier: 'read',
     description:
-      "The knowledge base about the user: notes on people, work, commitments, upcoming events, interests and recent activity, written in the background from their mail, calendar, files and chat. Notes from outside text, not confirmed facts.",
+      "The knowledge base about the user: notes on people, work, commitments, interests and recent activity, written in the background from their mail, calendar, files and chat. Notes from outside text, not confirmed facts. Not a calendar: it can't say what is on a given day.",
     input: z.strictObject({}),
   }),
   def({

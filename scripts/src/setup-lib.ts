@@ -12,8 +12,9 @@ export interface Prompter {
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
 export const modelKeyRef = (role: CloudModelRole): SecretRef => `keyring:model-${role}`;
-export const CALENDAR_SECRET_REF: SecretRef = 'keyring:calendar-client-secret';
-export const CALENDAR_TOKEN_REF: SecretRef = 'keyring:calendar-google';
+// C1: shared with the setup window's Calendar step.
+export { CALENDAR_SECRET_REF, CALENDAR_TOKEN_REF } from './onboard/answers.js';
+import { CALENDAR_SECRET_REF, CALENDAR_TOKEN_REF } from './onboard/answers.js';
 
 /** Every keyring reference a config points at, deduplicated. */
 export interface CollectedSetup {

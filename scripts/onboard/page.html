@@ -98,7 +98,8 @@
   let step = 0, seen = 0, S = null, editing = false;
   const A = { name: '', timezone: '', ai: { provider: 'openrouter', baseUrl: '', model: '', key: '' }, local: null,
     mail: { address: '', password: '', imap: { host: '', port: 993 }, smtp: { host: '', port: 465 } },
-    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '', signal: { enabled: false } };
+    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '', signal: { enabled: false },
+    calendar: { use: 'keep', clientId: '', clientSecret: '' } };
   const T = { ai: null, mail: null, mailProvider: undefined, finished: null, addons: null, pick: new Set(), signal: null, signalPoll: null };
 
   function okToLeave() {
@@ -115,6 +116,7 @@
       if (editing && !A.mail.password && S.existing.mail.address.toLowerCase() === A.mail.address.toLowerCase()) return '';
       return 'Press Test sign-in first.';
     }
+    if (s === 'calendar') return A.calendar.use === 'new' && !/^[A-Za-z0-9._-]{1,200}\.apps\.googleusercontent\.com$/.test(A.calendar.clientId.trim()) ? 'Paste the whole Client ID, ending in .apps.googleusercontent.com, or clear it to skip.' : '';
     if (s === 'signal') return A.signal.enabled && !signalNumber() ? 'Link your phone first, or untick Signal.' : '';
     if (s === 'folders') return A.folders.length ? '' : 'Tick at least one folder.';
     return '';
@@ -228,12 +230,30 @@
         result(T.mail),
       ];
     },
-    calendar: () => [
-      el('h1', { text: 'Connect your calendar' }),
-      el('p', { class: 'lead', text: 'Astra can tell you what’s on and find free time. Changes, like moving a meeting, wait for your click on a card.' }),
-      el('div', { class: 'note' }, S.existing && S.existing.calendar ? 'Your Google Calendar is already connected.' : 'One-click Sign in with Google is coming next. For now, press Next and connect it after setup with: ', S.existing && S.existing.calendar ? null : el('code', { text: 'astra calendar-login' })),
-      el('p', { class: 'hint', text: 'Not using Google Calendar? Astra works without one.' }),
-    ],
+    // C1: keep or remove the calendar Astra has, use the one AI OS had on this computer, or
+    // connect one with your own Google OAuth client. Google's sign-in opens on Start Astra or Save.
+    calendar: () => {
+      const has = !!(S.existing && S.existing.calendar);
+      const newId = (e) => { A.calendar.clientId = e.target.value; A.calendar.use = A.calendar.clientId.trim() ? 'new' : 'keep'; nextLabel(); };
+      const fresh = () => [
+        el('div', { class: 'note' }, 'Make an OAuth client of type “Desktop app” in your own Google Cloud project, with the Google Calendar API turned on (the README’s Calendar section shows each click). Then paste its Client ID and secret here.'),
+        ...field('Client ID', el('input', { id: 'cal-id', type: 'text', autocomplete: 'off', placeholder: '1234-abc.apps.googleusercontent.com', value: A.calendar.clientId, oninput: newId })),
+        ...field('Client secret', el('input', { id: 'cal-secret', type: 'password', autocomplete: 'off', value: A.calendar.clientSecret, oninput: (e) => { A.calendar.clientSecret = e.target.value; } }), 'It goes to the keyring, never into the settings file.'),
+        el('p', { class: 'hint', text: 'When you press ' + (editing ? 'Save' : 'Start Astra') + ', Google’s sign-in page opens in your browser. Allow access and come back here.' }),
+      ];
+      return [
+        el('h1', { text: 'Connect your calendar' }),
+        el('p', { class: 'lead', text: 'Astra can tell you what’s on and find free time. Changes, like moving a meeting, wait for your click on a card.' }),
+        has ? el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'cal-on', checked: A.calendar.use !== 'off', onchange: (e) => { A.calendar.use = e.target.checked ? 'keep' : 'off'; render(); } }),
+          el('div', {}, el('label', { for: 'cal-on', class: 'flat' }, 'Google Calendar', el('span', { class: 'badge', text: 'Connected' })), el('span', { text: 'Untick to disconnect it from Astra. To sign in to Google again, run astra calendar-login.' }))) : null,
+        !has && S.oldCalendar ? el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'cal-old', checked: A.calendar.use === 'old', onchange: (e) => { A.calendar.use = e.target.checked ? 'old' : 'keep'; A.calendar.clientId = ''; render(); } }),
+          el('div', {}, el('label', { for: 'cal-old', class: 'flat', text: 'Use the Google Calendar you connected in AI OS' }), el('span', { text: 'Astra copies its settings and sign-in from AI OS on this computer. If that sign-in has run out, Google’s sign-in page opens.' }))) : null,
+        !has && A.calendar.use !== 'old' ? fresh() : null,
+        el('p', { class: 'hint', text: 'Not using Google Calendar? Astra works without one.' }),
+      ];
+    },
     signal: () => {
       const number = signalNumber();
       const waiting = T.signal && T.signal.state === 'waiting';
@@ -352,13 +372,21 @@
           el('li', { text: `AI: ${(S.presets.find((p) => p.id === A.ai.provider) || { label: 'your provider' }).label}, ${A.ai.model}${A.local ? `, and ${A.local} on this computer` : ''}.` }),
           el('li', { text: `Mail: ${A.mail.address}.` }),
           el('li', { text: `Folders: ${A.folders.join(', ')}.` }),
-          A.signal.enabled && signalNumber() ? el('li', { text: `Signal: ${signalNumber()}.` }) : null),
+          A.signal.enabled && signalNumber() ? el('li', { text: `Signal: ${signalNumber()}.` }) : null,
+          A.calendar.use === 'old' || A.calendar.use === 'new' ? el('li', { text: A.calendar.use === 'old' ? 'Calendar: the Google Calendar from AI OS.' : 'Calendar: Google Calendar (sign in when the page opens).' }) : null,
+          A.calendar.use === 'off' ? el('li', { text: 'Calendar: disconnected.' }) : null),
         T.finished && !T.finished.ok ? result(T.finished) : null,
       ];
     },
   };
 
   function num(s) { return { host: String(s.host).trim(), port: Number.parseInt(String(s.port), 10) }; }
+
+  function nextLabel() {
+    const s = STEPS[step][0];
+    const calendarSkip = s === 'calendar' && A.calendar.use === 'keep' && !(S.existing && S.existing.calendar);
+    $('#next').textContent = calendarSkip || (s === 'signal' && !signalNumber()) ? 'Skip for now' : 'Next';
+  }
 
   function render() {
     rail();
@@ -368,15 +396,17 @@
     $('#back').hidden = step === 0 || (last && T.finished && T.finished.ok);
     const next = $('#next');
     next.disabled = false;
-    if (!last) { next.textContent = STEPS[step][0] === 'calendar' || (STEPS[step][0] === 'signal' && !signalNumber()) ? 'Skip for now' : 'Next'; next.onclick = () => go(step + 1); return; }
+    if (!last) { nextLabel(); next.onclick = () => go(step + 1); return; }
     if (T.finished && T.finished.ok) { next.textContent = 'Open Astra'; next.onclick = async () => { next.disabled = true; await call('open', {}); next.textContent = 'Opening…'; }; return; }
     next.textContent = editing ? 'Save' : 'Start Astra';
     next.onclick = async () => {
       next.disabled = true; next.textContent = 'Setting up…';
       const body = { ...A, ai: { provider: A.ai.provider, model: A.ai.model, key: A.ai.key, ...(A.ai.provider === 'other' ? { baseUrl: A.ai.baseUrl } : {}) },
-        mail: { address: A.mail.address, password: A.mail.password, ...(T.mailProvider === null ? { imap: num(A.mail.imap), smtp: num(A.mail.smtp) } : {}) } };
+        mail: { address: A.mail.address, password: A.mail.password, ...(T.mailProvider === null ? { imap: num(A.mail.imap), smtp: num(A.mail.smtp) } : {}) },
+        calendar: A.calendar.use === 'new' ? { use: 'new', clientId: A.calendar.clientId.trim(), clientSecret: A.calendar.clientSecret } : { use: A.calendar.use } };
+      if (A.calendar.use === 'new') next.textContent = 'Signing in to Google…';
       T.finished = await call('finish', body);
-      if (T.finished.ok) { A.ai.key = ''; A.mail.password = ''; }
+      if (T.finished.ok) { A.ai.key = ''; A.mail.password = ''; A.calendar.clientSecret = ''; }
       else if (T.finished.step) { const i = STEPS.findIndex(([id]) => id === T.finished.step); if (i >= 0) { step = i; $('#err').textContent = T.finished.message; } }
       render();
     };
@@ -416,6 +446,7 @@
     if (e) for (const f of e.folders) if (!offered.includes(f)) S.folders.push({ path: f });
     if (!e) A.apps.voice = !!S.apps.speech;
     if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; A.signal.enabled = !!(e.signal && e.signal.enabled); }
+    if (!(e && e.calendar) && S.oldCalendar) A.calendar.use = 'old';
     if (!A.monitor && S.screens.length > 1) A.monitor = (S.screens.find((s) => s.focused) || S.screens[0]).name;
     if (e) { seen = STEPS.length - 1; T.mailProvider = undefined; }
     initial = JSON.stringify(A);

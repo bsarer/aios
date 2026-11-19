@@ -1,6 +1,8 @@
 /**
  * The chat agent loop (plan §4): build context → call model → validate and run tool
  * calls through the registry → repeat (max 6 iterations) → stream the final answer.
+ * A call repeated with the same arguments is not run again, and the next round (and the
+ * last one) offers no tool choice, so the model answers instead of going round in circles.
  * Every chat item it produces is persisted and emitted to connected UIs.
  */
 import { randomUUID } from 'node:crypto';
@@ -15,6 +17,17 @@ import type { ToolRegistry, UntrustedSource } from './tools/registry.js';
 
 export const MAX_ITERATIONS = 6;
 const CONTEXT_TURNS = 30;
+
+/** One key per tool and arguments, whatever order the model wrote the arguments in. */
+export function callKey(name: string, args: string): string {
+  const sort = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(sort) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, sort(x)])) : typeof v === 'string' ? v.trim() : v;
+  try {
+    return `${name} ${JSON.stringify(sort(JSON.parse(args || '{}')))}`;
+  } catch {
+    return `${name} ${args}`;
+  }
+}
 /** With memory, the token budget trims the window; this only bounds the query. */
 const CONTEXT_TURNS_BUDGETED = 120;
 
@@ -156,7 +169,12 @@ export class Agent {
 
     // P1: read once per message, so a /tone typed just before applies to this reply.
     const voice = this.o.voice?.() ?? { name: 'Astra', tone: 'friendly' as const };
+    // Calls already made in this reply, so the same one is never run twice (a loop guard).
+    const made = new Set<string>();
+    let repeated = false;
     for (let i = 0; i < MAX_ITERATIONS; i++) {
+      // After a repeat, and on the last round, the model has to answer with what it has.
+      const toolChoice = repeated || i === MAX_ITERATIONS - 1 ? 'none' : 'auto';
       const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), web: tools.has('web_open'), webRead: tools.has('web_read'), music: tools.has('music_control'), knowledge: tools.has('knowledge_read'), knowledgeSearch: tools.has('knowledge_search'), contacts: tools.has('contacts_find'), signal: tools.has('signal_draft'), assistantName: voice.name, tone: voice.tone });
       const closing = voiceReminder(voice.tone);
       const messages = quarantineEarlierEmail(
@@ -176,7 +194,7 @@ export class Agent {
       let reply = '';
       let result: ModelResult | undefined;
       try {
-        for await (const d of model.stream({ role: 'chat', messages, tools: tools.specs({ untrustedInContext, untrustedSources: sources }), toolChoice: 'auto', signal })) {
+        for await (const d of model.stream({ role: 'chat', messages, tools: tools.specs({ untrustedInContext, untrustedSources: sources }), toolChoice, signal })) {
           if (d.type === 'text') {
             if (!item) {
               item = { kind: 'assistant', id: this.newId(), text: '', at: at(), streaming: true };
@@ -207,9 +225,21 @@ export class Agent {
       if (!result.toolCalls.length) return;
 
       for (const call of result.toolCalls) {
+        const key = callKey(call.name, call.arguments);
+        if (made.has(key)) {
+          // Not shown as a step and not run: the model is told it already has this result.
+          repeated = true;
+          const outcome = tools.skipRepeat(call);
+          store.saveTurn({ role: 'tool', toolCallId: call.id, name: call.name, content: outcome.content }, at());
+          continue;
+        }
+        made.add(key);
         const toolItem: ChatItem = { kind: 'tool', id: this.newId(), label: tools.label(call.name), state: 'running', at: at() };
         this.post(toolItem);
         const outcome = await tools.execute(call, { signal, untrustedInContext, untrustedSources: sources, userText: text });
+        // A change (a to-do added, a setting) can make the same look-up give a new answer.
+        const tier = tools.tier(call.name);
+        if (tier && tier !== 'read') made.clear();
         this.patch({ ...toolItem, state: outcome.ok ? 'done' : 'failed' });
         store.saveTurn({ role: 'tool', toolCallId: call.id, name: call.name, content: outcome.content }, at());
         if (signal.aborted) {
@@ -218,6 +248,6 @@ export class Agent {
         }
       }
     }
-    this.notice('warning', `I stopped after ${MAX_ITERATIONS} steps without finishing. Try a more specific request.`);
+    this.notice('warning', `I stopped after ${MAX_ITERATIONS} rounds of looking things up without an answer. Try a more specific request.`);
   }
 }

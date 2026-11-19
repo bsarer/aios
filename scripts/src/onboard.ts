@@ -10,8 +10,9 @@ import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { Keyring, dataDir } from '@aios/core';
-import { type AiosConfig, APP_NAME, configDir, parseConfig, serializeConfig } from '@aios/shared';
+import { Keyring, dataDir, spawnRunner } from '@aios/core';
+import { type AiosConfig, APP_NAME, LEGACY_IDS, configDir, parseConfig, serializeConfig } from '@aios/shared';
+import { signInToCalendar } from './calendar-auth.js';
 import providers from '../providers.json' with { type: 'json' };
 import { installKiosk, kioskPaths } from './kiosk.js';
 import { readPresets } from './onboard/answers.js';
@@ -85,6 +86,9 @@ export async function runSetupWindow(): Promise<void> {
   // SG1: signal-cli as the window's scan found it (the scan runs again each time the window loads).
   let signalCli: string | null = null;
   const linker = new SignalLinker(() => signalCli);
+  // C1: an AI OS install on this computer (its own config folder and keyring), for its calendar.
+  const oldPath = join(process.env.XDG_CONFIG_HOME || join(process.env.HOME ?? '', '.config'), LEGACY_IDS.dir, 'config.toml');
+  const oldKeyring = new Keyring(spawnRunner, LEGACY_IDS.keyring);
   const deps: SetupDeps = {
     page: () => readFile(join(ROOT, 'scripts', 'onboard', 'page.html'), 'utf8'),
     presets,
@@ -105,6 +109,19 @@ export async function runSetupWindow(): Promise<void> {
     checkMail: (o) => checkMail(o),
     installDesktop,
     signal: linker,
+    ...(oldPath !== configPath
+      ? {
+          oldCalendar: {
+            config: async () => (await readConfig(oldPath))?.calendar ?? null,
+            secret: async (ref) => (await oldKeyring.get(ref))?.reveal() ?? null,
+          },
+        }
+      : {}),
+    signInCalendar: async (cal, o) => {
+      const lines: string[] = [];
+      const n = await signInToCalendar(cal, keyring, o.timeZone, { loginHint: o.loginHint, log: (l) => (l.startsWith('Contacts') ? lines.push(l) : console.log(l)) });
+      return { ok: true, message: `Connected your Google Calendar (${n} event${n === 1 ? '' : 's'} in the next 7 days).${lines.length ? ` ${lines.join(' ')}` : ''}` };
+    },
     // The package's astra; a checkout runs its own through pnpm.
     installAddons: (ids: AddonId[]) => openTerminal(existsSync('/usr/bin/astra') ? ['/usr/bin/astra', 'addons', ...ids.map((i) => `--${i}`)] : ['pnpm', '-C', ROOT, 'astra', 'addons', ...ids.map((i) => `--${i}`)], 'astra-addons'),
     done: () => {

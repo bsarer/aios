@@ -5,11 +5,33 @@
  * the nightly job use the chat's model and key, and every section setup doesn't show is kept
  * from the existing config. Pure, so it is unit-tested (scripts/test/onboard.test.ts).
  */
-import { AiosConfig, DEFAULT_PORT, EmbeddingsConfig, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig } from '@aios/shared';
+import { AiosConfig, CalendarConfig, DEFAULT_PORT, EmbeddingsConfig, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig } from '@aios/shared';
 import { z } from 'zod';
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
 export const CHAT_KEY_REF: SecretRef = 'keyring:model-chat';
+/** C1: the same names the terminal setup uses (setup-lib.ts). */
+export const CALENDAR_SECRET_REF: SecretRef = 'keyring:calendar-client-secret';
+export const CALENDAR_TOKEN_REF: SecretRef = 'keyring:calendar-google';
+
+/**
+ * C1: the Calendar step. "keep" leaves [calendar] as it is (and is what an older page sends by
+ * leaving it out); "old" copies the one AI OS had on this computer; "new" makes one from the
+ * person's own Google OAuth client; "off" removes it. Google's sign-in runs on Finish.
+ */
+export const CalendarAnswer = z.discriminatedUnion('use', [
+  z.strictObject({ use: z.literal('keep') }),
+  z.strictObject({ use: z.literal('old') }),
+  z.strictObject({ use: z.literal('off') }),
+  z.strictObject({
+    use: z.literal('new'),
+    /** Google shows it as <digits>-<letters>.apps.googleusercontent.com. Not a secret. */
+    clientId: z.string().trim().regex(/^[A-Za-z0-9._-]{1,200}\.apps\.googleusercontent\.com$/, 'Paste the Client ID, ending in .apps.googleusercontent.com'),
+    /** Empty keeps the stored one when the Client ID is the same. */
+    clientSecret: z.string().trim().max(500).default(''),
+  }),
+]);
+export type CalendarAnswer = z.infer<typeof CalendarAnswer>;
 
 export interface ProviderPreset {
   label: string;
@@ -107,6 +129,7 @@ export const SetupAnswers = z.strictObject({
   desktop: z.strictObject({ autostart: z.boolean(), hyprland: z.boolean(), bar: z.boolean() }),
   /** SG1: Signal on or off. The number comes from linking in this window, never from the page. */
   signal: z.strictObject({ enabled: z.boolean() }).default({ enabled: false }),
+  calendar: CalendarAnswer.default({ use: 'keep' }),
   /** The screen Astra keeps; empty when there is only one. */
   monitor: z.union([z.literal(''), z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/)]).default(''),
 });
@@ -142,6 +165,8 @@ export function buildConfig(
   servers: MailServers | null,
   /** SG1: the number this window just linked, if it did. */
   signalLinked: string | null = null,
+  /** C1: the [calendar] of the AI OS install on this computer, when Astra has none of its own. */
+  oldCalendar: CalendarConfig | null = null,
 ): BuiltSetup {
   const secrets = new Map<SecretRef, string>();
 
@@ -195,7 +220,8 @@ export function buildConfig(
   const saveTo = roots.includes('~/Downloads') ? '~/Downloads' : roots[0]!;
   const docsOn = a.apps.docs && !!found.wordcraftCli && !!found.gridcraftCli;
   const base = existing ?? null;
-  const { calendar, ...kept } = base ?? ({} as Partial<AiosConfig>);
+  const { calendar: prevCalendar, ...kept } = base ?? ({} as Partial<AiosConfig>);
+  const calendar = calendarSection(a.calendar, prevCalendar, oldCalendar, secrets);
   const config = AiosConfig.parse({
     ...kept,
     ...(calendar ? { calendar } : {}),
@@ -221,6 +247,24 @@ export function buildConfig(
   return { config, secrets };
 }
 
+/** C1: the [calendar] the Calendar step's answer makes. */
+function calendarSection(a: CalendarAnswer, prev: CalendarConfig | undefined, old: CalendarConfig | null, secrets: Map<SecretRef, string>): CalendarConfig | undefined {
+  if (a.use === 'keep') return prev;
+  if (a.use === 'off') return undefined;
+  if (a.use === 'old') {
+    if (!old) throw new SetupError('calendar', 'There is no AI OS calendar on this computer to use');
+    return old;
+  }
+  const same = prev?.clientId === a.clientId;
+  if (a.clientSecret) secrets.set(CALENDAR_SECRET_REF, a.clientSecret);
+  return CalendarConfig.parse({
+    ...(same ? prev : {}),
+    clientId: a.clientId,
+    tokenRef: same ? prev.tokenRef : CALENDAR_TOKEN_REF,
+    ...(a.clientSecret ? { clientSecretRef: CALENDAR_SECRET_REF } : same && prev.clientSecretRef ? { clientSecretRef: prev.clientSecretRef } : {}),
+  });
+}
+
 /** SG1: on only with a linked number: the one just linked, or the one linked before. */
 function signalSection(a: SetupAnswers, base: AiosConfig | null, found: FoundApps, linked: string | null): Partial<AiosConfig['signal']> {
   const prev = base?.signal;
@@ -238,7 +282,7 @@ function signalSection(a: SetupAnswers, base: AiosConfig | null, found: FoundApp
 export class SetupError extends Error {
   override readonly name = 'SetupError';
   constructor(
-    readonly step: 'welcome' | 'ai' | 'mail' | 'signal' | 'folders' | 'desktop',
+    readonly step: 'welcome' | 'ai' | 'mail' | 'calendar' | 'signal' | 'folders' | 'desktop',
     message: string,
   ) {
     super(message);
@@ -247,6 +291,7 @@ export class SetupError extends Error {
 
 /** What the window may know about an existing config: never a secret, only whether one is stored. */
 export function summarize(c: AiosConfig | null, presets: Record<string, ProviderPreset>): Record<string, unknown> | null {
+  // calendar: only whether one is set up; its client id is shown only to say which.
   if (!c) return null;
   const provider = Object.entries(presets).find(([, p]) => p.baseUrl === c.models.chat.baseUrl)?.[0] ?? 'other';
   return {

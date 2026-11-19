@@ -10,7 +10,7 @@ import { signInToCalendar } from './calendar-auth.js';
 async function main(): Promise<void> {
   const path = `${configDir()}/config.toml`;
   const config = parseConfig(await readFile(path, 'utf8'));
-  if (!config.calendar) throw new Error(`no [calendar] in ${path}; run \`astra setup\` and answer yes to Google Calendar`);
+  if (!config.calendar) throw new Error(`no [calendar] in ${path}; open Settings (\`astra settings\`) and connect Google Calendar in its Calendar step`);
   const keyring = new Keyring();
   if (!(await keyring.available())) throw new Error('secret-tool not found; install libsecret first');
   const n = await signInToCalendar(config.calendar, keyring, config.user.timezone, { loginHint: config.mail.address });

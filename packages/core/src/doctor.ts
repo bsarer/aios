@@ -159,6 +159,13 @@ export async function runDoctor(p: DoctorProbes): Promise<Check[]> {
     for (const c of clis) if (!(await onPath(p, c))) lost.push(c);
     if (lost.length) add({ name: 'Word and Excel', status: 'warn', detail: `${lost.join(' and ')} not found`, fix: 'see "Word and Excel files" in the README, or set [docs] enabled = false' });
   }
+  // C1: without a calendar the chat can't answer "what's on tomorrow?", so say so here too.
+  if (config) {
+    const cal = config.calendar;
+    if (!cal) add({ name: 'Calendar', status: 'warn', detail: "no calendar connected, so the chat can't see your appointments", fix: 'connect Google Calendar in the Calendar step of `astra settings`' });
+    else if (!(await p.hasSecret(cal.tokenRef))) add({ name: 'Calendar', status: 'warn', detail: 'Google Calendar is set up but not signed in', fix: 'run `astra calendar-login`' });
+    else add({ name: 'Calendar', status: 'ok', detail: 'Google Calendar signed in' });
+  }
   // SG1: Signal, once it is turned on.
   if (config?.signal.enabled) {
     if (!(await onPath(p, config.signal.command))) add({ name: 'Signal', status: 'warn', detail: `${config.signal.command} not found, so Signal is off`, fix: "install the Signal add-on: `astra addons --signal`" });

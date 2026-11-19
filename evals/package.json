@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "bakeoff": "tsx src/main.ts",
-    "render": "tsx src/render.ts"
+    "render": "tsx src/render.ts",
+    "knowledge": "tsx src/knowledge.ts"
   },
   "dependencies": {
     "@aios/core": "workspace:*",

@@ -7,7 +7,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { AiosConfig, SecretRef } from '@aios/shared';
+import type { AiosConfig, CalendarConfig, SecretRef } from '@aios/shared';
 import { z } from 'zod';
 import {
   type FoundApps,
@@ -50,6 +50,14 @@ export interface SetupDeps {
   installDesktop: (c: AiosConfig, d: SetupAnswers['desktop']) => Promise<string[]>;
   /** SG1: linking the phone to Signal. Without it, the Signal step says linking isn't available. */
   signal?: { start(): Promise<LinkState>; readonly status: LinkState; cancel(): void };
+  /**
+   * C1: the AI OS install on this computer, read only: its [calendar] and that calendar's two
+   * keyring entries (OAuth client secret and sign-in), copied into Astra's keyring on Finish
+   * when the person ticks "use it". Never sent to the page.
+   */
+  oldCalendar?: { config(): Promise<CalendarConfig | null>; secret(ref: SecretRef): Promise<string | null> };
+  /** C1: Google's sign-in in the browser, on Finish; puts the sign-in in the keyring. */
+  signInCalendar?: (cal: CalendarConfig, o: { timeZone: string; loginHint: string }) => Promise<CheckResult>;
   /** Opens the chat and closes the setup window. */
   done: () => void;
   /** Closes the setup window without saving anything or opening the chat (the Exit button). */
@@ -79,8 +87,11 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
   const api: Record<string, (body: unknown) => Promise<unknown>> = {
     'GET state': async () => {
       const [existing, look] = await Promise.all([deps.readConfig(), deps.look()]);
+      // C1: offered only while Astra has no calendar of its own.
+      const old = existing?.calendar ? null : await oldCalendar();
       return {
         existing: summarize(existing, deps.presets),
+        oldCalendar: !!old,
         presets: Object.entries(deps.presets).map(([id, p]) => ({ id, label: p.label, blurb: p.blurb, keyUrl: p.keyUrl, defaultModel: p.defaultModel ?? '' })),
         ...look,
       };
@@ -131,10 +142,11 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       const look = await deps.look();
       const s = serversFor(answers.mail.address, await deps.mx(answers.mail.address));
       const link = deps.signal?.status;
-      const built = buildConfig(answers, existing, deps.presets, look.apps, s, link?.state === 'linked' ? link.number : null);
+      const old = answers.calendar.use === 'old' ? await oldCalendar() : null;
+      const built = buildConfig(answers, existing, deps.presets, look.apps, s, link?.state === 'linked' ? link.number : null, old);
       for (const [ref, value] of built.secrets) await deps.keyring.set(ref, value);
       await deps.writeConfig(built.config);
-      const did = ['Saved your settings, and your keys in the keyring.', ...(await deps.installDesktop(built.config, answers.desktop))];
+      const did = ['Saved your settings, and your keys in the keyring.', ...(await calendarDone(answers, built.config)), ...(await deps.installDesktop(built.config, answers.desktop))];
       finished = true;
       return { ok: true, did };
     },
@@ -149,6 +161,33 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       return { ok: true };
     },
   };
+
+  async function oldCalendar(): Promise<CalendarConfig | null> {
+    try {
+      return (await deps.oldCalendar?.config()) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * C1, after the config is written: AI OS's calendar brings its client secret and sign-in
+   * along; a new calendar (or an old one without a sign-in) signs in with Google now.
+   */
+  async function calendarDone(a: SetupAnswers, c: AiosConfig): Promise<string[]> {
+    const cal = c.calendar;
+    if (!cal || (a.calendar.use !== 'old' && a.calendar.use !== 'new')) return [];
+    if (a.calendar.use === 'old' && deps.oldCalendar) {
+      for (const ref of [cal.clientSecretRef, cal.tokenRef]) {
+        const value = ref ? await deps.oldCalendar.secret(ref).catch(() => null) : null;
+        if (ref && value) await deps.keyring.set(ref, value);
+      }
+      if (await deps.keyring.get(cal.tokenRef)) return ['Connected the Google Calendar you used in AI OS.'];
+    }
+    if (!deps.signInCalendar) return ['Calendar saved. Sign in to Google with: astra calendar-login'];
+    const r = await deps.signInCalendar(cal, { timeZone: c.user.timezone, loginHint: c.mail.address }).catch((err: unknown) => ({ ok: false, message: (err as Error).message }));
+    return [r.ok ? r.message : `Calendar saved, but Google's sign-in didn't finish (${r.message}). Open Settings again, or run astra calendar-login.`];
+  }
 
   const server = createServer((req, res) => {
     void handle(req, res).catch((err: unknown) => {

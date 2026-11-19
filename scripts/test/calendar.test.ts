@@ -366,6 +366,10 @@ describe('calendar quarantine', () => {
     expect(system).not.toContain('You are reading an email or calendar event');
     const bare = new Shell({ store: new Store(':memory:'), model, tools: new ToolRegistry(audit), audit, userName: 'John', timeZone: TZ, modelName: 'm', costCapUsd: 2, readBattery: async () => null, readWifi: async () => null });
     await bare.handle({ type: 'send', text: 'hi' });
-    expect(String(requests[1]!.messages[0]!.content)).not.toContain('calendar');
+    // Without the tools no calendar tool is named, and the model is told the calendar isn't
+    // connected, so it says so instead of hunting through mail (the appointments loop).
+    const without = String(requests[1]!.messages[0]!.content);
+    expect(without).not.toContain('calendar_');
+    expect(without).toContain("Calendar: not connected");
   });
 });

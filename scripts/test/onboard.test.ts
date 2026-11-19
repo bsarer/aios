@@ -338,3 +338,83 @@ describe('R2 window: no old setup pages come back', () => {
     expect(existsSync(b)).toBe(true);
   });
 });
+
+// C1: "do I have any appointments tomorrow?" looped through mail because Astra's settings had
+// no calendar: the window's Calendar step only pointed at a command that needs one already.
+describe('C1 Calendar step: keep, carry over from AI OS, connect a new one, or remove', () => {
+  const CLIENT = '1234-abc.apps.googleusercontent.com';
+  const OLD = { provider: 'google', clientId: CLIENT, clientSecretRef: 'keyring:calendar-client-secret', tokenRef: 'keyring:calendar-google', workday: { start: '08:00', end: '17:00' } };
+  const edit = { ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: '' }, mail: { address: 'baris@gmail.com', password: '' } };
+
+  it('keeps the calendar when the page sends no answer for it, and removes it only on "off"', () => {
+    const first = buildConfig(answers(), null, presets, all, GMAIL).config;
+    expect(first.calendar).toBeUndefined();
+    const withCal = AiosConfig.parse({ ...first, calendar: OLD });
+    expect(buildConfig(answers(edit), withCal, presets, all, GMAIL).config.calendar).toMatchObject({ clientId: CLIENT, workday: { start: '08:00' } });
+    expect(buildConfig(answers({ ...edit, calendar: { use: 'off' } }), withCal, presets, all, GMAIL).config.calendar).toBeUndefined();
+  });
+
+  it("uses AI OS's calendar as it was, and refuses when there is none", () => {
+    const built = buildConfig(answers({ calendar: { use: 'old' } }), null, presets, all, GMAIL, null, AiosConfig.shape.calendar.unwrap().parse(OLD));
+    expect(built.config.calendar).toMatchObject({ clientId: CLIENT, clientSecretRef: 'keyring:calendar-client-secret', workday: { start: '08:00', end: '17:00' } });
+    expect(() => buildConfig(answers({ calendar: { use: 'old' } }), null, presets, all, GMAIL)).toThrow(/no AI OS calendar/);
+  });
+
+  it('makes a new calendar from a Client ID; the secret goes to the keyring only', () => {
+    const built = buildConfig(answers({ calendar: { use: 'new', clientId: ` ${CLIENT} `, clientSecret: 'GOCSPX-secret' } }), null, presets, all, GMAIL);
+    expect(built.config.calendar).toMatchObject({ clientId: CLIENT, clientSecretRef: 'keyring:calendar-client-secret', tokenRef: 'keyring:calendar-google' });
+    expect(built.secrets.get('keyring:calendar-client-secret')).toBe('GOCSPX-secret');
+    expect(JSON.stringify(built.config)).not.toContain('GOCSPX-secret');
+    expect(() => answers({ calendar: { use: 'new', clientId: 'not-a-client' } })).toThrow(/Client ID/);
+  });
+
+  async function finishWith(calendar: unknown, over: Partial<SetupDeps> = {}) {
+    const signIns: string[] = [];
+    const t = await serve({
+      oldCalendar: { config: async () => AiosConfig.shape.calendar.unwrap().parse(OLD), secret: async (ref) => (ref === 'keyring:calendar-google' ? 'old-refresh' : 'old-client-secret') },
+      signInCalendar: async (cal) => (signIns.push(cal.clientId), { ok: true, message: 'Connected your Google Calendar (3 events in the next 7 days).' }),
+      ...over,
+    });
+    const state = JSON.parse((await t.send('/s/tok/api/state')).body) as Record<string, unknown>;
+    const r = JSON.parse((await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), calendar } })).body) as { ok: boolean; did: string[] };
+    await t.s.close();
+    return { t, state, r, signIns };
+  }
+
+  it("offers AI OS's calendar without sending anything secret, and copies its sign-in on Finish", async () => {
+    const { t, state, r, signIns } = await finishWith({ use: 'old' });
+    expect(state.oldCalendar).toBe(true);
+    expect(JSON.stringify(state)).not.toContain('old-refresh');
+    expect(r.did).toContain('Connected the Google Calendar you used in AI OS.');
+    expect(t.stored.get('keyring:calendar-google')).toBe('old-refresh');
+    expect(t.stored.get('keyring:calendar-client-secret')).toBe('old-client-secret');
+    expect(t.written[0]!.calendar?.clientId).toBe(CLIENT);
+    expect(signIns).toEqual([]);
+    expect(JSON.stringify(r)).not.toContain('old-');
+  });
+
+  it("signs in with Google when AI OS's sign-in isn't there", async () => {
+    const { r, signIns } = await finishWith({ use: 'old' }, { oldCalendar: { config: async () => AiosConfig.shape.calendar.unwrap().parse(OLD), secret: async () => null } });
+    expect(signIns).toEqual([CLIENT]);
+    expect(r.did).toContain('Connected your Google Calendar (3 events in the next 7 days).');
+  });
+
+  it('signs in on Finish for a new calendar, and says what to do when sign-in fails', async () => {
+    const ok = await finishWith({ use: 'new', clientId: CLIENT, clientSecret: 's' });
+    expect(ok.signIns).toEqual([CLIENT]);
+    const bad = await finishWith({ use: 'new', clientId: CLIENT, clientSecret: 's' }, { signInCalendar: async () => { throw new Error('timed out waiting for the browser'); } });
+    expect(bad.r.ok).toBe(true);
+    expect(bad.r.did.join(' ')).toMatch(/sign-in didn't finish \(timed out waiting for the browser\)\. Open Settings again/);
+    expect(bad.t.written[0]!.calendar?.clientId).toBe(CLIENT);
+  });
+
+  it("does nothing for the calendar on keep, and stops offering AI OS's once Astra has one", async () => {
+    const { r, signIns, t } = await finishWith({ use: 'keep' });
+    expect(signIns).toEqual([]);
+    expect(t.written[0]!.calendar).toBeUndefined();
+    expect(r.did).toEqual(['Saved your settings, and your keys in the keyring.', 'installed']);
+    const t2 = await serve({ readConfig: async () => AiosConfig.parse({ ...t.written[0]!, calendar: OLD }), oldCalendar: { config: async () => AiosConfig.shape.calendar.unwrap().parse(OLD), secret: async () => null } });
+    expect(JSON.parse((await t2.send('/s/tok/api/state')).body)).toMatchObject({ oldCalendar: false, existing: { calendar: true } });
+    await t2.s.close();
+  });
+});

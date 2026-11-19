@@ -12,7 +12,7 @@ import { SIGNAL_NUMBER } from '@aios/shared';
 import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool, ToolContext } from '../tools/registry.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
-import { auditChat, chatDetail, type SignalActions } from './actions.js';
+import { auditChat, chatDetail, type SignalActions, UNTRUSTED_IN_VIEW } from './actions.js';
 import { CHAT_ID, type ChatId } from './envelope.js';
 import type { ChatRow, SignalInbox } from './inbox.js';
 
@@ -28,7 +28,7 @@ export function signalRecipientWarnings(chat: ChatId, name: string, ctx: Pick<To
   const named = (number && digits.length >= 6 && number.endsWith(digits.slice(-Math.min(digits.length, 9)))) || words.some((w) => typed.includes(w));
   const out: string[] = [];
   if (!named) out.push(`${name || chatDetail(chat)} is not named in your message. Check who this goes to before sending.`);
-  if (ctx.untrustedInContext) out.push('Written while a message, email or other outside text was in view. Read it before sending.');
+  if (ctx.untrustedInContext) out.push(UNTRUSTED_IN_VIEW);
   return out;
 }
 

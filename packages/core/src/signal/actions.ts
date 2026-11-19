@@ -5,7 +5,8 @@
  *
  *   pending ──Send click (hash matches)──▶ sending ──▶ sent
  *      │                                      └──────▶ failed ──Send click──▶ sending
- *      └──── Discard ──▶ discarded               (failed can be discarded too)
+ *      ├──── Edit (the user's words, new hash) ──▶ pending
+ *      └──── Discard ──▶ discarded               (failed can be edited or discarded too)
  *
  * Signal has no way to send a message only once, so a send cut short by a crash is shown as
  * failed with a note to check the phone first; it is never sent again on its own.
@@ -49,6 +50,9 @@ export interface SignalActionsOptions {
 }
 
 export type SignalSendResult = 'sent' | 'failed' | 'refused';
+
+/** The card's warning for a message written while outside text was in view; an edit by the user drops it. */
+export const UNTRUSTED_IN_VIEW = 'Written while a message, email or other outside text was in view. Read it before sending.';
 
 /** What the card says a chat is, written by code: the number, or that it is a group. */
 export function chatDetail(chat: ChatId): string {
@@ -158,6 +162,29 @@ export class SignalActions {
       this.refresh(id);
       return 'failed';
     }
+  }
+
+  /**
+   * The user's own edit from the card: new words, same recipient. It gives a new hash, so an
+   * earlier Send click can no longer match, and the card is pending again. The words are now
+   * the user's, so the outside-text warning goes; a warning about who it goes to stays.
+   */
+  edit(id: string, text: string): boolean {
+    const r = this.row(id);
+    if (!r || (r.state !== 'pending' && r.state !== 'failed')) return false;
+    const words = text.trim();
+    if (!words || words.length > 2000) return false;
+    const d: SignalDraft = { ...(JSON.parse(r.spec) as SignalDraft), text: words };
+    const old = JSON.parse(r.card) as CardFields;
+    const card: CardFields = { ...old, text: words, warnings: old.warnings.filter((w) => w !== UNTRUSTED_IN_VIEW) };
+    const hash = signalHash(id, d, card);
+    const u = this.db
+      .prepare(`UPDATE signal_actions SET spec = ?, card = ?, hash = ?, state = 'pending', result = NULL, updated_at = ? WHERE id = ? AND state IN ('pending', 'failed')`)
+      .run(JSON.stringify(d), JSON.stringify(card), hash, this.clock(), id);
+    if (u.changes !== 1) return false;
+    this.o.audit.append({ kind: 'signal', event: 'edited', cardId: id, chars: words.length });
+    this.refresh(id);
+    return true;
   }
 
   discard(id: string): boolean {

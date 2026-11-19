@@ -503,6 +503,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   /** SG1: Send on a Signal message card, echoing the card's hash. */
   z.strictObject({ type: z.literal('signal_send'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('signal_discard'), id: z.string().max(100) }),
+  /** SG1: the user's own edit of a Signal card's message. The recipient can't change; Send still needs the new hash. */
+  z.strictObject({ type: z.literal('signal_edit'), id: z.string().max(100), text: z.string().trim().min(1).max(2000) }),
   /** D2: Save on a document change card, echoing the card's hash. */
   z.strictObject({ type: z.literal('doc_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('doc_change_discard'), id: z.string().max(100) }),

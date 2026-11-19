@@ -50,6 +50,7 @@ export function App() {
     onEventDiscard: (id) => send({ type: 'event_discard', id }),
     onSignalSend: (id, hash) => send({ type: 'signal_send', id, hash }),
     onSignalDiscard: (id) => send({ type: 'signal_discard', id }),
+    onSignalEdit: (id, text) => send({ type: 'signal_edit', id, text }),
     onDocChangeConfirm: (id, hash) => send({ type: 'doc_change_confirm', id, hash }),
     onDocChangeDiscard: (id) => send({ type: 'doc_change_discard', id }),
     onFileChangeConfirm: (id, hash) => send({ type: 'file_change_confirm', id, hash }),

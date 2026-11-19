@@ -102,7 +102,8 @@ export class SignalService {
     if (!m) return;
     if (!this.o.inbox.add(m)) return;
     this.o.audit.append({ kind: 'signal', event: 'message', chat: auditChat(m.chat), mine: m.mine, chars: m.text.length, attachments: m.attachments });
-    if (m.mine || !this.o.notify) return;
+    // The side rail always gets it; `[signal] notify` only turns the desktop notification off.
+    if (m.mine) return;
     this.pending.push(m);
     if (!this.batchTimer) {
       this.batchTimer = setTimeout(() => this.flush(), this.o.batchMs ?? 8000);
@@ -131,7 +132,17 @@ export class SignalService {
       signals: batch.map((m) => signalRow(m, chatName)),
       ...(quiet ? { quiet: true } : {}),
     });
-    if (!quiet) this.o.desktop('Signal', text);
+    if (!quiet && this.o.notify) this.o.desktop('Signal', text);
+  }
+
+  /** The last day's messages from others, newest first, for the side rail when a screen connects. */
+  recent(limit = 100): SignalRow[] {
+    return this.o.inbox.recentFromOthers(this.clock() - 86_400_000, limit).map(({ message: r, chat: c }) =>
+      signalRow(
+        { chat: r.chat, kind: c.kind, groupName: c.kind === 'group' ? c.name : '', from: r.from, fromName: r.fromName, text: r.text, ts: r.ts, attachments: r.attachments, mine: false },
+        () => c.name,
+      ),
+    );
   }
 
   /** For /signal: one plain line, written by code. */

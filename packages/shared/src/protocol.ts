@@ -559,7 +559,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional() }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
@@ -580,14 +580,16 @@ export interface ChatState {
   widgets: Widgets | null;
   /** When the chat was last cleared: mail notifications from before it feed the inbox only. */
   clearedAt: number | null;
+  /** SG1: the last day's Signal messages kept by core when the screen connected, for the side rail. */
+  signals: SignalRow[];
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [] };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [] };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':

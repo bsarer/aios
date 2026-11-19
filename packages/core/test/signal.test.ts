@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { type ChatItem, ChatItem as ChatItemSchema, SignalConfig } from '@aios/shared';
+import { type ChatItem, ChatItem as ChatItemSchema, type ServerEvent, ServerEvent as ServerEventSchema, SignalConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import { untrustedSources } from '../src/agent.js';
 import { AuditLog } from '../src/audit.js';
@@ -86,7 +86,7 @@ function fakeSignalCli(answer: (method: string, params: Record<string, unknown>)
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
-function rig(o: { answer?: (method: string, params: Record<string, unknown>) => unknown; userText?: string } = {}) {
+function rig(o: { answer?: (method: string, params: Record<string, unknown>) => unknown; userText?: string; notify?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'aios-signal-'));
   const auditPath = join(dir, 'audit.jsonl');
   const audit = new AuditLog(auditPath);
@@ -104,7 +104,7 @@ function rig(o: { answer?: (method: string, params: Record<string, unknown>) => 
     inbox,
     audit,
     keepDays: 30,
-    notify: true,
+    notify: o.notify ?? true,
     timeZone: 'Europe/Istanbul',
     get quietHours() {
       return quietHours;
@@ -252,6 +252,38 @@ describe('messages from signal-cli (SG1)', () => {
     expect(r.desktop).toHaveLength(1);
     expect(r.inbox.unreadTotal()).toBe(2);
     r.service.stop();
+  });
+
+  it('with [signal] notify off, messages still reach the rail, with no desktop notification', async () => {
+    const r = rig({ notify: false });
+    r.service.start();
+    r.cli.push(data('quietly'));
+    await tick();
+    expect(r.notes()).toHaveLength(1);
+    expect(r.notes()[0]!.quiet).toBeUndefined();
+    expect(r.desktop).toEqual([]);
+    r.service.stop();
+  });
+
+  it('a screen that connects gets the last day of kept messages, so ones from before an update show in the rail', async () => {
+    const r = rig();
+    // Kept before this version: in the store, but never in a rail notification.
+    r.inbox.add(parseReceive(data('from yesterday morning', { timestamp: T0 - 30 * 3600_000 }))!);
+    r.inbox.add(parseReceive(data('this morning', { timestamp: T0 - 3600_000 }))!);
+    r.inbox.add(parseReceive(data('family news', { timestamp: T0 - 60_000, groupInfo: { groupId: GROUP, groupName: 'Family' } }))!);
+    r.inbox.add(parseReceive(envelope({ syncMessage: { sentMessage: { timestamp: T0 - 30_000, message: 'mine', destinationNumber: SAM } } }))!);
+    const rows = r.service.recent();
+    expect(rows.map((x) => [x.chat, x.text])).toEqual([
+      [`g:${GROUP}`, 'family news'],
+      [SAM, 'this morning'],
+    ]);
+    expect(rows[0]).toMatchObject({ kind: 'group', name: 'Family', sender: 'Sam Lee' });
+    const shell = new Shell({ store: r.store, model: { stream: () => { throw new Error('no model'); } }, tools: r.tools, audit: new AuditLog(r.auditPath), userName: 'John', timeZone: 'Europe/Istanbul', modelName: 'm', costCapUsd: 2, readBattery: async () => null, readWifi: async () => null, signal: { actions: r.actions, status: () => r.service.status(), recent: () => r.service.recent() } });
+    const events: ServerEvent[] = [];
+    shell.subscribe((ev) => events.push(ev));
+    const hello = events.find((e) => e.type === 'hello');
+    expect(hello).toMatchObject({ signals: rows });
+    expect(ServerEventSchema.safeParse(hello).success).toBe(true);
   });
 
   it('in quiet hours messages reach the rail marked quiet; my own messages post nothing', async () => {

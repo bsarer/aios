@@ -115,6 +115,17 @@ export class SignalInbox {
     return r ? messageRow(r) : null;
   }
 
+  /** Messages from others since `since`, newest first, with their chat (for the side rail at connect). */
+  recentFromOthers(since: number, limit = 100): { message: MessageRow; chat: ChatRow }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.*, c.kind AS c_kind, c.name AS c_name, c.last_at AS c_last_at, c.unread AS c_unread FROM signal_messages m
+         JOIN signal_chats c ON c.chat = m.chat WHERE m.mine = 0 AND m.ts >= ? ORDER BY m.ts DESC LIMIT ?`,
+      )
+      .all(since, limit) as (DbMessage & { c_kind: 'person' | 'group'; c_name: string; c_last_at: number; c_unread: number })[];
+    return rows.map((r) => ({ message: messageRow(r), chat: { chat: r.chat, kind: r.c_kind, name: r.c_name, lastAt: r.c_last_at, unread: r.c_unread } }));
+  }
+
   markRead(chat: ChatId): void {
     this.db.prepare('UPDATE signal_chats SET unread = 0 WHERE chat = ?').run(chat);
   }

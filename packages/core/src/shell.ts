@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type ChatItem, type ClientMessage, type ServerEvent, type Status, type Theme } from '@aios/shared';
+import { type ChatItem, type ClientMessage, type ServerEvent, type SignalRow, type Status, type Theme } from '@aios/shared';
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
@@ -98,7 +98,7 @@ export interface ShellOptions {
   /** MU1: /music says what is playing, in a line written by code; its changes go through the registry's music_control. */
   music?: { now: () => Promise<string> };
   /** SG1: Signal message cards' Send and Discard, and /signal's status line. Without it, signal messages are ignored and /signal says Signal is off. */
-  signal?: { actions: Pick<SignalActions, 'send' | 'discard'>; status: () => string };
+  signal?: { actions: Pick<SignalActions, 'send' | 'discard'>; status: () => string; recent?: () => SignalRow[] };
   /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
   knowledge?: {
     view: () => string;
@@ -184,6 +184,7 @@ export class Shell {
       theme: this.theme,
       ...(this.o.widgets ? { widgets: this.o.widgets.current() } : {}),
       ...(clearedAt === null ? {} : { clearedAt }),
+      ...(this.o.signal?.recent ? { signals: this.o.signal.recent() } : {}),
     };
   }
 

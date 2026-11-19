@@ -34,10 +34,19 @@ const withSignals = (i: ChatItem): i is Notification & { signals: SignalRow[] } 
 /** True once any Signal message has come in on this chat screen: the rail shows Signal's button. */
 export const hasSignal = (items: ChatItem[]) => items.some(withSignals);
 
-/** Messages from the last day's notifications, one per message id, newest first. */
-export function signalMessages(items: ChatItem[], now: number): SignalMessageRow[] {
+/**
+ * Messages from the last day's notifications, one per message id, newest first. `kept` are the
+ * messages core had when this screen connected (hello), so ones from before an update or a
+ * restart show too; they count as posted when they were sent.
+ */
+export function signalMessages(items: ChatItem[], now: number, kept: SignalRow[] = []): SignalMessageRow[] {
   const seen = new Set<string>();
   const out: SignalMessageRow[] = [];
+  for (const s of kept) {
+    if (s.date < now - DAY || seen.has(s.id)) continue;
+    seen.add(s.id);
+    out.push({ ...s, at: s.date });
+  }
   for (const n of items.filter(withSignals)) {
     if (n.at < now - DAY) continue;
     for (const s of n.signals) {
@@ -50,9 +59,9 @@ export function signalMessages(items: ChatItem[], now: number): SignalMessageRow
 }
 
 /** The panel's rows: one per chat, the chat with the newest message first. */
-export function signalChats(items: ChatItem[], now: number): SignalChatRow[] {
+export function signalChats(items: ChatItem[], now: number, kept: SignalRow[] = []): SignalChatRow[] {
   const by = new Map<string, SignalChatRow>();
-  for (const m of signalMessages(items, now)) {
+  for (const m of signalMessages(items, now, kept)) {
     const c = by.get(m.chat);
     if (c) c.messages.push(m);
     else by.set(m.chat, { chat: m.chat, kind: m.kind, name: m.name, latest: m, messages: [m] });

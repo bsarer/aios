@@ -52,6 +52,19 @@ describe('Signal in the side rail', () => {
     expect(signalCounts(chats, 0)).toEqual({ fresh: 3, chats: 2 });
   });
 
+  it('adds the messages core kept when the screen connected, once each, from the last day', () => {
+    const kept = [msg(SAM, NOW - 3 * HOUR), msg(GROUP, NOW - 2 * HOUR), msg(SAM, NOW - 30 * HOUR)];
+    const items: ChatItem[] = [note('a', NOW - HOUR, [msg(SAM, NOW - HOUR), msg(SAM, NOW - 3 * HOUR)])];
+    const chats = signalChats(items, NOW, kept);
+    expect(chats.map((c) => [c.chat, c.messages.length])).toEqual([
+      [SAM, 2],
+      [GROUP, 1],
+    ]);
+    // A kept message counts as posted when it was sent, so it isn't new to a screen that saw it.
+    expect(signalCounts(chats, NOW - 2.5 * HOUR)).toEqual({ fresh: 2, chats: 2 });
+    expect(signalChats([], NOW, kept).map((c) => c.chat)).toEqual([GROUP, SAM]);
+  });
+
   it("peeks for a person's message posted after the page opened, never a group's, a quiet one or in the rail's quiet hour", () => {
     const since = NOW - HOUR;
     expect(signalPeekFor([note('h', NOW - 2 * HOUR, [msg(SAM, NOW - 2 * HOUR)])], since, new Set(), 0, NOW)).toBeNull();

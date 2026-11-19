@@ -632,7 +632,7 @@ async function main(): Promise<void> {
         }
       : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
-    ...(signal ? { signal: { actions: signal.actions, status: () => signal.service.status() } } : {}),
+    ...(signal ? { signal: { actions: signal.actions, status: () => signal.service.status(), recent: () => signal.service.recent() } } : {}),
     ...(musicPlayer ? { music: { now: async () => describeNowPlaying(await musicPlayer.nowPlaying().catch(() => null)) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     doctor: async () => formatChecks(await runDoctor(realDoctorProbes(kioskPaths()))),

@@ -15,7 +15,7 @@ export function App() {
   // Calm mail alerts: new mail waits in the side rail's inbox instead of the chat.
   const inbox = useInbox(state.items);
   // SG1: new Signal messages wait in the same rail, under their own button.
-  const signals = useSignals(state.items, inbox.quietUntil, state.status?.signal === true);
+  const signals = useSignals(state.items, inbox.quietUntil, state.status?.signal === true, state.signals);
   // One panel at a time.
   const openInbox = (v: boolean) => {
     if (v) signals.setOpen(false);

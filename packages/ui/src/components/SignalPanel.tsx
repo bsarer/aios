@@ -1,4 +1,4 @@
-import type { ChatItem } from '@aios/shared/protocol';
+import type { ChatItem, SignalRow } from '@aios/shared/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { timeLabel } from '../inbox';
 import {
@@ -37,7 +37,7 @@ export interface Signals {
   dismissPeek: () => void;
 }
 
-export function useSignals(items: ChatItem[], quietUntil: number, linked = false): Signals {
+export function useSignals(items: ChatItem[], quietUntil: number, linked = false, kept: SignalRow[] = []): Signals {
   const [openedAt] = useState(() => Date.now());
   const [now, setNow] = useState(openedAt);
   const [seenAt, setSeenAt] = useState(() => loadSignalSeenAt(openedAt));
@@ -51,7 +51,7 @@ export function useSignals(items: ChatItem[], quietUntil: number, linked = false
     return () => window.clearInterval(t);
   }, []);
 
-  const chats = useMemo(() => signalChats(items, Math.max(now, Date.now())), [items, now]);
+  const chats = useMemo(() => signalChats(items, Math.max(now, Date.now()), kept), [items, now, kept]);
   const shown = useMemo(() => linked || hasSignal(items), [items, linked]);
   const { fresh } = signalCounts(chats, seenAt);
 

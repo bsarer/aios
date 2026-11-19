@@ -98,7 +98,7 @@ export interface ShellOptions {
   /** MU1: /music says what is playing, in a line written by code; its changes go through the registry's music_control. */
   music?: { now: () => Promise<string> };
   /** SG1: Signal message cards' Send and Discard, and /signal's status line. Without it, signal messages are ignored and /signal says Signal is off. */
-  signal?: { actions: Pick<SignalActions, 'send' | 'discard'>; status: () => string; recent?: () => SignalRow[] };
+  signal?: { actions: Pick<SignalActions, 'send' | 'discard' | 'edit'>; status: () => string; recent?: () => SignalRow[] };
   /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
   knowledge?: {
     view: () => string;
@@ -281,7 +281,7 @@ export class Shell {
     if (msg.type === 'event_confirm' || msg.type === 'event_discard') return this.calendarAction(msg);
     if (msg.type === 'doc_change_confirm' || msg.type === 'doc_change_discard') return this.docChangeAction(msg);
     // SG1: the user's own click on a Signal card; the broker checks its hash and state before anything is sent. Works while paused, like Send on a draft.
-    if (msg.type === 'signal_send' || msg.type === 'signal_discard') return this.signalAction(msg);
+    if (msg.type === 'signal_send' || msg.type === 'signal_discard' || msg.type === 'signal_edit') return this.signalAction(msg);
     if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
     // The user's own click on Save, so like Send on a draft it works while paused.
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
@@ -401,11 +401,15 @@ export class Shell {
   }
 
   /** Clicks on a Signal message card (SG1): the user's own action; the broker checks the hash and state. */
-  private async signalAction(msg: Extract<ClientMessage, { type: 'signal_send' | 'signal_discard' }>): Promise<void> {
+  private async signalAction(msg: Extract<ClientMessage, { type: 'signal_send' | 'signal_discard' | 'signal_edit' }>): Promise<void> {
     const actions = this.o.signal?.actions;
     if (!actions) return;
     if (msg.type === 'signal_discard') {
       actions.discard(msg.id);
+      return;
+    }
+    if (msg.type === 'signal_edit') {
+      actions.edit(msg.id, msg.text);
       return;
     }
     await actions.send(msg.id, msg.hash);

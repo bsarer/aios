@@ -60,6 +60,7 @@ export interface MessageActions {
   /** SG1: a Signal message goes out only on this click, which echoes the card's hash. */
   onSignalSend: (id: string, hash: string) => void;
   onSignalDiscard: (id: string) => void;
+  onSignalEdit: (id: string, text: string) => void;
   /** A document change (D2) is saved only on this click, which echoes the card's hash. */
   onDocChangeConfirm: (id: string, hash: string) => void;
   onDocChangeDiscard: (id: string) => void;
@@ -508,6 +509,9 @@ const SIGNAL_STATE_TEXT: Record<SignalItem['state'], string> = {
 /** A Signal message waiting for a Send click (SG1). Names can be chosen by the people themselves: plain text only. */
 function SignalCard({ item, actions }: { item: SignalItem; actions: MessageActions }) {
   const open = item.state === 'pending' || item.state === 'failed';
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+  const words = text.trim();
   return (
     <Card data-kind="signal" data-state={item.state} icon="chat" title="Send on Signal?" badge={open ? { text: item.state === 'failed' ? "Didn't send" : NEEDS_OK, tone: item.state === 'failed' ? 'danger' : 'warning' } : false}>
       <div className="flex flex-wrap items-baseline gap-x-2">
@@ -520,9 +524,42 @@ function SignalCard({ item, actions }: { item: SignalItem; actions: MessageActio
           </span>
         )}
       </div>
-      <div data-testid="signal-text" className="inset mt-3 whitespace-pre-wrap break-words px-3.5 py-3 text-[15px]">
-        {item.text}
-      </div>
+      {editing && open ? (
+        // The recipient stays as it is; only the words change. Saving gives the card a new hash.
+        <div className="mt-3 flex flex-col gap-2">
+          <textarea
+            data-testid="signal-edit-text"
+            aria-label="Message"
+            className="min-h-24 w-full rounded-lg bg-transparent px-2 py-1 font-[inherit] outline-none"
+            style={{ border: '1px solid var(--muted)' }}
+            value={text}
+            maxLength={2000}
+            autoFocus
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              data-testid="signal-edit-save"
+              disabled={!words || words === item.text}
+              className="btn btn-primary"
+              onClick={() => {
+                actions.onSignalEdit(item.id, words);
+                setEditing(false);
+              }}
+            >
+              Save changes
+            </button>
+            <button type="button" data-testid="signal-edit-cancel" className="btn btn-quiet" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div data-testid="signal-text" className="inset mt-3 whitespace-pre-wrap break-words px-3.5 py-3 text-[15px]">
+          {item.text}
+        </div>
+      )}
       {item.warnings.map((w) => (
         <div key={w} data-testid="signal-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
           {w}
@@ -533,10 +570,21 @@ function SignalCard({ item, actions }: { item: SignalItem; actions: MessageActio
           {item.result}
         </div>
       )}
-      {open ? (
+      {open && editing ? null : open ? (
         <CardActions>
           <button type="button" data-testid="signal-send" className="btn btn-primary" onClick={() => actions.onSignalSend(item.id, item.hash)}>
             {item.state === 'failed' ? 'Try again: Send' : 'Send'}
+          </button>
+          <button
+            type="button"
+            data-testid="signal-edit"
+            className="btn btn-secondary"
+            onClick={() => {
+              setText(item.text);
+              setEditing(true);
+            }}
+          >
+            Edit
           </button>
           <button type="button" data-testid="signal-discard" className="btn btn-quiet" onClick={() => actions.onSignalDiscard(item.id)}>
             Discard

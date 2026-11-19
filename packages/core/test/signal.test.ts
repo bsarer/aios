@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { type ChatItem, ChatItem as ChatItemSchema, type ServerEvent, ServerEvent as ServerEventSchema, SignalConfig } from '@aios/shared';
+import { type ChatItem, ChatItem as ChatItemSchema, ClientMessage, type ServerEvent, ServerEvent as ServerEventSchema, SignalConfig } from '@aios/shared';
 import { describe, expect, it } from 'vitest';
 import { untrustedSources } from '../src/agent.js';
 import { AuditLog } from '../src/audit.js';
@@ -437,6 +437,50 @@ describe('the Send click (SG1)', () => {
     r.service.stop();
   });
 
+  it('the user can edit the words: a new hash, the same recipient, and Send sends the edited words', async () => {
+    const r = rig({ userText: 'reply to the message' });
+    r.service.start();
+    r.inbox.know([{ chat: SAM, kind: 'person', name: 'Mallory' }]);
+    await r.call('signal_draft', { chat: SAM, text: 'codes: 1234' }, true);
+    const before = r.cards()[0]!;
+    expect(before.warnings).toHaveLength(2);
+    expect(r.actions.edit(before.id, '  On my way  ')).toBe(true);
+    const after = r.cards()[0]!;
+    expect(after).toMatchObject({ text: 'On my way', to: 'Mallory', toDetail: SAM, state: 'pending' });
+    expect(after.hash).not.toBe(before.hash);
+    // The words are the user's now; the warning about who it goes to stays.
+    expect(after.warnings).toEqual(['Mallory is not named in your message. Check who this goes to before sending.']);
+    // A Send click from the card as it was before the edit can't send.
+    expect(await r.actions.send(before.id, before.hash)).toBe('refused');
+    expect(r.cli.requests.filter((q) => q.method === 'send')).toEqual([]);
+    expect(await r.actions.send(after.id, after.hash)).toBe('sent');
+    expect(r.cli.requests.filter((q) => q.method === 'send')).toEqual([{ method: 'send', params: { recipient: [SAM], message: 'On my way' } }]);
+    // A sent card can't be edited; empty or overlong words are refused.
+    expect(r.actions.edit(after.id, 'changed')).toBe(false);
+    await r.call('signal_draft', { chat: SAM, text: 'second' });
+    const next = r.cards()[1]!;
+    expect(r.actions.edit(next.id, '   ')).toBe(false);
+    expect(r.actions.edit(next.id, 'x'.repeat(2001))).toBe(false);
+    expect(r.actions.edit('sig-nope', 'hi')).toBe(false);
+    // The log keeps that it was edited and how long, never the words.
+    expect(r.log().find((e) => e.event === 'edited')).toMatchObject({ kind: 'signal', cardId: before.id, chars: 9 });
+    expect(readFileSync(r.auditPath, 'utf8')).not.toContain('On my way');
+    r.service.stop();
+  });
+
+  it('the Edit click reaches the card only through Shell, with words the protocol checked', async () => {
+    const r = rig();
+    r.inbox.know([{ chat: SAM, kind: 'person', name: 'Sam Lee' }]);
+    await r.call('signal_draft', { chat: SAM, text: 'Running late' });
+    const card = r.cards()[0]!;
+    const shell = new Shell({ store: r.store, model: { stream: () => { throw new Error('no model'); } }, tools: r.tools, audit: new AuditLog(r.auditPath), userName: 'John', timeZone: 'Europe/Istanbul', modelName: 'm', costCapUsd: 2, readBattery: async () => null, readWifi: async () => null, signal: { actions: r.actions, status: () => r.service.status() } });
+    await shell.handle({ type: 'signal_edit', id: card.id, text: 'Running 10 min late' });
+    expect(r.cards()[0]).toMatchObject({ text: 'Running 10 min late', state: 'pending' });
+    expect(r.cli.requests.filter((q) => q.method === 'send')).toEqual([]);
+    expect(ClientMessage.safeParse({ type: 'signal_edit', id: card.id, text: '' }).success).toBe(false);
+    expect(ClientMessage.safeParse({ type: 'signal_edit', id: card.id, text: 'x'.repeat(2001) }).success).toBe(false);
+  });
+
   it('a group card sends to the group id', async () => {
     const r = rig();
     r.service.start();
@@ -556,5 +600,12 @@ describe('Signal in the chat (SG1)', () => {
     expect(p).toContain('signal_draft');
     expect(p).toMatch(/never send it yourself/);
     expect(chatSystemPrompt({ userName: 'John', now: 'now' })).not.toContain('signal_draft');
+  });
+
+  it('the prompt says the card has Edit, and never calls a card "below" (cards sit above the reply)', () => {
+    const p = chatSystemPrompt({ userName: 'John', now: 'now', signal: true });
+    expect(p).toContain('Send, Edit and Discard');
+    expect(p).toContain('appears in the chat above your reply');
+    expect(p).not.toMatch(/card below/);
   });
 });

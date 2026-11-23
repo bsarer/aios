@@ -92,6 +92,17 @@ const SinkList = z.array(
 );
 const NightLight = z.looseObject({ enabled: z.boolean() });
 
+/** S1: Omarchy 4's settings panels, by the plugin id its shell opens (default/hypr/bindings/utilities.lua). */
+export const SETTINGS_PANELS = {
+  network: 'omarchy.network',
+  bluetooth: 'omarchy.bluetooth',
+  audio: 'omarchy.audio',
+  display: 'omarchy.monitor',
+  power: 'omarchy.power',
+} as const;
+export type SettingsPanel = keyof typeof SETTINGS_PANELS;
+export const SETTINGS_PANEL_NAMES = Object.keys(SETTINGS_PANELS) as [SettingsPanel, ...SettingsPanel[]];
+
 export class SystemControls {
   constructor(private readonly run: Run = runCommand) {}
 
@@ -206,6 +217,20 @@ export class SystemControls {
     return this.doNotDisturb();
   }
 
+  // ── Omarchy's settings panels ──
+
+  /**
+   * Opens one of Omarchy's own settings panels (Omarchy 4's shell, the same panels its
+   * Super+Ctrl hotkeys open). `summon` only opens, so asking twice never closes it. The
+   * panel's plugin id comes from SETTINGS_PANELS, never from the model.
+   */
+  async openPanel(panel: SettingsPanel): Promise<void> {
+    const id = SETTINGS_PANELS[panel];
+    const r = await this.run('omarchy-shell', ['shell', 'summon', id, '{}'], { timeoutMs: 5000 });
+    if (r.code !== 0) throw new SystemCommandError('failed', 'omarchy-shell', `couldn't open the ${panel} panel (is Omarchy's shell running?)`);
+    if (r.stdout.trim() !== 'ok') throw new SystemCommandError('failed', 'omarchy-shell', `this version of Omarchy has no ${panel} panel`);
+  }
+
   async lock(): Promise<void> {
     await this.act('omarchy-system-lock', [], 'lock the screen');
   }
@@ -303,7 +328,7 @@ export class SystemControls {
   async connectSaved(name: string): Promise<WifiState> {
     const { saved } = await this.savedNetworks();
     const n = saved.find((s) => s.name.toLowerCase() === name.trim().toLowerCase());
-    if (!n) throw new SystemCommandError('refused', 'nmcli', `"${cleanName(name)}" is not a saved network. New networks are joined in Omarchy's Network panel (Super+Ctrl+N)`);
+    if (!n) throw new SystemCommandError('refused', 'nmcli', `"${cleanName(name)}" is not a saved network. New networks are joined in Omarchy's Network panel, which you can ask me to open`);
     await this.act('nmcli', ['connection', 'up', 'id', n.name], `connect to ${n.name}`, 30_000);
     return this.wifi();
   }

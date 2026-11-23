@@ -10,7 +10,7 @@ import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { Keyring, dataDir } from '@aios/core';
+import { Keyring, Wallpaper, dataDir } from '@aios/core';
 import { type AiosConfig, APP_NAME, configDir, parseConfig, serializeConfig } from '@aios/shared';
 import providers from '../providers.json' with { type: 'json' };
 import { installKiosk, kioskPaths } from './kiosk.js';
@@ -105,6 +105,7 @@ export async function runSetupWindow(): Promise<void> {
     checkMail: (o) => checkMail(o),
     installDesktop,
     signal: linker,
+    wallpaper: new Wallpaper(configDir()),
     // The package's astra; a checkout runs its own through pnpm.
     installAddons: (ids: AddonId[]) => openTerminal(existsSync('/usr/bin/astra') ? ['/usr/bin/astra', 'addons', ...ids.map((i) => `--${i}`)] : ['pnpm', '-C', ROOT, 'astra', 'addons', ...ids.map((i) => `--${i}`)], 'astra-addons'),
     done: () => {

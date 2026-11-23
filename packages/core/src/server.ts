@@ -13,6 +13,7 @@ import type { AppLink } from './apps/link.js';
 import type { AttachmentFiles } from './mail/attachments.js';
 import type { Shell } from './shell.js';
 import { type Dictation, speechBodyLimit } from './speech/dictation.js';
+import type { Wallpaper } from './wallpaper.js';
 
 export interface ServerOptions {
   port: number;
@@ -28,6 +29,8 @@ export interface ServerOptions {
   appLink?: Pick<AppLink, 'change' | 'status'>;
   /** V2: the chat's microphone button. Without it, /speech answers 404. */
   speech?: Pick<Dictation, 'transcribe' | 'maxSeconds'>;
+  /** The picture behind the chat. Without it, /wallpaper answers 404. */
+  wallpaper?: Pick<Wallpaper, 'file'>;
 }
 
 /**
@@ -127,6 +130,17 @@ export async function createServer(shell: Shell, o: ServerOptions): Promise<Fast
     if ('error' in f) return reply.code(422).type('text/plain').send(f.error);
     if (f.kind === 'pdf') return reply.code(200).type('application/pdf').send(f.bytes);
     return reply.code(200).type('application/json; charset=utf-8').send(JSON.stringify(f.view));
+  });
+
+  // The chat's wallpaper: the one copied picture in the config folder, checked by its bytes. Only
+  // the chat page fetches it (as a CSS background); same headers as attachments.
+  app.get('/wallpaper', async (req, reply) => {
+    reply.headers(ATTACHMENT_HEADERS);
+    const site = req.headers['sec-fetch-site'];
+    if (site !== undefined && site !== 'same-origin') return reply.code(403).type('text/plain').send('forbidden');
+    const f = o.wallpaper?.file();
+    if (!f) return reply.code(404).type('text/plain').send('not found');
+    return reply.code(200).type(f.type).send(f.bytes);
   });
 
   // V2: a recording from the chat's microphone button, as audio/wav. Only the chat page itself may

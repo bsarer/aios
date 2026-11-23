@@ -135,3 +135,36 @@ body {
 @media (min-width: 1200px) {
   .inbox-open { padding-right: 480px; }
 }
+
+/*
+ * The chat's wallpaper (/wallpaper, Settings). The picture fills the screen behind everything; the
+ * theme's background lies over it, more over the middle where the conversation is, so text keeps
+ * its contrast. Cards and the message box are solid already. `data-dim` is the user's choice.
+ */
+.wallpaper {
+  --edge: 42%;
+  --middle: 72%;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: var(--bg);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.wallpaper[data-dim="light"] { --edge: 25%; --middle: 55%; }
+.wallpaper[data-dim="strong"] { --edge: 68%; --middle: 88%; }
+.wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bg) var(--edge), transparent) 0%,
+    color-mix(in srgb, var(--bg) var(--middle), transparent) 28%,
+    color-mix(in srgb, var(--bg) var(--middle), transparent) 72%,
+    color-mix(in srgb, var(--bg) var(--edge), transparent) 100%
+  );
+}
+.wallpaper ~ main { text-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 60%, transparent); }

@@ -7,17 +7,23 @@
  *
  * Chromium: $CHROMIUM_PATH, else `chromium` on PATH.
  */
+import { mkdtempSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Page, chromium } from 'playwright-core';
+import { Wallpaper } from '@aios/core';
 import type { AiosConfig, SecretRef } from '@aios/shared';
 import { readPresets } from './onboard/answers.js';
 import { type SetupDeps, startSetupServer } from './onboard/server.js';
 import { type LinkRunner, SignalLinker } from './onboard/signal.js';
 import providers from '../providers.json' with { type: 'json' };
+import { WALLPAPER_ART } from '../../fixtures/wallpaper.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const shotsArg = process.argv.indexOf('--shots');
+const shots = shotsArg > 0 ? process.argv[shotsArg + 1] : undefined;
 const FAKE_KEY = 'sk-or-v1-e2e-fake-key';
 const FAKE_APP_PASSWORD = 'abcd efgh ijkl mnop';
 
@@ -37,7 +43,7 @@ const pretendSignal: LinkRunner = {
   listAccounts: async () => 'Number: +905550000001\n',
 };
 
-function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; exits: number; installs: number; mailTests: { address: string; password: string; host: string }[]; addons: string[][] }): SetupDeps {
+function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, string>; done: number; exits: number; installs: number; mailTests: { address: string; password: string; host: string }[]; addons: string[][]; wallpaper: Wallpaper }): SetupDeps {
   return {
     page: () => readFile(join(here, '..', 'onboard', 'page.html'), 'utf8'),
     presets: readPresets(providers as Record<string, unknown>),
@@ -81,16 +87,21 @@ function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, st
       return ['Started Astra in the background (astra.service).'];
     },
     signal: new SignalLinker(() => '/usr/bin/signal-cli', pretendSignal),
+    wallpaper: state.wallpaper,
     done: () => void state.done++,
     exit: () => void state.exits++,
   };
 }
 
 const next = (p: Page) => p.click('#next');
+async function until(ok: () => Promise<boolean>, ms = 5000): Promise<void> {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) if (await ok()) return;
+  throw new Error('setup e2e: timed out');
+}
 const heading = (p: Page) => p.textContent('h1');
 
 async function main(): Promise<void> {
-  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, exits: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[], addons: [] as string[][] };
+  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, exits: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[], addons: [] as string[][], wallpaper: new Wallpaper(mkdtempSync(join(tmpdir(), 'aios-e2e-wallpaper-'))) };
   const server = await startSetupServer(fakeDeps(state));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
   const errors: string[] = [];
@@ -177,6 +188,30 @@ async function main(): Promise<void> {
     check(await page.isChecked('#app-video'), 'found apps start on');
     check((await page.isChecked('#app-voice')) && (await page.textContent('main'))?.includes('Running'), 'a running whisper.cpp server turns voice on');
     await next(page);
+    check((await heading(page)) === 'Chat wallpaper' && (await page.textContent('main'))?.includes('No wallpaper'), 'the wallpaper step starts with none');
+    // Any real PNG will do: a picture of this page.
+    const picture = await page.screenshot({ type: 'png' });
+    await page.setInputFiles('#wp-file', { name: 'not-a-picture.png', mimeType: 'image/png', buffer: Buffer.from('<svg><script>alert(1)</script></svg>') });
+    await page.waitForSelector('.result.bad');
+    check((await page.textContent('.result.bad'))?.includes('isn’t a picture'), 'a file that isn’t a picture is refused by its bytes');
+    await page.setInputFiles('#wp-file', { name: 'beach.png', mimeType: 'image/png', buffer: picture });
+    await page.waitForSelector('[data-testid="wp-preview"] img');
+    check(state.wallpaper.current() === null, 'a picked picture shows in the preview, and nothing is saved yet');
+    await page.click('button.card:has-text("Strong")');
+    check((await page.getAttribute('[data-testid="wp-preview"]', 'data-dim')) === 'strong', 'the preview dims as chosen');
+    if (shots) {
+      // For the screenshot, the same drawn picture as the chat's checks (fixtures/wallpaper.ts).
+      const art = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+      await art.setContent(WALLPAPER_ART);
+      const drawn = await art.screenshot({ type: 'png' });
+      await art.close();
+      await page.setInputFiles('#wp-file', { name: 'dusk hills.png', mimeType: 'image/png', buffer: drawn });
+      await until(async () => ((await page.getAttribute('[data-testid="wp-preview"] img', 'src')) ?? '').length > 20_000);
+      await page.click('button.card:has-text("Medium")');
+      await page.screenshot({ path: join(shots, 'settings-wallpaper.png') });
+      await page.click('button.card:has-text("Strong")');
+    }
+    await next(page);
     check((await page.textContent('main'))?.includes('You have 2 screens'), 'two screens ask which is Astra’s');
     check((await page.getAttribute('button.card[aria-pressed="true"]', 'aria-pressed')) === 'true' && (await page.textContent('button.card[aria-pressed="true"] b')) === 'eDP-1', 'the focused screen is picked');
     await page.uncheck('#d-bar');
@@ -195,6 +230,7 @@ async function main(): Promise<void> {
     check(c.models.speech?.baseUrl === 'http://127.0.0.1:8178', 'voice is set up for the running whisper.cpp server');
     check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'the key and app password went to the keyring');
     check(!JSON.stringify(c).includes(FAKE_KEY) && !JSON.stringify(c).includes('abcdefghijklmnop'), 'no secret is in the config');
+    check(state.wallpaper.current()?.dim === 'strong', 'Finish put the picture behind the chat, dimmed strongly');
     check(state.installs === 1, 'the desktop parts were installed once');
     check((await page.inputValue('#key').catch(() => '')) === '', 'the page forgets the key');
     await next(page);
@@ -219,6 +255,10 @@ async function main(): Promise<void> {
     check(await again.isChecked('[id="f-~/Projects"]'), 'ticked folders come back');
     await again.click('nav button:has-text("Apps")');
     check(await again.isChecked('#app-voice'), 'voice comes back on');
+    await again.click('nav button:has-text("Wallpaper")');
+    // The page's CSP allows no eval, so this is a function; the scripts are typed without the DOM.
+    await until(async () => (await again.locator('[data-testid="wp-preview"] img').evaluate((img) => (img as unknown as { naturalWidth: number }).naturalWidth)) > 0);
+    check((await again.getAttribute('[data-testid="wp-preview"]', 'data-dim')) === 'strong', 'the wallpaper comes back, with its dim');
     await again.click('nav button:has-text("Finish")');
     check((await again.textContent('#next')) === 'Save', 'the last button is Save');
     await next(again);

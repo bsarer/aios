@@ -270,6 +270,77 @@ describe('R2 setup server: only its own page can drive it', () => {
   });
 });
 
+describe('Wallpaper step: only Finish puts the picture behind the chat', () => {
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png')]);
+  const upload = (url: string, bytes: Buffer, headers: Record<string, string> = {}) =>
+    new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const u = new URL(url);
+      const req = request({ host: '127.0.0.1', port: u.port, path: `${u.pathname}api/wallpaper`, method: 'POST', headers: { host: u.host, origin: u.origin, 'content-type': 'application/octet-stream', ...headers } }, (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+      });
+      req.on('error', reject);
+      req.end(bytes);
+    });
+
+  async function withWallpaper() {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { Wallpaper } = await import('@aios/core');
+    const wallpaper = new Wallpaper(mkdtempSync(join(tmpdir(), 'aios-setup-wp-')));
+    return { wallpaper, t: await serve({ wallpaper }) };
+  }
+
+  it('checks the picked picture, keeps it in memory, and saves it only on Finish', async () => {
+    const { wallpaper, t } = await withWallpaper();
+    try {
+      expect(JSON.parse((await t.send('/s/tok/api/state')).body).wallpaper).toEqual({ available: true, current: null });
+      expect(JSON.parse((await upload(t.s.url, Buffer.from('<svg><script>alert(1)</script></svg>'))).body)).toMatchObject({ ok: false, message: expect.stringContaining('isn’t a picture') });
+      expect((await upload(t.s.url, PNG, { origin: 'https://evil.example' })).status).toBe(403);
+      expect((await upload(t.s.url, PNG, { 'content-type': 'image/png' })).status).toBe(415);
+      expect(JSON.parse((await upload(t.s.url, PNG)).body)).toEqual({ ok: true });
+      expect(wallpaper.current()).toBeNull();
+      const r = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'new', dim: 'strong' } } });
+      expect(JSON.parse(r.body).did).toContain('Put your picture behind the chat.');
+      expect(wallpaper.current()).toMatchObject({ dim: 'strong' });
+      const shown = await t.send('/s/tok/api/wallpaper');
+      expect(shown.status).toBe(200);
+      expect(shown.headers['content-type']).toBe('image/png');
+      // Keep changes only the dim; remove takes it off.
+      await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'keep', dim: 'light' } } });
+      expect(wallpaper.current()).toMatchObject({ dim: 'light' });
+      const off = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'remove', dim: 'light' } } });
+      expect(JSON.parse(off.body).did).toContain('Took the wallpaper off the chat.');
+      expect(wallpaper.current()).toBeNull();
+    } finally {
+      await t.s.close();
+    }
+  });
+
+  it('saves nothing on Exit, and asks again when Finish has no picture', async () => {
+    const { wallpaper, t } = await withWallpaper();
+    try {
+      await upload(t.s.url, PNG);
+      await t.send('/s/tok/api/exit', { method: 'POST', body: {} });
+      expect(wallpaper.current()).toBeNull();
+    } finally {
+      await t.s.close();
+    }
+    const again = await withWallpaper();
+    try {
+      const r = await again.t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'new', dim: 'medium' } } });
+      expect(r.status).toBe(400);
+      expect(JSON.parse(r.body)).toMatchObject({ step: 'wallpaper' });
+      expect(again.t.written).toEqual([]);
+      expect(again.t.stored.size).toBe(0);
+    } finally {
+      await again.t.s.close();
+    }
+  });
+});
+
 describe('Add-ons from the setup window', () => {
   it('opens the add-ons terminal only for known add-ons', async () => {
     const t = await serve();

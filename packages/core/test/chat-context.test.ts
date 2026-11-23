@@ -111,3 +111,34 @@ describe('the chat context budget', () => {
     expect(AiosConfig.shape.memory.parse(undefined).contextTokens).toBe(32_000);
   });
 });
+
+describe('email ids from earlier notes', () => {
+  // Found in use: "who is Olga?" was answered with an unrelated email's id (a Chromium bug notice)
+  // taken from an older note, and "show me the attachment" then opened it.
+  it('a note says its id is only for the question above it', async () => {
+    const { quarantineNote } = await import('../src/agent.js');
+    for (const note of [quarantineNote(['INBOX:179310']), quarantineNote(['INBOX:1'], true), quarantineNote(['INBOX:1'], false, true)]) {
+      expect(note).toContain('only for the question just above; for a different person or subject, search again instead of reusing it.');
+    }
+    expect(quarantineNote([])).not.toContain('only for the question');
+  });
+
+  it('the chat rules say to find a person\'s email by searching, and to say so when the opened one is about something else', () => {
+    const p = chatSystemPrompt({ userName: 'John', now: 'now' });
+    expect(p).toContain('An id in a note belongs only to the question just above that note');
+    expect(p).toMatch(/only call an email theirs if its From or To shows them/);
+    expect(p).toMatch(/if the email you opened is about something else, say so and search/);
+  });
+
+  it('mail search puts emails to or from the name above ones that only mention it', async () => {
+    const { rankSearch } = await import('../src/mail/imap.js');
+    const at = (d: string) => new Date(`2026-11-${d}T12:00:00Z`);
+    const found = [
+      { id: 'INBOX:179310', date: at('23') }, // a bug notice whose text has "olga" in it somewhere
+      { id: 'Sent:812', date: at('17') }, // to Olga Kozel
+      { id: 'INBOX:179001', date: at('20') },
+      { id: 'Sent:640', date: at('01') }, // to Olga Kozel
+    ];
+    expect(rankSearch(found, new Set(['Sent:812', 'Sent:640']), 3).map((m) => m.id)).toEqual(['Sent:812', 'Sent:640', 'INBOX:179310']);
+  });
+});

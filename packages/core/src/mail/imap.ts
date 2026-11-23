@@ -184,12 +184,24 @@ async function readBytes(s: Readable, maxBytes: number): Promise<Buffer | null> 
  * UIDs where `text` appears in sender, recipients, subject or body. One SEARCH per
  * field, unioned: some servers (GreenMail among them) reject OR with quoted phrases.
  */
-async function matchAnyField(client: ImapFlow, text: string, extra: { since?: Date }): Promise<number[]> {
-  const all = new Set<number>();
-  for (const field of ['from', 'to', 'subject', 'body'] as const) {
-    for (const uid of (await client.search({ [field]: text, ...extra }, { uid: true })) || []) all.add(uid);
+/** The messages with `text` in From, To or Subject, and those with it only in the body. */
+async function matchFields(client: ImapFlow, text: string, extra: { since?: Date }): Promise<{ header: number[]; body: number[] }> {
+  const header = new Set<number>();
+  for (const field of ['from', 'to', 'subject'] as const) {
+    for (const uid of (await client.search({ [field]: text, ...extra }, { uid: true })) || []) header.add(uid);
   }
-  return [...all];
+  const body = ((await client.search({ body: text, ...extra }, { uid: true })) || []).filter((u) => !header.has(u));
+  return { header: [...header], body };
+}
+
+/**
+ * Search order: messages with every word in From, To or Subject first, newest first, then the
+ * rest. IMAP matches inside words ("Olga" is in "Tolga") and anywhere in the body, so a recent
+ * email that only mentions a name could otherwise push out the ones to or from that person.
+ */
+export function rankSearch<T extends { id: string; date: Date | null }>(found: T[], inHeaders: ReadonlySet<string>, limit: number): T[] {
+  const time = (m: T) => m.date?.getTime() ?? 0;
+  return [...found].sort((a, b) => Number(inHeaders.has(b.id)) - Number(inHeaders.has(a.id)) || time(b) - time(a)).slice(0, limit);
 }
 
 /** Headers, the readable body and attachment names of one message in the selected folder. */
@@ -316,25 +328,37 @@ export class MailClient {
   /** Newest first, across INBOX and Sent. */
   async search(query: string, opts: { since?: Date; limit: number; signal?: AbortSignal }): Promise<MessageSummary[]> {
     const found: MessageSummary[] = [];
+    const inHeaders = new Set<string>();
     for (const folder of FOLDERS) {
       await this.inFolder(folder, async (client) => {
         const since = opts.since ? { since: opts.since } : {};
         const q = query.trim();
-        let uids = q ? await matchAnyField(client, q, since) : ((await client.search({ all: true, ...since }, { uid: true })) || []);
-        const words = q.split(/\s+/).filter((w) => w.length >= 3);
-        if (!uids.length && words.length > 1) {
-          // No exact phrase: messages that contain every word somewhere.
-          const sets = await Promise.all(words.map((w) => matchAnyField(client, w, since)));
-          uids = sets.reduce((acc, set) => acc.filter((u) => set.includes(u)));
-        }
-        const newest = uids.sort((a, b) => b - a).slice(0, opts.limit);
+        let header: number[] = [];
+        let uids: number[];
+        if (q) {
+          const m = await matchFields(client, q, since);
+          header = m.header;
+          uids = [...header, ...m.body];
+          const words = q.split(/\s+/).filter((w) => w.length >= 3);
+          if (!uids.length && words.length > 1) {
+            // No exact phrase: messages that contain every word somewhere (in the headers, if every word is there).
+            const sets = await Promise.all(words.map((w) => matchFields(client, w, since)));
+            const every = (pick: (x: { header: number[]; body: number[] }) => number[]) => sets.map(pick).reduce((acc, set) => acc.filter((u) => set.includes(u)));
+            header = every((x) => x.header);
+            uids = every((x) => [...x.header, ...x.body]);
+          }
+        } else uids = (await client.search({ all: true, ...since }, { uid: true })) || [];
+        const top = new Set(header);
+        // Header matches first, then the newest of the rest.
+        const newest = [...uids.filter((u) => top.has(u)).sort((a, b) => b - a), ...uids.filter((u) => !top.has(u)).sort((a, b) => b - a)].slice(0, opts.limit);
         if (!newest.length) return;
+        for (const u of top) inHeaders.add(mailId(folder, u));
         for await (const msg of client.fetch(newest.join(','), { uid: true, envelope: true, internalDate: true }, { uid: true })) {
           found.push(summaryOf(folder, msg));
         }
       }, opts.signal);
     }
-    return found.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)).slice(0, opts.limit);
+    return rankSearch(found, inHeaders, opts.limit);
   }
 
   /**

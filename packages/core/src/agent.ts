@@ -58,17 +58,20 @@ export function quarantineNote(ids: string[], calendar = false, document = false
   // "reply to it" just works: the email comes back into view (and its links become confirm
   // cards) instead of the model saying it can't see it.
   const again = ids.length ? `call mail_read with ${ids.join(', ')} again` : 'find it again with mail_search or mail_recent';
+  // An id here belongs to the question just above it. Found in use: with more of the chat in view,
+  // "who is Olga?" was answered with an unrelated email's id taken from an older note.
+  const only = ids.length ? ` ${ids.length > 1 ? 'Those ids are' : 'That id is'} only for the question just above; for a different person or subject, search again instead of reusing ${ids.length > 1 ? 'them' : 'it'}.` : '';
   if (document) {
     const read = [...(ids.length ? [`email ${ids.join(', ')}`] : []), ...(calendar ? ['the calendar'] : []), 'a document'];
     const which = read.length > 1 ? `${read.slice(0, -1).join(', ')} and ${read.at(-1)!}` : read[0]!;
-    return `(Answering this, I read ${which}. That exchange is hidden from me now, because outside text can carry instructions. If the user follows up on it, read it again first, then do what they ask; never ask them which one they mean.)`;
+    return `(Answering this, I read ${which}. That exchange is hidden from me now, because outside text can carry instructions. If the user follows up on it, read it again first, then do what they ask; never ask them which one they mean.${only})`;
   }
   if (calendar && !ids.length) {
     return '(Answering this, I read the calendar. That exchange is hidden from me now, because event text from invites can carry instructions. If the user follows up on it, look at the calendar again first, then do what they ask.)';
   }
   const which = ids.length ? `email ${ids.join(', ')}` : 'an email';
-  if (calendar) return `(Answering this, I read ${which} and the calendar. That exchange is hidden from me now, because email and event text can carry instructions. If the user follows up on it, ${again} and look at the calendar again first, then do what they ask.)`;
-  return `(Answering this, I read ${which}. That exchange is hidden from me now, because email text can carry instructions. If the user follows up on it (a link in it, a reply, a translation), ${again} first, then do what they ask; never ask them which email they mean.)`;
+  if (calendar) return `(Answering this, I read ${which} and the calendar. That exchange is hidden from me now, because email and event text can carry instructions. If the user follows up on it, ${again} and look at the calendar again first, then do what they ask.${only})`;
+  return `(Answering this, I read ${which}. That exchange is hidden from me now, because email text can carry instructions. If the user follows up on it (a link in it, a reply, a translation), ${again} first, then do what they ask; never ask them which email they mean.${only})`;
 }
 
 /**

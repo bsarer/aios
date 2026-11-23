@@ -75,6 +75,8 @@ const MAX_CHUNK_MAILS = 5000;
 /** K3: more mail is listed while fewer than this many runs' worth wait, at most this many months a run. */
 const QUEUE_RUNS = 2;
 const MAX_CHUNKS_PER_RUN = 6;
+/** Profiles: months of past mail headers gone through per run for people (headers only, no model). */
+const PEOPLE_CHUNKS_PER_RUN = 12;
 /** K5: on its first run, items read in the last this many days (at most this many) are read again under the new rules. */
 const REREAD_DAYS = 30;
 const REREAD_MAX = 400;
@@ -337,6 +339,8 @@ export class KnowledgeCrawler {
     const fresh: ListedMail[] = [];
     const sent = found.filter((m) => this.mailKind(m) === 'sent');
     for (const m of sent) {
+      // Profiles see every listed email's headers, even one read before profiles were on.
+      this.noteHeaders(m, true, now);
       if (this.ledger.has(key(m))) continue;
       for (const to of m.to) this.ledger.signal('contact', to.address);
       if (m.inReplyTo) {
@@ -346,24 +350,83 @@ export class KnowledgeCrawler {
       if (m.threadId) this.ledger.signal('thread', m.threadId);
       items.push({ key: key(m), kind: 'sent', ref: m.id, at: m.date?.getTime() ?? now, phase, priority: PRIORITY.sent });
       fresh.push(m);
-      this.o.profiles?.noteMail({ key: key(m), sent: true, from: m.from, to: m.to, subject: m.subject, at: m.date?.getTime() ?? now });
     }
     let skipped = 0;
     for (const m of found) {
-      if (this.mailKind(m) === 'sent' || this.ledger.has(key(m))) continue;
+      if (this.mailKind(m) === 'sent') continue;
+      const listed = this.ledger.has(key(m));
       if (skipReason(m, false, c)) {
-        skipped++;
+        if (!listed) skipped++;
         continue;
       }
+      this.noteHeaders(m, false, now);
+      if (listed) continue;
       const replied = this.ledger.signalCount('replied', m.messageId) > 0 || this.ledger.signalCount('thread', m.threadId) > 0;
       const priority = replied || m.starred || m.important ? PRIORITY.replied : this.ledger.signalCount('contact', m.from?.address) >= 2 ? PRIORITY.contact : PRIORITY.mail;
       items.push({ key: key(m), kind: 'mail', ref: m.id, at: m.date?.getTime() ?? now, phase, priority });
       fresh.push(m);
-      this.o.profiles?.noteMail({ key: key(m), sent: false, from: m.from, to: m.to, subject: m.subject, at: m.date?.getTime() ?? now });
     }
     if (skipped) this.setting.set('skipped', String(this.num('skipped') + skipped));
     this.skippedThisRun += skipped;
     return { added: this.ledger.add(items, now), fresh: fresh.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)) };
+  }
+
+  /** Profiles: one email's headers (who, when, subject), never its body. */
+  private noteHeaders(m: ListedMail, sent: boolean, now: number): void {
+    this.o.profiles?.noteMail({ key: `mail:${m.messageId ?? m.id}`, sent, from: m.from, to: m.to, subject: m.subject, at: m.date?.getTime() ?? now });
+  }
+
+  /**
+   * Profiles: once, the headers of the mail listed before profiles started (each email is
+   * listed for reading only once, so the reading never showed it to them). Sent mail first,
+   * all the way back, so a reply from someone you wrote to earlier still counts; then received
+   * mail, which only adds to people already known. Headers only: no ledger, no model.
+   * Returns how many emails were noted.
+   */
+  private async peoplePass(now: number): Promise<number> {
+    if (!this.o.profiles || !this.o.mail || !this.on('mail')) return 0;
+    const stage = this.setting.get('peopleStage') || 'sent';
+    if (stage === 'done') return 0;
+    // As far back as the reading has listed; nothing yet means nothing to go through.
+    const windowFrom = this.num('windowFrom');
+    if (!windowFrom) return 0;
+    const stop = Math.min(windowFrom, this.num('cursor') || windowFrom);
+    if (!this.num('peopleStart')) {
+      this.setting.set('peopleStart', String(now));
+      this.setting.set('peopleCursor', String(now));
+    }
+    const c = this.o.config;
+    let noted = 0;
+    for (let n = 0; n < PEOPLE_CHUNKS_PER_RUN; n++) {
+      const cursor = this.num('peopleCursor');
+      const from = Math.max(cursor - CHUNK, stop);
+      let found: ListedMail[];
+      try {
+        found = await this.o.mail.list({ since: new Date(from), before: new Date(cursor), limit: MAX_CHUNK_MAILS, skipCategories: c.skipCategories });
+      } catch (err) {
+        this.o.audit.append({ kind: 'knowledge', event: 'mail_error', error: (err as Error).message.slice(0, 200) });
+        break;
+      }
+      for (const m of found) {
+        const sent = this.mailKind(m) === 'sent';
+        if (stage === 'sent' && sent) {
+          this.noteHeaders(m, true, now);
+          noted++;
+        } else if (stage === 'received' && !sent && !skipReason(m, false, c)) {
+          this.noteHeaders(m, false, now);
+          noted++;
+        }
+      }
+      this.setting.set('peopleCursor', String(from));
+      if (from <= stop) {
+        const next = stage === 'sent' ? 'received' : 'done';
+        this.setting.set('peopleStage', next);
+        this.setting.set('peopleCursor', this.setting.get('peopleStart') ?? String(now));
+        this.o.audit.append({ kind: 'knowledge', event: 'people_pass', stage, done: next === 'done' });
+        break;
+      }
+    }
+    return noted;
   }
 
   private findFiles(since: number, limit: number, phase: Phase, now: number): number {
@@ -731,6 +794,7 @@ export class KnowledgeCrawler {
     this.skippedThisRun = 0;
     const reread = this.upgrade(now);
     const { found, freshMail } = await this.discover(now);
+    await this.peoplePass(now);
     const phase: Phase = this.backfilling() ? 'backfill' : 'hourly';
     let choice = phase === 'backfill' ? this.o.models.backfill : this.o.models.hourly;
     let budgetHit = false;

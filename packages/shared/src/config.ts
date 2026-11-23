@@ -384,12 +384,20 @@ export const KnowledgeConfig = z.strictObject({
   enabled: z.boolean().default(true),
   /** How often it looks for what is new. */
   everyMinutes: z.int().min(15).max(24 * 60).default(60),
-  /** The hourly updates: "local", the local model ([models.local]); without one, code writes only Upcoming and Recent activity. "cloud": the nightly role. */
+  /**
+   * K6: false (the default): everything is read on the cloud model (`cloudModel`, else the nightly
+   * model), and the local model ([models.local]) reads only when the cloud can't (no key, no
+   * credit, the daily cap or `dailyBudgetUsd` spent). true: nothing goes to the cloud; mail, files
+   * and chat are read on the local model only (more private, much less accurate). `model`,
+   * `backfillModel` and `olderMail`'s "local"/"cloud" choice are kept only so older config files load.
+   */
+  localOnly: z.boolean().default(false),
+  /** Before K6: the hourly updates' model. Ignored now (see localOnly). */
   model: z.enum(['local', 'cloud']).default('local'),
   sources: z.array(z.enum(KNOWLEDGE_SOURCES)).max(KNOWLEDGE_SOURCES.length).default([...KNOWLEDGE_SOURCES]),
   /** K2/K3: the first pass reads mail (INBOX and Sent) from this many days back (about 6 months), and every indexed file. 0: no first pass. */
   backfillDays: z.int().min(0).max(730).default(183),
-  /** K2: the first pass runs on the cloud nightly role ("cloud", the default) or the local model ("local"). */
+  /** Before K6: the first pass's model. Ignored now (see localOnly). */
   backfillModel: z.enum(['local', 'cloud']).default('cloud'),
   /**
    * The model id for the knowledge base's cloud reading, on the nightly role's connection and key
@@ -407,9 +415,9 @@ export const KnowledgeConfig = z.strictObject({
   /** One copy of the file a day is kept in knowledge/history for this many days. */
   keepDays: z.int().min(1).max(90).default(14),
   /**
-   * K3: mail older than the first pass. "local-overnight" (the default): read on the local model,
-   * only in the `overnight` hours, newest first. "cloud": on backfillModel's cloud role, under
-   * `dailyBudgetUsd`. "off": never.
+   * K3: mail older than the first pass. "local-overnight" (the default): read only in the
+   * `overnight` hours, newest first. "cloud": at any hour. "off": never. K6: on the cloud model
+   * under `dailyBudgetUsd` either way, or the local model with localOnly.
    */
   olderMail: z.enum(['off', 'local-overnight', 'cloud']).default('local-overnight'),
   /** K3: how far back older mail goes, in months before the first pass's window. */

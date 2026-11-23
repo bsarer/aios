@@ -29,6 +29,7 @@ const CONFIG: KnowledgeConfig = {
   model: 'local',
   backfillDays: 183,
   backfillModel: 'cloud',
+  localOnly: false,
   backfillMaxMails: 5000,
   backfillMaxFiles: 300,
   perRun: 40,
@@ -249,7 +250,7 @@ describe('listing a big mailbox', () => {
     expect(await r.crawler.runIfDue()).toBe('updated');
     expect(r.asked).toHaveLength(cloud);
     expect(r.crawler.progress().older.total).toBeGreaterThan(0);
-    expect(progressText(r.crawler.progress(), true)).toMatch(/Older mail: 0 of \d+ read, listed back to \d{4}-\d\d-\d\d\. It continues overnight on the local model\./);
+    expect(progressText(r.crawler.progress(), true)).toMatch(/Older mail: 0 of \d+ read, listed back to \d{4}-\d\d-\d\d\. It continues overnight\./);
     expect(await r.crawler.runIfDue()).toBe('not_due');
     // Overnight: every five minutes until it is all read.
     r.setNow('2026-11-11T02:00');

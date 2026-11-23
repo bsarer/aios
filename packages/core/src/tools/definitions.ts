@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAX_CHANGES, SheetChange, WordChange } from '../docs/changes.js';
 import { MUSIC_ACTIONS } from '../music/player.js';
+import { SETTINGS_PANEL_NAMES } from '../system/controls.js';
 
 /**
  * Risk tiers are enforced in code (registry and approval brokers), not by prompts.
@@ -521,7 +522,7 @@ export const ALPHA_TOOLS = [
   def({
     name: 'wifi_networks',
     tier: 'read',
-    description: 'Saved Wi-Fi networks and whether each is in range. New networks are joined in Omarchy\'s Network panel (Super+Ctrl+N), not here.',
+    description: 'Saved Wi-Fi networks and whether each is in range. New networks are joined in Omarchy\'s Network panel (system_panel_open with network), not here.',
     input: z.strictObject({}),
   }),
   def({
@@ -628,6 +629,13 @@ export const ALPHA_TOOLS = [
     tier: 'device',
     description: 'Set the power profile.',
     input: z.strictObject({ profile: z.enum(['power-saver', 'balanced', 'performance']) }),
+  }),
+  def({
+    name: 'system_panel_open',
+    tier: 'device',
+    description:
+      "Open one of Omarchy's own settings panels on screen: network (Wi-Fi networks, joining a new one with its password), bluetooth (pairing and devices), audio (outputs, inputs, levels), display or power. Use it when the user asks to open or show Wi-Fi, Bluetooth, sound, display or power settings, or to join a new Wi-Fi network.",
+    input: z.strictObject({ panel: z.enum(SETTINGS_PANEL_NAMES) }),
   }),
   def({
     name: 'screen_lock',

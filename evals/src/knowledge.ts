@@ -145,6 +145,8 @@ async function main(): Promise<void> {
   for (const c of contenders) {
     for (let r = 0; r < repeat; r++) {
       for (const [n, f] of FIXTURES.entries()) {
+        // A refused key or missing credit won't change on the next item: stop this model.
+        if (rows.some((x) => x.who === c.label && /^(auth|credits|forbidden|key_missing|not_configured):/.test(x.ex.error ?? ''))) break;
         const ex = await extractOnce(c.client, fixtureRequest(c.role, f.item, n));
         const checks = ex.ok ? grade(f, ex.lines) : f.checks.map((k) => ({ label: k.label, pass: false, culprit: ex.error }));
         rows.push({ id: f.id, who: c.label, run: r, ex, checks });
@@ -156,9 +158,11 @@ async function main(): Promise<void> {
   const date = new Date().toISOString().slice(0, 10);
   const summary = contenders.map((c) => {
     const xs = rows.filter((x) => x.who === c.label);
-    const cs = xs.flatMap((x) => x.checks);
-    const traps = xs.flatMap((x) => x.checks.filter((_k, i) => FIXTURES.find((f) => f.id === x.id)!.checks[i]!.forbid));
-    const facts = xs.flatMap((x) => x.checks.filter((_k, i) => FIXTURES.find((f) => f.id === x.id)!.checks[i]!.expect));
+    // Only answers count: a failed call is an error, not a guess.
+    const answered = xs.filter((x) => x.ex.ok);
+    const cs = answered.flatMap((x) => x.checks);
+    const traps = answered.flatMap((x) => x.checks.filter((_k, i) => FIXTURES.find((f) => f.id === x.id)!.checks[i]!.forbid));
+    const facts = answered.flatMap((x) => x.checks.filter((_k, i) => FIXTURES.find((f) => f.id === x.id)!.checks[i]!.expect));
     return {
       who: c.label,
       pass: cs.filter((k) => k.pass).length,
@@ -177,7 +181,7 @@ async function main(): Promise<void> {
     '',
     `Invented emails, chat and calendar only. Every model gets the knowledge base's own extraction request, unchanged. ${repeat} run${repeat > 1 ? 's' : ''}.`,
     '',
-    '| Model | Checks passed | Guesses stated as facts | Real facts kept | Errors | Avg time | Cost |',
+    '| Model | Checks passed (answered items) | Guesses stated as facts | Real facts kept | Failed calls | Avg time | Cost |',
     '|---|---|---|---|---|---|---|',
     ...summary.map((s) => `| \`${s.who}\` | ${s.pass} of ${s.total} | ${s.guesses} of ${s.traps} traps | ${s.facts} of ${s.factTotal} | ${s.errors} | ${(s.avgMs / 1000).toFixed(1)} s | ${fmtUsd(s.usd)} |`),
     '',

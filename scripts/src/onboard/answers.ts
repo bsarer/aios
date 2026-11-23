@@ -5,7 +5,7 @@
  * the nightly job use the chat's model and key, and every section setup doesn't show is kept
  * from the existing config. Pure, so it is unit-tested (scripts/test/onboard.test.ts).
  */
-import { AiosConfig, DEFAULT_PORT, EmbeddingsConfig, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig } from '@aios/shared';
+import { AiosConfig, DEFAULT_PORT, EmbeddingsConfig, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig, WallpaperDim } from '@aios/shared';
 import { z } from 'zod';
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
@@ -109,6 +109,11 @@ export const SetupAnswers = z.strictObject({
   signal: z.strictObject({ enabled: z.boolean() }).default({ enabled: false }),
   /** The screen Astra keeps; empty when there is only one. */
   monitor: z.union([z.literal(''), z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/)]).default(''),
+  /**
+   * The picture behind the chat. `new` uses the picture this window was sent (POST wallpaper);
+   * `remove` takes the current one away; `keep` leaves it and only sets the dim.
+   */
+  wallpaper: z.strictObject({ change: z.enum(['keep', 'new', 'remove']), dim: WallpaperDim }).default({ change: 'keep', dim: 'medium' }),
 });
 export type SetupAnswers = z.infer<typeof SetupAnswers>;
 
@@ -238,7 +243,7 @@ function signalSection(a: SetupAnswers, base: AiosConfig | null, found: FoundApp
 export class SetupError extends Error {
   override readonly name = 'SetupError';
   constructor(
-    readonly step: 'welcome' | 'ai' | 'mail' | 'signal' | 'folders' | 'desktop',
+    readonly step: 'welcome' | 'ai' | 'mail' | 'signal' | 'folders' | 'wallpaper' | 'desktop',
     message: string,
   ) {
     super(message);

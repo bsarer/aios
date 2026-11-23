@@ -86,6 +86,8 @@ export function App() {
   return (
     // While the inbox is open on a wide screen, the chat moves aside for it (styles.css).
     <div className={`flex h-full flex-col ${inbox.open || signals.open ? 'inbox-open' : ''}`}>
+      {/* The user's wallpaper, behind everything, with the theme's background over it so text stays readable. The version is checked by the protocol (hex only). */}
+      {state.wallpaper && <div aria-hidden="true" data-testid="wallpaper" data-dim={state.wallpaper.dim} className="wallpaper" style={{ backgroundImage: `url("/wallpaper?v=${state.wallpaper.version}")` }} />}
       <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} onClear={fresh ? undefined : () => send({ type: 'chat_clear' })} working={working} mail={{ fresh: inbox.fresh, urgent: inbox.urgent }} onMail={() => openInbox(!inbox.open)} />
       {/* S7: the chat keeps its own screen; this says where apps are and how to come back. */}
       {state.status?.appsAt && (

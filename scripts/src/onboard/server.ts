@@ -7,7 +7,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { AiosConfig, SecretRef } from '@aios/shared';
+import type { AiosConfig, SecretRef, Wallpaper as WallpaperState } from '@aios/shared';
+import { type Wallpaper, WALLPAPER_MAX_BYTES, checkWallpaperBytes } from '@aios/core';
 import { z } from 'zod';
 import {
   type FoundApps,
@@ -50,6 +51,8 @@ export interface SetupDeps {
   installDesktop: (c: AiosConfig, d: SetupAnswers['desktop']) => Promise<string[]>;
   /** SG1: linking the phone to Signal. Without it, the Signal step says linking isn't available. */
   signal?: { start(): Promise<LinkState>; readonly status: LinkState; cancel(): void };
+  /** The picture behind the chat, in the config folder. Without it, the Wallpaper step says it isn't available. */
+  wallpaper?: Pick<Wallpaper, 'current' | 'file' | 'set' | 'setDim' | 'remove'>;
   /** Opens the chat and closes the setup window. */
   done: () => void;
   /** Closes the setup window without saving anything or opening the chat (the Exit button). */
@@ -72,6 +75,8 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
   const token = opts.token ?? randomBytes(24).toString('base64url');
   let origin = '';
   let finished = false;
+  // A picture the window sent, held here until Finish; Exit drops it with the window.
+  let pickedWallpaper: Buffer | null = null;
 
   const servers = async (address: string, imap?: MailServers['imap'], smtp?: MailServers['smtp']): Promise<MailServers | null> =>
     serversFor(address, await deps.mx(address)) ?? (imap && smtp ? { provider: 'other', imap, smtp } : null);
@@ -79,8 +84,10 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
   const api: Record<string, (body: unknown) => Promise<unknown>> = {
     'GET state': async () => {
       const [existing, look] = await Promise.all([deps.readConfig(), deps.look()]);
+      const wallpaper: WallpaperState | undefined = deps.wallpaper?.current();
       return {
         existing: summarize(existing, deps.presets),
+        wallpaper: deps.wallpaper ? { available: true, current: wallpaper ?? null } : { available: false, current: null },
         presets: Object.entries(deps.presets).map(([id, p]) => ({ id, label: p.label, blurb: p.blurb, keyUrl: p.keyUrl, defaultModel: p.defaultModel ?? '' })),
         ...look,
       };
@@ -127,6 +134,8 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
     },
     'POST finish': async (body) => {
       const answers = SetupAnswers.parse(body);
+      // Checked before anything is written, so a missing picture never leaves a half-saved setup.
+      if (answers.wallpaper.change === 'new' && deps.wallpaper && !pickedWallpaper) throw new SetupError('wallpaper', 'Pick the picture again.');
       const existing = await deps.readConfig();
       const look = await deps.look();
       const s = serversFor(answers.mail.address, await deps.mx(answers.mail.address));
@@ -134,7 +143,7 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       const built = buildConfig(answers, existing, deps.presets, look.apps, s, link?.state === 'linked' ? link.number : null);
       for (const [ref, value] of built.secrets) await deps.keyring.set(ref, value);
       await deps.writeConfig(built.config);
-      const did = ['Saved your settings, and your keys in the keyring.', ...(await deps.installDesktop(built.config, answers.desktop))];
+      const did = ['Saved your settings, and your keys in the keyring.', ...saveWallpaper(answers.wallpaper), ...(await deps.installDesktop(built.config, answers.desktop))];
       finished = true;
       return { ok: true, did };
     },
@@ -149,6 +158,23 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       return { ok: true };
     },
   };
+
+  /** Finish only: the chat's wallpaper, as the window chose it. */
+  function saveWallpaper(w: SetupAnswers['wallpaper']): string[] {
+    const wp = deps.wallpaper;
+    if (!wp) return [];
+    if (w.change === 'remove') return wp.remove() ? ['Took the wallpaper off the chat.'] : [];
+    if (w.change === 'new') {
+      if (!pickedWallpaper) return [];
+      const r = wp.set(pickedWallpaper, w.dim);
+      if (!r.ok) throw new SetupError('wallpaper', r.error);
+      pickedWallpaper = null;
+      return ['Put your picture behind the chat.'];
+    }
+    const now = wp.current();
+    if (now && now.dim !== w.dim) wp.setDim(w.dim);
+    return [];
+  }
 
   const server = createServer((req, res) => {
     void handle(req, res).catch((err: unknown) => {
@@ -166,6 +192,26 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
     if (prefix !== 's' || !given || !sameToken(given, token)) return void send(res, 404, { ok: false });
     const route = rest.join('/');
     if (req.method === 'GET' && route === '') return void page(res);
+    // The current wallpaper, for the Wallpaper step's preview (img-src 'self').
+    if (req.method === 'GET' && route === 'api/wallpaper') {
+      const f = deps.wallpaper?.file();
+      if (!f) return void send(res, 404, { ok: false });
+      res.writeHead(200, { 'content-type': f.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      return void res.end(f.bytes);
+    }
+    // A picture picked in the window: raw bytes, checked here and kept in memory until Finish.
+    if (req.method === 'POST' && route === 'api/wallpaper') {
+      if (req.headers.origin !== origin) return void send(res, 403, { ok: false });
+      if (req.headers['content-type'] !== 'application/octet-stream') return void send(res, 415, { ok: false });
+      if (!deps.wallpaper) return void send(res, 404, { ok: false, message: 'The wallpaper isn’t available here.' });
+      const bytes = await readBytes(req, WALLPAPER_MAX_BYTES);
+      if (!bytes) return void send(res, 200, { ok: false, message: `That picture is too big (over ${WALLPAPER_MAX_BYTES / 1024 / 1024} MB).` });
+      const c = checkWallpaperBytes(bytes);
+      // A refusal is an answer for the step, like a failed key test, not an error.
+      if (!c.ok) return void send(res, 200, { ok: false, message: c.error });
+      pickedWallpaper = bytes;
+      return void send(res, 200, { ok: true });
+    }
     if (!route.startsWith('api/')) return void send(res, 404, { ok: false });
     const name = `${req.method} ${route.slice(4)}`;
     const fn = api[name];
@@ -210,6 +256,18 @@ function sameToken(a: string, b: string): boolean {
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(JSON.stringify(body));
+}
+
+/** The body as bytes, or null once it is over `max`. */
+async function readBytes(req: IncomingMessage, max: number): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  // Read to the end either way, so the answer can still be sent; keep nothing past `max`.
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size <= max) chunks.push(c as Buffer);
+  }
+  return size > max ? null : Buffer.concat(chunks);
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

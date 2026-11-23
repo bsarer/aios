@@ -162,9 +162,9 @@ describe('whole-text search', () => {
         VALUES ('/x/lease.pdf', 'lease.pdf', '~/Documents', 'pdf', 10, 1, 1, '{"title":"Flat lease"}', 'done', 'A lease.', 'rental', 'done', 'home', 1);`);
     // Before F3's migration; K2's (knowledge_items, after it) runs again harmlessly, and K3's
     // (after that) runs again once its column, index and table are gone; SG1's (Signal, after K3)
-    // runs again harmlessly too, and so does K5's (knowledge facts, after SG1).
+    // runs again harmlessly too, and so do K5's (knowledge facts, after SG1) and the profiles' (people, after K5).
     s1.db.exec('DROP INDEX knowledge_items_pending; ALTER TABLE knowledge_items DROP COLUMN priority; DROP TABLE knowledge_signals;');
-    s1.db.pragma(`user_version = ${version - 5}`);
+    s1.db.pragma(`user_version = ${version - 6}`);
     s1.db.close();
     const s2 = new Store(path);
     const c = new FileCatalog(s2);

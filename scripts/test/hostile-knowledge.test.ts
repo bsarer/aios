@@ -70,6 +70,8 @@ const CONFIG: KnowledgeConfig = {
   wiki: true,
   pageSummariesPerRun: 10,
   checkEveryDays: 7,
+  profiles: true,
+  contactsPerRun: 20,
 };
 
 /** A pretend mailbox: one hostile email whose whole body is the attack, in INBOX and in Sent. */

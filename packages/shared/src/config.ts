@@ -429,6 +429,14 @@ export const KnowledgeConfig = z.strictObject({
   pageSummariesPerRun: z.int().min(0).max(100).default(10),
   /** K4: the check for old commitments, duplicates and pages with no links, every this many days. 0: only /knowledge check. */
   checkEveryDays: z.int().min(0).max(90).default(7),
+  /**
+   * Profiles: each person's wiki page also says who they are (Google Contacts, saved contacts
+   * only), how you know them (only when something states it) and your recent conversations
+   * (mail headers and Signal counts). A person is someone you wrote to, by email or on Signal.
+   */
+  profiles: z.boolean().default(true),
+  /** Profiles: people looked up in Google Contacts per run, by address or number ([calendar] contacts must be on). 0: never. */
+  contactsPerRun: z.int().min(0).max(200).default(20),
 });
 export type KnowledgeConfig = z.infer<typeof KnowledgeConfig>;
 

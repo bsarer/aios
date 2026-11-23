@@ -46,6 +46,8 @@ const CONFIG: KnowledgeConfig = {
   wiki: true,
   pageSummariesPerRun: 10,
   checkEveryDays: 7,
+  profiles: true,
+  contactsPerRun: 20,
 };
 
 interface Mail {

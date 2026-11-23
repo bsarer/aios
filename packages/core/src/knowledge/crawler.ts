@@ -59,6 +59,7 @@ import { type Fact, KnowledgeFacts, ME, originOf } from './facts.js';
 import { type Knowledge, type KnowledgeFile, MODEL_SECTIONS, type Note, SECTION_LIMITS, cleanNote } from './file.js';
 import { type Item, type ItemKind, type ItemSource, KnowledgeLedger, PRIORITY, type Phase, type Progress } from './ledger.js';
 import { skipReason } from './mailfilter.js';
+import type { KnowledgeProfiles } from './profile.js';
 import { type FiledFact, type KnowledgeWiki, type PageFact, checkText, pageId } from './wiki.js';
 
 const MINUTE = 60_000;
@@ -111,6 +112,8 @@ export interface KnowledgeCrawlerOptions {
   quietHours?: { start: string; end: string } | undefined;
   /** K4: the wiki pages beside the file; none when [knowledge] wiki is off. */
   wiki?: KnowledgeWiki | undefined;
+  /** Profiles: a page per person from mail headers, Google Contacts and Signal (needs the wiki). */
+  profiles?: KnowledgeProfiles | undefined;
   /** K4: the weekly check's one line of counts, written by code (main posts it as a notice). */
   onCheck?: ((line: string) => void) | undefined;
   now?: () => number;
@@ -137,6 +140,8 @@ export interface KnowledgeRun {
   /** K4: wiki pages that got new facts or links, and summaries rewritten. */
   pages: number;
   summaries: number;
+  /** Profiles written again this run. */
+  profiles?: number;
   error?: string;
 }
 
@@ -332,6 +337,7 @@ export class KnowledgeCrawler {
       if (m.threadId) this.ledger.signal('thread', m.threadId);
       items.push({ key: key(m), kind: 'sent', ref: m.id, at: m.date?.getTime() ?? now, phase, priority: PRIORITY.sent });
       fresh.push(m);
+      this.o.profiles?.noteMail({ key: key(m), sent: true, from: m.from, to: m.to, subject: m.subject, at: m.date?.getTime() ?? now });
     }
     let skipped = 0;
     for (const m of found) {
@@ -344,6 +350,7 @@ export class KnowledgeCrawler {
       const priority = replied || m.starred || m.important ? PRIORITY.replied : this.ledger.signalCount('contact', m.from?.address) >= 2 ? PRIORITY.contact : PRIORITY.mail;
       items.push({ key: key(m), kind: 'mail', ref: m.id, at: m.date?.getTime() ?? now, phase, priority });
       fresh.push(m);
+      this.o.profiles?.noteMail({ key: key(m), sent: false, from: m.from, to: m.to, subject: m.subject, at: m.date?.getTime() ?? now });
     }
     if (skipped) this.setting.set('skipped', String(this.num('skipped') + skipped));
     this.skippedThisRun += skipped;
@@ -799,6 +806,7 @@ export class KnowledgeCrawler {
       reread: run.reread,
       pages: run.pages,
       summaries: run.summaries,
+      profiles: run.profiles ?? 0,
       mail: p.mail,
       files: p.files,
       spentToday: this.spentToday(now),
@@ -842,6 +850,7 @@ export class KnowledgeCrawler {
     run.pages = filed.changed.length;
     // Pages waiting for a summary, oldest first; kept between runs (500 at most).
     let dirty = [...new Set([...this.dirtyPages(), ...filed.changed])].slice(-500);
+    const summarized: string[] = [];
     const limit = this.o.config.pageSummariesPerRun;
     if (choice && limit > 0 && !run.error) {
       for (const id of dirty.slice(0, limit)) {
@@ -855,6 +864,7 @@ export class KnowledgeCrawler {
           const { value, result } = await choice.model.structured(pageSummaryRequest(choice.role, this.o.userName, page), 'knowledge_page', PageSummary);
           this.spend(choice, result?.usage?.costUsd, now);
           wiki.setSummary(id, value.summary, value.contradictions, stamp);
+          summarized.push(id);
           run.summaries++;
           dirty = dirty.filter((d) => d !== id);
         } catch (err) {
@@ -867,7 +877,13 @@ export class KnowledgeCrawler {
       }
     }
     this.setting.set('wikiDirty', JSON.stringify(dirty));
-    if (filed.changed.length || run.summaries || !existsSync(wiki.indexPath)) wiki.writeIndex(stamp);
+    // Profiles: person pages the filing changed or made, and people new from mail, Signal or Contacts.
+    if (this.o.profiles) {
+      const pr = await this.o.profiles.update([...new Set([...filed.changed, ...summarized])], stamp, now);
+      run.profiles = pr.written;
+      if (pr.error) this.o.audit.append({ kind: 'knowledge', event: 'contacts_error', error: pr.error });
+    }
+    if (filed.changed.length || run.summaries || run.profiles || !existsSync(wiki.indexPath)) wiki.writeIndex(stamp);
     if (filed.changed.length || run.summaries) {
       wiki.log(stamp, `Filed ${filed.facts} facts on ${filed.changed.length} pages (${filed.created} new)${run.summaries ? `, rewrote ${run.summaries} summaries` : ''}: ${filed.changed.slice(0, 12).join(', ')}${filed.changed.length > 12 ? ', …' : ''}`);
     }

@@ -50,7 +50,10 @@ export function untrustedSources(messages: ChatMessage[], returnsUntrusted: (nam
 }
 
 /** What the model sees in place of an earlier exchange that involved an email (or calendar, or document text). */
-export function quarantineNote(ids: string[], calendar = false, document = false): string {
+export function quarantineNote(ids: string[], calendar = false, document = false, knowledge = false): string {
+  if (knowledge && !ids.length && !calendar && !document) {
+    return '(Answering this, I looked in the knowledge base. That exchange is hidden from me now, because its notes are written from outside text that can carry instructions. If the user follows up on it ("her", "that project", "what did I email them?"), the user\'s message above says who or what they mean: look in the knowledge base or search mail again first, then do what they ask; never ask them who they mean.)';
+  }
   // The follow-up line tells the model to look again itself, so "open the unsubscribe page" or
   // "reply to it" just works: the email comes back into view (and its links become confirm
   // cards) instead of the model saying it can't see it.
@@ -101,7 +104,9 @@ export function quarantineEarlierEmail(messages: ChatMessage[], returnsUntrusted
       );
       const calendar = span.some((x) => x.role === 'tool' && x.name.startsWith('calendar_') && returnsUntrusted(x.name));
       const document = span.some((x) => x.role === 'tool' && isDocumentTool(x.name) && returnsUntrusted(x.name));
-      out.push({ role: 'assistant', content: quarantineNote([...new Set(ids)], calendar, document) });
+      const untrustedTools = span.filter((x) => x.role === 'tool' && returnsUntrusted(x.name));
+      const knowledge = untrustedTools.length > 0 && untrustedTools.every((x) => x.role === 'tool' && x.name.startsWith('knowledge_'));
+      out.push({ role: 'assistant', content: quarantineNote([...new Set(ids)], calendar, document, knowledge) });
     } else out.push(...span);
     i = end;
   }
@@ -159,14 +164,15 @@ export class Agent {
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const system = chatSystemPrompt({ userName: this.o.userName, now: formatNow(this.clock(), this.o.timeZone), calendar: tools.has('calendar_list'), documents: tools.has('doc_read'), todos: tools.has('todo_add'), video: tools.has('video_play'), web: tools.has('web_open'), webRead: tools.has('web_read'), music: tools.has('music_control'), knowledge: tools.has('knowledge_read'), knowledgeSearch: tools.has('knowledge_search'), contacts: tools.has('contacts_find'), signal: tools.has('signal_draft'), assistantName: voice.name, tone: voice.tone });
       const closing = voiceReminder(voice.tone);
-      const messages = quarantineEarlierEmail(
-        this.o.memory
-          ? this.o.memory.context(system, text, store.recentTurns(CONTEXT_TURNS_BUDGETED), closing)
-          : [{ role: 'system', content: `${system}\n\n${closing}` }, ...store.recentTurns(CONTEXT_TURNS)],
-        (name) => tools.returnsUntrusted(name),
-      );
+      const returnsUntrusted = (name: string) => tools.returnsUntrusted(name);
+      // Fold earlier email and knowledge exchanges into their short notes before the token
+      // budget trims the window, so a long result read earlier can't push the user's own
+      // earlier questions (and what "her" refers to) out of view.
+      const messages = this.o.memory
+        ? this.o.memory.context(system, text, quarantineEarlierEmail(store.recentTurns(CONTEXT_TURNS_BUDGETED), returnsUntrusted), closing)
+        : quarantineEarlierEmail([{ role: 'system', content: `${system}\n\n${closing}` }, ...store.recentTurns(CONTEXT_TURNS)], returnsUntrusted);
       // Decided in code from what the model can see, so an email cannot talk its way out of it.
-      const sources = untrustedSources(messages, (name) => tools.returnsUntrusted(name));
+      const sources = untrustedSources(messages, returnsUntrusted);
       const untrustedInContext = sources.size > 0;
       // So a blocked request gets "ask me again" rather than "I can't do that".
       const sys = messages.find((m) => m.role === 'system');

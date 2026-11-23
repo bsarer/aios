@@ -50,9 +50,12 @@ const turnTokens = (m: ChatMessage) =>
   estimateTokens(m.content ?? '') + (m.role === 'assistant' && m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 4;
 
 /**
- * system prompt + profile + recalled notes, then as many recent turns as fit in the
- * budget. The window always starts at a user turn (an orphan tool result is rejected
- * by the API) and always keeps the latest user message.
+ * system prompt + profile + recalled notes, then the request being answered, then as many
+ * earlier turns as fit in the budget. The request being answered (the latest user message
+ * and every tool call and result after it) is always kept whole: dropping a result the model
+ * is still working from makes it call the same tool again until it runs out of steps. Older
+ * turns are dropped from the oldest, and the window always starts at a user turn (an orphan
+ * tool result is rejected by the API).
  */
 export function assembleContext(p: ContextParts): ChatMessage[] {
   const sections = [p.system, `## Profile (written by the user)\n${capTokens(p.profile.trim(), PROFILE_TOKENS)}`];
@@ -68,30 +71,34 @@ export function assembleContext(p: ContextParts): ChatMessage[] {
   if (p.closing) sections.push(p.closing);
   const system: ChatMessage = { role: 'system', content: sections.join('\n\n') };
 
-  let remaining = p.budgetTokens - turnTokens(system);
-  let start = p.turns.length;
+  let lastUser = -1;
   for (let i = p.turns.length - 1; i >= 0; i--) {
+    if (p.turns[i]!.role === 'user') {
+      lastUser = i;
+      break;
+    }
+  }
+  if (lastUser < 0) return [system];
+  const current = p.turns.slice(lastUser);
+  let remaining = p.budgetTokens - turnTokens(system) - current.reduce((n, m) => n + turnTokens(m), 0);
+  let start = lastUser;
+  for (let i = lastUser - 1; i >= 0; i--) {
     const cost = turnTokens(p.turns[i]!);
-    if (cost > remaining && start < p.turns.length) break;
+    if (cost > remaining) break;
     remaining -= cost;
     start = i;
   }
-  let window = p.turns.slice(start);
-  const firstUser = window.findIndex((m) => m.role === 'user');
-  if (firstUser > 0) window = window.slice(firstUser);
-  if (firstUser < 0) {
-    // Budget too small for even one full exchange: keep just the latest user message.
-    const lastUser = [...p.turns].reverse().find((m) => m.role === 'user');
-    window = lastUser ? [lastUser] : [];
-  }
-  return [system, ...window];
+  let earlier = p.turns.slice(start, lastUser);
+  const firstUser = earlier.findIndex((m) => m.role === 'user');
+  earlier = firstUser < 0 ? [] : earlier.slice(firstUser);
+  return [system, ...earlier, ...current];
 }
 
 export class Memory {
   constructor(
     readonly files: MemoryFiles,
     private readonly store: Store,
-    readonly contextTokens = 8000,
+    readonly contextTokens = 32_000,
   ) {
     this.reindex();
   }

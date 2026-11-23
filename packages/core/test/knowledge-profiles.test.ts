@@ -284,6 +284,69 @@ describe('in the knowledge run', () => {
   });
 });
 
+describe('mail read before profiles were on', () => {
+  // Found in use: every email had been listed for reading before profiles were installed, and
+  // each is listed only once, so no one was ever recorded ("you haven't written to them").
+  const mails: FullMessage[] = [
+    { id: 'Sent:1', messageId: '<old-s1@x>', from: { name: 'John', address: ME }, to: [ana], subject: 'Lab results', date: new Date(NOW - 45 * DAY), cc: [], replyTo: [], inReplyTo: null, references: [], text: 'Attached.', html: null, attachments: [] },
+    // Her reply is a month newer than what he sent, so it is listed first going back.
+    { id: 'INBOX:2', messageId: '<old-i2@x>', from: ana, to: [{ name: 'John', address: ME }], subject: 'Re: Lab results', date: new Date(NOW - 10 * DAY), cc: [], replyTo: [], inReplyTo: '<old-s1@x>', references: [], text: 'Thanks!', html: null, attachments: [] },
+  ];
+  const lists: { since: number; before: number | null }[] = [];
+  const mailbox = {
+    list: async (o: { since: Date; before?: Date | undefined }): Promise<ListedMail[]> => {
+      lists.push({ since: o.since.getTime(), before: o.before?.getTime() ?? null });
+      return mails
+        .filter((m) => m.date!.getTime() >= o.since.getTime() && (!o.before || m.date!.getTime() < o.before.getTime()))
+        .map((m) => ({ ...m, threadId: null, starred: false, important: false, bulkHeaders: {} }));
+    },
+    read: async (id: string) => mails.find((m) => m.id === id) ?? null,
+  };
+
+  it('are gone through once, headers only, so the people you wrote to get their profiles', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aios-profiles-late-'));
+    const store = new Store(':memory:');
+    const file = new KnowledgeFile(join(dir, 'knowledge'), 'John');
+    const wiki = new KnowledgeWiki(file.dir);
+    const calls: string[] = [];
+    const model = {
+      structured: async (_req: ModelRequest, name: string, schema: { parse: (v: unknown) => unknown }) => {
+        calls.push(name);
+        return { value: schema.parse({ notes: [] }) as never, result: { usage: { costUsd: 0 } } as never, repaired: false };
+      },
+    };
+    const config: KnowledgeConfig = { ...KnowledgeSchema.parse({}), backfillDays: 60, olderMail: 'off', sources: ['mail'] };
+    const audit = new AuditLog(join(dir, 'audit.jsonl'));
+    const crawler = (profiles?: KnowledgeProfiles, now = NOW) =>
+      new KnowledgeCrawler({ config, userName: 'John', userAddresses: [ME], timeZone: TZ, file, store, audit, mail: mailbox, models: { backfill: { model, role: 'nightly' }, hourly: null }, isPaused: () => false, wiki, ...(profiles ? { profiles } : {}), now: () => now });
+
+    // Before profiles: the whole window is listed and read.
+    for (let i = 0; i < 3; i++) await crawler().run();
+    const readBefore = calls.length;
+    expect(readBefore).toBeGreaterThan(0);
+
+    // Profiles installed: the same mail is never listed for reading again...
+    const p = new KnowledgePeople(store, { addresses: [ME] }, TZ);
+    const profiles = new KnowledgeProfiles({ people: p, wiki, contactsPerRun: 0, timeZone: TZ });
+    const later = NOW + DAY;
+    await crawler(profiles, later).run();
+    await crawler(profiles, later + 60 * 60_000).run();
+    // ...but its headers reach the profiles: sent first, then the reply from someone known.
+    expect(p.ids()).toEqual(['people/ana-lopez']);
+    const md = readFileSync(wiki.pathOf('people/ana-lopez')!, 'utf8');
+    expect(md).toContain('email from you: Lab results');
+    expect(md).toContain('email from them: Re: Lab results');
+    expect(md).not.toContain("you haven't written to them");
+    // Headers only: no model call for it, and nothing read again.
+    expect(calls.filter((c) => c === 'knowledge_notes').length).toBe(calls.slice(0, readBefore).filter((c) => c === 'knowledge_notes').length);
+    // Once: a later run doesn't go back over it.
+    const n = lists.length;
+    await crawler(profiles, later + 2 * 60 * 60_000).run();
+    expect(lists.slice(n).every((l) => l.before === null)).toBe(true);
+    expect(readFileSync(join(dir, 'audit.jsonl'), 'utf8')).toMatch(/"event":"people_pass","stage":"received","done":true/);
+  });
+});
+
 describe('with the facts records', () => {
   it('shows a relationship from the user\'s own words, never one a stranger wrote, and keeps the profile through the wiki\'s own writes', async () => {
     const store = new Store(':memory:');

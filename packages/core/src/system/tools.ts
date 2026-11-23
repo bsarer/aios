@@ -8,7 +8,7 @@
 import { toolByName } from '../tools/definitions.js';
 import type { RegisteredTool, ToolResult } from '../tools/registry.js';
 import type { SystemActions } from './actions.js';
-import { type PowerProfile, type SystemControls, cleanName } from './controls.js';
+import { type PowerProfile, type SettingsPanel, type SystemControls, cleanName } from './controls.js';
 import { checkWebLink } from '../web/open.js';
 
 /** Pair cards a single scan may post. */
@@ -53,6 +53,8 @@ export function describeChange(tool: string, args: Record<string, unknown>): str
       return `Switch to the ${String(args.profile)} power profile`;
     case 'screen_lock':
       return 'Lock the screen';
+    case 'system_panel_open':
+      return `Open the ${String(args.panel)} settings panel`;
     case 'theme_set':
       return `Switch to the ${name('name')} theme`;
     case 'open_app':
@@ -173,7 +175,7 @@ function buildTools(o: { controls: SystemControls; actions: SystemActions }): Re
       return [
         `Wi-Fi is ${onOff(wifi.radio)}.`,
         saved.length ? `Saved networks:\n${lines.join('\n')}` : 'No saved networks.',
-        `${othersNearby} other network${othersNearby === 1 ? '' : 's'} nearby. Joining a new network happens in Omarchy's Network panel (Super+Ctrl+N), not in this chat.`,
+        `${othersNearby} other network${othersNearby === 1 ? '' : 's'} nearby. Joining a new network happens in Omarchy's Network panel (system_panel_open opens it), not in this chat.`,
       ].join('\n');
     }),
 
@@ -227,7 +229,7 @@ function buildTools(o: { controls: SystemControls; actions: SystemActions }): Re
       const want = (args as { network: string }).network.trim().toLowerCase();
       const { saved } = await c.savedNetworks();
       const n = saved.find((s) => s.name.toLowerCase() === want);
-      if (!n) return `Error: that is not a saved network. Saved: ${saved.map((s) => q(s.name)).join(', ') || 'none'}. New networks are joined in Omarchy's Network panel (Super+Ctrl+N).`;
+      if (!n) return `Error: that is not a saved network. Saved: ${saved.map((s) => q(s.name)).join(', ') || 'none'}. New networks are joined in Omarchy's Network panel (system_panel_open opens it).`;
       if (n.inUse) return `Already connected to ${q(n.name)}.`;
       o.actions.propose({ action: 'wifi_connect', network: n.name });
       return CARD_SHOWN;
@@ -301,6 +303,12 @@ function buildTools(o: { controls: SystemControls; actions: SystemActions }): Re
       const old = (await c.powerProfile()).current;
       const now = await c.setPowerProfile((args as { profile: PowerProfile }).profile);
       return change(`Power profile is now ${now ?? 'unknown'} (was ${old ?? 'unknown'}).`, old, now);
+    }),
+
+    tool('system_panel_open', 'Opening the settings panel…', async (args) => {
+      const panel = (args as { panel: SettingsPanel }).panel;
+      await c.openPanel(panel);
+      return change(`Omarchy's ${panel} panel is open on screen. Say so in one line.`, 'closed', 'open');
     }),
 
     tool('screen_lock', 'Locking the screen…', async () => {

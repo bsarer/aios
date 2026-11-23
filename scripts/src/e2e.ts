@@ -26,6 +26,7 @@ import { type Page, chromium } from 'playwright-core';
 import { utcToLocal, zonedToUtc } from '@aios/core';
 import { FAKE_CLIENT_ID, calendarFixtures, startFakeGoogleCalendar } from '../../fixtures/calendar.js';
 import { makeDocFixture } from '../../fixtures/documents.js';
+import { WALLPAPER_ART } from '../../fixtures/wallpaper.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
 import { TEST_MAILBOX } from './mailbox.js';
@@ -1199,6 +1200,41 @@ async function main(): Promise<void> {
     await input.fill('what time is it?');
     await input.press('Enter');
     check('the Clear button comes back once you write', await waitFor(async () => (await page.getByTestId('clear-chat').count()) === 1));
+
+    // The chat's wallpaper (/wallpaper; Settings has it too, e2e-setup.ts). The picture is drawn here.
+    const art = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    await art.setContent(WALLPAPER_ART);
+    mkdirSync(join(tmp, 'Pictures', 'Walls'), { recursive: true });
+    writeFileSync(join(tmp, 'Pictures', 'Walls', 'dusk hills.png'), await art.screenshot({ type: 'png' }));
+    await art.close();
+    await input.fill('/wallpaper ~/Pictures/Walls/dusk hills.png');
+    await input.press('Enter');
+    const wallpaper = page.getByTestId('wallpaper');
+    check('/wallpaper puts the picture behind the chat', await waitFor(async () => (await wallpaper.count()) === 1 && (await wallpaper.getAttribute('data-dim')) === 'medium'), await lastNotice());
+    // A string, since the scripts are typed without the DOM.
+    const loaded = await page.evaluate<string>(`(async () => {
+      const m = /url\\("?([^")]+)"?\\)/.exec(getComputedStyle(document.querySelector('[data-testid="wallpaper"]')).backgroundImage);
+      const r = m ? await fetch(m[1]) : null;
+      return r ? r.status + ' ' + r.headers.get('content-type') : 'no url';
+    })()`);
+    check('the page loads the picture from /wallpaper', loaded === '200 image/png', loaded);
+    await input.fill('Draft a short note to Sara about Friday');
+    await input.press('Enter');
+    await sleep(1500);
+    await shot(page, 'wallpaper-medium');
+    await input.fill('/wallpaper strong');
+    await input.press('Enter');
+    check('/wallpaper strong dims it more', await waitFor(async () => (await wallpaper.getAttribute('data-dim')) === 'strong'));
+    await shot(page, 'wallpaper-strong');
+    await page.reload();
+    check('the wallpaper stays after a reload', await waitFor(async () => (await page.getByTestId('wallpaper').getAttribute('data-dim').catch(() => null)) === 'strong'));
+    await input.fill('/wallpaper light');
+    await input.press('Enter');
+    check('/wallpaper light dims it less', await waitFor(async () => (await wallpaper.getAttribute('data-dim')) === 'light'));
+    await shot(page, 'wallpaper-light');
+    await input.fill('/wallpaper off');
+    await input.press('Enter');
+    check('/wallpaper off takes it away', await waitFor(async () => (await wallpaper.count()) === 0));
 
     // 9. A7: a lasting outage says what to do; a brief one does not. The banner clears on reconnect.
     await stopCore();

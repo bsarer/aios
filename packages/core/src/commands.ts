@@ -25,6 +25,7 @@ export type Command =
   | { name: 'unpin'; text: string }
   | { name: 'knowledge'; update: boolean; check: boolean }
   | { name: 'tone'; text: string }
+  | { name: 'wallpaper'; text: string }
   | { name: 'feedback'; list: true }
   | { name: 'feedback'; list: false; text: string }
   | { name: 'unknown'; raw: string };
@@ -86,6 +87,10 @@ export function parseCommand(text: string): Command | null {
       return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(rest.join(' ').trim()), check: /^check$/i.test(rest.join(' ').trim()) };
     case 'tone':
       return { name: 'tone', text: rest.join(' ') };
+    case 'wallpaper':
+    case 'background':
+      // Keep the path as typed: file names can have runs of spaces.
+      return { name: 'wallpaper', text: t.slice(1 + head.length).trim() };
     case 'feedback': {
       // Keep the idea as typed, line breaks included.
       const text = t.slice(1 + head.length).trim();
@@ -120,7 +125,8 @@ export const HELP_TEXT = [
   '/knowledge update  update it now (it updates by itself every hour)',
   '/knowledge check  look for old commitments, duplicate pages and pages with no links',
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
-  '/settings  open the settings window (the gear at the top does the same); /tone and /pin change tone and tiles here',
+  '/wallpaper <picture | off | light | medium | strong>  put a picture behind the chat, take it away, or change how much it is dimmed',
+  '/settings  open the settings window (the gear at the top does the same); /tone, /pin and /wallpaper change tone, tiles and wallpaper here',
   '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',
   '/clear   clear the chat and start a new conversation (the Clear button at the top does the same; /new too)',
   '/help    this list',

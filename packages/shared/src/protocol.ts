@@ -486,6 +486,17 @@ export type Widgets = z.infer<typeof Widgets>;
 export const Theme = z.record(z.string(), z.string());
 export type Theme = z.infer<typeof Theme>;
 
+/**
+ * The chat's wallpaper: a picture behind the chat, chosen by the user in Settings or with
+ * /wallpaper. The page fetches it from /wallpaper?v=<version>; `dim` is how much of the theme's
+ * background lies over it so text stays readable. null: no wallpaper.
+ */
+export const WALLPAPER_DIMS = ['light', 'medium', 'strong'] as const;
+export const WallpaperDim = z.enum(WALLPAPER_DIMS);
+export type WallpaperDim = z.infer<typeof WallpaperDim>;
+export const Wallpaper = z.strictObject({ version: z.string().regex(/^[0-9a-f]{12}$/), dim: WallpaperDim }).nullable();
+export type Wallpaper = z.infer<typeof Wallpaper>;
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 export const ClientMessage = z.discriminatedUnion('type', [
@@ -561,13 +572,14 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional() }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional(), wallpaper: Wallpaper.optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
   z.strictObject({ type: z.literal('status'), status: Status }),
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
   z.strictObject({ type: z.literal('widgets'), widgets: Widgets }),
+  z.strictObject({ type: z.literal('wallpaper'), wallpaper: Wallpaper }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
@@ -584,14 +596,16 @@ export interface ChatState {
   clearedAt: number | null;
   /** SG1: the last day's Signal messages kept by core when the screen connected, for the side rail. */
   signals: SignalRow[];
+  /** The picture behind the chat, or null. */
+  wallpaper: Wallpaper;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [] };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [], wallpaper: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [] };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [], wallpaper: ev.wallpaper ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':
@@ -607,5 +621,7 @@ export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
       return { ...state, theme: ev.theme };
     case 'widgets':
       return { ...state, widgets: ev.widgets };
+    case 'wallpaper':
+      return { ...state, wallpaper: ev.wallpaper };
   }
 }

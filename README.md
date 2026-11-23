@@ -205,7 +205,9 @@ Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[br
 
 Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"friendly"` default, `"playful"`, `"neutral"`, `"concise"`). Type `/tone` in the chat to see it and `/tone playful` to change it; the change applies to the next reply and is kept.
 
-Settings: the ⚙ gear at the right of the status strip, or `/settings` in the chat, opens the setup window on your current settings (the same as `astra settings` in a terminal). Change what you like and press Finish; Astra restarts with the new settings and the chat reconnects by itself. `/tone` and `/pin` change the tone and the tiles right in the chat.
+Settings: the ⚙ gear at the right of the status strip, or `/settings` in the chat, opens the setup window on your current settings (the same as `astra settings` in a terminal). Change what you like and press Finish; Astra restarts with the new settings and the chat reconnects by itself. `/tone`, `/pin` and `/wallpaper` change the tone, the tiles and the wallpaper right in the chat.
+
+Chat wallpaper: setup's Wallpaper step (or Settings) puts a picture behind the chat, and so does `/wallpaper ~/Pictures/beach.jpg` in the chat. Astra keeps a copy as `wallpaper.img` in its config folder and lays the theme's background over it, most behind the conversation, so text stays readable: `/wallpaper light`, `medium` (the default) or `strong` changes how much. `/wallpaper off` takes it away. PNG, JPEG, WebP or GIF, up to 15 MB.
 
 Message history: in the message box, Up brings back what you sent before (messages and commands, newest first) and Down goes forward again, back to what you were typing. Up and Down only do this on the first and last line, so they still move the cursor within a long message. Nothing new is stored: the list is your messages in the chat plus what you sent since the page loaded.
 

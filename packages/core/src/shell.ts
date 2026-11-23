@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type ChatItem, type ClientMessage, type ServerEvent, type SignalRow, type Status, type Theme } from '@aios/shared';
+import { type ChatItem, type ClientMessage, type ServerEvent, type SignalRow, type Status, type Theme, WallpaperDim } from '@aios/shared';
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
@@ -32,6 +32,7 @@ import type { UpdateCheck } from './update.js';
 import type { MusicAction } from './music/player.js';
 import type { SignalActions } from './signal/actions.js';
 import { pickWeb } from './web/tools.js';
+import type { Wallpaper } from './wallpaper.js';
 
 /** MU1: /music's words, mapped by code to music_control's actions. */
 const MUSIC_WORDS: Record<string, MusicAction> = {
@@ -118,6 +119,10 @@ export interface ShellOptions {
   memory?: Memory;
   /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
   personality?: Pick<Personality, 'voice' | 'tone' | 'setTone'>;
+  /** The picture behind the chat and /wallpaper. Without it, /wallpaper says it is off. */
+  wallpaper?: Pick<Wallpaper, 'current' | 'setFromPath' | 'setDim' | 'remove'>;
+  /** The home folder /wallpaper's paths start from. Default: the user's. */
+  home?: string;
   /** The Settings gear and /settings: opens the setup window. Without it, they say to run `astra settings`. */
   settings?: { open: () => Promise<void> };
   /** /feedback: the user's improvement ideas. Without it, /feedback says it is off. */
@@ -185,6 +190,7 @@ export class Shell {
       ...(this.o.widgets ? { widgets: this.o.widgets.current() } : {}),
       ...(clearedAt === null ? {} : { clearedAt }),
       ...(this.o.signal?.recent ? { signals: this.o.signal.recent() } : {}),
+      ...(this.o.wallpaper ? { wallpaper: this.o.wallpaper.current() } : {}),
     };
   }
 
@@ -540,7 +546,7 @@ export class Shell {
     try {
       await this.o.settings.open();
       this.o.audit.append({ kind: 'settings', event: 'open', via });
-      say('info', 'Settings opened in their own window. When you press Finish there, Astra restarts with the new settings and this chat reconnects by itself. /tone and /pin change tone and tiles right here.');
+      say('info', 'Settings opened in their own window. When you press Finish there, Astra restarts with the new settings and this chat reconnects by itself. /tone, /pin and /wallpaper change tone, tiles and wallpaper right here.');
     } catch (err) {
       this.o.audit.append({ kind: 'settings', event: 'failed', via });
       say('warning', `Couldn’t open settings: ${(err as Error).message}`);
@@ -562,6 +568,39 @@ export class Shell {
     }
     this.o.store.saveItem(next);
     this.broadcast({ type: 'patch', id: next.id, item: next });
+  }
+
+  /**
+   * /wallpaper: the user's own typing, the only way the chat changes the wallpaper (Settings is
+   * the other). There is no tool for it. The audit log keeps what changed, never the path.
+   */
+  private wallpaperCommand(text: string, say: (t: string) => void): void {
+    const w = this.o.wallpaper;
+    if (!w) return say('The wallpaper is off here.');
+    const word = text.toLowerCase();
+    const usage = 'For example /wallpaper ~/Pictures/beach.jpg. /wallpaper light, medium or strong changes how much it is dimmed, and /wallpaper off takes it away. Settings has it too.';
+    if (!word) {
+      const now = w.current();
+      return say(now ? `The chat has a wallpaper, dimmed ${now.dim === 'light' ? 'lightly' : now.dim === 'strong' ? 'strongly' : 'a medium amount'}. ${usage}` : `The chat has no wallpaper. ${usage}`);
+    }
+    const changed = (event: string, line: string, next = w.current()) => {
+      this.o.audit.append({ kind: 'wallpaper', event, via: 'command' });
+      this.broadcast({ type: 'wallpaper', wallpaper: next });
+      say(line);
+    };
+    if (/^(off|none|remove|clear|reset)$/.test(word)) {
+      if (!w.remove()) return say('There is no wallpaper to take away.');
+      return changed('remove', 'Wallpaper removed.', null);
+    }
+    const dim = WallpaperDim.safeParse(word.replace(/^dim\s+/, ''));
+    if (dim.success) {
+      const r = w.setDim(dim.data);
+      if (!r.ok) return say(r.error);
+      return changed('dim', `Wallpaper dimmed ${dim.data === 'light' ? 'lightly' : dim.data === 'strong' ? 'strongly' : 'a medium amount'}.`, r.state);
+    }
+    const r = w.setFromPath(text, this.o.home);
+    if (!r.ok) return say(r.error);
+    return changed('set', this.warm('Done! Your wallpaper is behind the chat now. /wallpaper strong dims it more if the text is hard to read.', 'Wallpaper set. /wallpaper strong dims it more if the text is hard to read.'), r.state);
   }
 
   /** P1: the warmer wording for code-written lines under the friendly and playful tones. */
@@ -711,6 +750,8 @@ export class Shell {
         if (!tone) return say(`I know these tones:\n${list}\nFor example /tone playful.`);
         return say(p.setTone(tone));
       }
+      case 'wallpaper':
+        return this.wallpaperCommand(cmd.text, say);
       case 'settings':
         return this.openSettings('command');
       case 'clear':

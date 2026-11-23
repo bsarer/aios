@@ -57,6 +57,15 @@
   .row.fixed { flex:none; }
   .row.fixed > * { flex:none; }
   [hidden] { display:none !important; }
+  .wp { position:relative; height:220px; border-radius:12px; overflow:hidden; border:1px solid var(--line); background:var(--bg); margin-top:12px; }
+  .wp img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .wp .scrim { position:absolute; inset:0; background:linear-gradient(90deg, rgb(22 22 30 / .42), rgb(22 22 30 / .72) 28%, rgb(22 22 30 / .72) 72%, rgb(22 22 30 / .42)); }
+  .wp[data-dim="light"] .scrim { background:linear-gradient(90deg, rgb(22 22 30 / .25), rgb(22 22 30 / .55) 28%, rgb(22 22 30 / .55) 72%, rgb(22 22 30 / .25)); }
+  .wp[data-dim="strong"] .scrim { background:linear-gradient(90deg, rgb(22 22 30 / .68), rgb(22 22 30 / .88) 28%, rgb(22 22 30 / .88) 72%, rgb(22 22 30 / .68)); }
+  .wp .lines { position:absolute; left:22%; right:22%; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:10px; font-size:14px; }
+  .wp .me { align-self:flex-end; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 12px; }
+  .wp .none { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mute); }
+  input[type=file] { font:inherit; color:var(--dim); }
   img.qr { background:#fff; padding:8px; border-radius:8px; display:block; margin:12px 0; }
 </style>
 </head>
@@ -93,13 +102,13 @@
 
   const STEPS = [
     ['welcome', 'Welcome'], ['ai', 'AI'], ['mail', 'Mail'], ['calendar', 'Calendar'],
-    ['folders', 'Folders'], ['addons', 'Add-ons'], ['signal', 'Signal'], ['apps', 'Apps'], ['desktop', 'Desktop'], ['done', 'Finish'],
+    ['folders', 'Folders'], ['addons', 'Add-ons'], ['signal', 'Signal'], ['apps', 'Apps'], ['wallpaper', 'Wallpaper'], ['desktop', 'Desktop'], ['done', 'Finish'],
   ];
   let step = 0, seen = 0, S = null, editing = false;
   const A = { name: '', timezone: '', ai: { provider: 'openrouter', baseUrl: '', model: '', key: '' }, local: null,
     mail: { address: '', password: '', imap: { host: '', port: 993 }, smtp: { host: '', port: 465 } },
-    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '', signal: { enabled: false } };
-  const T = { ai: null, mail: null, mailProvider: undefined, finished: null, addons: null, pick: new Set(), signal: null, signalPoll: null };
+    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '', signal: { enabled: false }, wallpaper: { change: 'keep', dim: 'medium' } };
+  const T = { ai: null, mail: null, mailProvider: undefined, finished: null, addons: null, pick: new Set(), signal: null, signalPoll: null, wallpaper: null, wallpaperPreview: '', wallpaperBusy: false };
 
   function okToLeave() {
     const s = STEPS[step][0];
@@ -321,6 +330,41 @@
         })(),
       ];
     },
+    wallpaper: () => {
+      if (!S.wallpaper.available) return [el('h1', { text: 'Chat wallpaper' }), el('p', { class: 'lead', text: 'The wallpaper isn’t available in this version.' })];
+      const has = A.wallpaper.change === 'new' ? !!T.wallpaperPreview : A.wallpaper.change === 'keep' && !!S.wallpaper.current;
+      const src = A.wallpaper.change === 'new' ? T.wallpaperPreview : has ? base + 'api/wallpaper?v=' + S.wallpaper.current.version : '';
+      const pick = el('input', { type: 'file', id: 'wp-file', hidden: true, 'aria-label': 'Wallpaper picture', accept: 'image/png,image/jpeg,image/webp,image/gif', disabled: T.wallpaperBusy, onchange: async (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        T.wallpaperBusy = true; T.wallpaper = null; render();
+        try {
+          const res = await fetch(base + 'api/wallpaper', { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: await f.arrayBuffer() });
+          const r = await res.json().catch(() => ({ ok: false, message: 'Astra stopped answering. Try again.' }));
+          if (r.ok) {
+            T.wallpaperPreview = await new Promise((done) => { const fr = new FileReader(); fr.onload = () => done(String(fr.result)); fr.onerror = () => done(''); fr.readAsDataURL(f); });
+            A.wallpaper.change = 'new';
+          } else T.wallpaper = r;
+        } finally { T.wallpaperBusy = false; render(); }
+      } });
+      const dims = [['light', 'Light', 'More of the picture'], ['medium', 'Medium', 'Balanced'], ['strong', 'Strong', 'Easiest to read']];
+      return [
+        el('h1', { text: 'Chat wallpaper' }),
+        el('p', { class: 'lead', text: 'Put a picture behind the chat. Astra dims it, most behind the conversation, so the words stay easy to read. In the chat, /wallpaper does the same.' }),
+        el('div', { class: 'wp', 'data-dim': A.wallpaper.dim, 'data-testid': 'wp-preview' },
+          has ? [el('img', { src, alt: '' }), el('div', { class: 'scrim' }), el('div', { class: 'lines' }, el('div', { class: 'me', text: 'What’s on today?' }), el('div', { text: 'You have two meetings: design review at 10 and lunch with Ana at 1.' }))]
+            : el('div', { class: 'none', text: 'No wallpaper' })),
+        pick,
+        el('div', { class: 'row fixed gap' },
+          el('button', { type: 'button', class: 'btn', id: 'wp-choose', disabled: T.wallpaperBusy, onclick: () => pick.click() }, T.wallpaperBusy ? 'Checking…' : has ? 'Choose another picture…' : 'Choose a picture…'),
+          has ? el('button', { type: 'button', class: 'btn ghost', onclick: () => { A.wallpaper.change = S.wallpaper.current ? 'remove' : 'keep'; T.wallpaperPreview = ''; T.wallpaper = null; render(); } }, 'No wallpaper') : null),
+        el('div', { class: 'hint', text: 'PNG, JPEG, WebP or GIF, up to 15 MB. Astra keeps a copy in its settings folder, so moving the original later is fine.' }),
+        T.wallpaper ? result(T.wallpaper) : null,
+        has ? [el('label', { text: 'How much to dim it' }),
+          el('div', { class: 'cards' }, dims.map(([id, name, hint]) => el('button', { type: 'button', class: 'card', 'aria-pressed': String(A.wallpaper.dim === id), onclick: () => { A.wallpaper.dim = id; render(); } }, el('b', { text: name }), el('small', { text: hint }))))] : null,
+        A.wallpaper.change === 'remove' ? el('p', { class: 'hint', text: 'The wallpaper comes off when you press Save.' }) : null,
+      ];
+    },
     desktop: () => {
       const rows = [
         ['autostart', 'Open Astra full screen when you log in', 'Astra always runs in the background; this opens the chat too.'],
@@ -352,7 +396,8 @@
           el('li', { text: `AI: ${(S.presets.find((p) => p.id === A.ai.provider) || { label: 'your provider' }).label}, ${A.ai.model}${A.local ? `, and ${A.local} on this computer` : ''}.` }),
           el('li', { text: `Mail: ${A.mail.address}.` }),
           el('li', { text: `Folders: ${A.folders.join(', ')}.` }),
-          A.signal.enabled && signalNumber() ? el('li', { text: `Signal: ${signalNumber()}.` }) : null),
+          A.signal.enabled && signalNumber() ? el('li', { text: `Signal: ${signalNumber()}.` }) : null,
+          A.wallpaper.change === 'new' ? el('li', { text: 'Wallpaper: your new picture behind the chat.' }) : A.wallpaper.change === 'remove' ? el('li', { text: 'Wallpaper: none.' }) : null),
         T.finished && !T.finished.ok ? result(T.finished) : null,
       ];
     },
@@ -417,6 +462,7 @@
     if (!e) A.apps.voice = !!S.apps.speech;
     if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; A.signal.enabled = !!(e.signal && e.signal.enabled); }
     if (!A.monitor && S.screens.length > 1) A.monitor = (S.screens.find((s) => s.focused) || S.screens[0]).name;
+    if (S.wallpaper && S.wallpaper.current) A.wallpaper.dim = S.wallpaper.current.dim;
     if (e) { seen = STEPS.length - 1; T.mailProvider = undefined; }
     initial = JSON.stringify(A);
     render();

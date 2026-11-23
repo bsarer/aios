@@ -633,10 +633,11 @@ export class KnowledgeCrawler {
   }
 
   /** Files what has been read as facts with their quotes. Returns the pages that got facts. */
-  private fileFacts(extracted: Item[], now: number): { pages: Set<string>; added: number } {
+  private fileFacts(extracted: Item[], now: number): { pages: Set<string>; added: number; pageFacts: number } {
     const tz = this.o.timeZone;
     const pages = new Set<string>();
     let added = 0;
+    let pageFacts = 0;
     for (const i of extracted) {
       // Read before K5, with no quotes: K5's first run reads it again.
       if (!i.source) continue;
@@ -662,12 +663,15 @@ export class KnowledgeCrawler {
           const r = this.facts.add({ subject: id, text: f.text, basis: f.basis, relation: f.relation, source: sourceOf(i.kind), on, evidence: evidence(f) }, now);
           if ('id' in r) {
             pages.add(id);
-            if (r.added) added++;
+            if (r.added) {
+              added++;
+              pageFacts++;
+            }
           }
         }
       }
     }
-    return { pages, added };
+    return { pages, added, pageFacts };
   }
 
   /** K5: where a fact came from, for /knowledge why. Written by code; quotes are shown as plain text. */
@@ -775,7 +779,7 @@ export class KnowledgeCrawler {
     k.updated = stamp;
     this.o.file.write(k, utcToLocal(now, tz).slice(0, 10), this.o.config.keepDays);
     // K4: pages and links filed by code, the pages' facts from the facts store, then the changed pages' summaries.
-    if (this.o.wiki) await this.updateWiki(this.o.wiki, extracted, filed.pages, choice, run, stamp, now);
+    if (this.o.wiki) await this.updateWiki(this.o.wiki, extracted, filed, choice, run, stamp, now);
     this.ledger.setMerged(extracted.map((i) => i.key), now);
     this.setting.set('ranAt', String(now));
     const p = this.ledger.progress();
@@ -815,7 +819,8 @@ export class KnowledgeCrawler {
     }
   }
 
-  private async updateWiki(wiki: KnowledgeWiki, extracted: Item[], withFacts: Set<string>, choice: ModelChoice | null, run: KnowledgeRun, stamp: string, now: number): Promise<void> {
+  private async updateWiki(wiki: KnowledgeWiki, extracted: Item[], filedFacts: { pages: Set<string>; pageFacts: number }, choice: ModelChoice | null, run: KnowledgeRun, stamp: string, now: number): Promise<void> {
+    const withFacts = filedFacts.pages;
     // Pages and links first (code makes a page the first time a name is seen); facts come from the facts store.
     const facts: FiledFact[] = extracted.flatMap((i) =>
       !i.source ? [] : i.pages.filter((p) => p.links.length || withFacts.has(pageId(p.kind, p.name) ?? '')).map((p) => ({ kind: p.kind, name: p.name, links: p.links, source: sourceOf(i.kind), text: '' })),
@@ -833,7 +838,7 @@ export class KnowledgeCrawler {
       changed.add(id);
     }
     filed.changed = [...changed];
-    filed.facts = run.notes;
+    filed.facts = filedFacts.pageFacts;
     run.pages = filed.changed.length;
     // Pages waiting for a summary, oldest first; kept between runs (500 at most).
     let dirty = [...new Set([...this.dirtyPages(), ...filed.changed])].slice(-500);

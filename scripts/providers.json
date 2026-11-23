@@ -1,10 +1,11 @@
 {
-  "_note": "Presets for setup (`astra setup`). Verify URLs and fields against each provider's current docs. OpenRouter fields checked against openrouter.ai/docs on 2026-10-19. defaultModel is what the setup window suggests (the A1 bake-off's pick for OpenRouter); the user can change it.",
+  "_note": "Presets for setup (`astra setup`). Verify URLs and fields against each provider's current docs. OpenRouter fields checked against openrouter.ai/docs on 2026-10-19. defaultModel is what the setup window suggests (the A1 bake-off's pick for OpenRouter); the user can change it. knowledgeModel is the knowledge base's cloud model ([knowledge] cloudModel), the 2026-11-23 knowledge bake-off's pick (evals/reports); setup keeps one already set.",
   "openrouter": {
     "label": "OpenRouter",
     "blurb": "Many models with one key. Good default.",
     "keyUrl": "https://openrouter.ai/settings/keys",
     "defaultModel": "anthropic/claude-haiku-5.5",
+    "knowledgeModel": "openai/gpt-6-luna",
     "baseUrl": "https://openrouter.ai/api/v1",
     "extraBody": {
       "provider": {

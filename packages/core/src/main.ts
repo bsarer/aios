@@ -74,7 +74,7 @@ import { ImapMailSource, MailWatcher } from './mail/watcher.js';
 import { MemoryFiles } from './memory/files.js';
 import { Memory } from './memory/memory.js';
 import { Nightly, localDate } from './memory/nightly.js';
-import { ModelClient, ModelError } from './model.js';
+import { ModelClient, type ModelClientOptions, ModelError } from './model.js';
 import { dataDir } from './paths.js';
 import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
   const personality = new Personality({ defaults: config.personality, store, audit });
   const tone = () => personality.tone();
   let shell: Shell | undefined;
-  const model = new ModelClient({
+  const modelOptions: ModelClientOptions = {
     models: config.models,
     // Resolved per call, so a keyring that unlocks after login starts working without a restart.
     resolveKey: (ref) => keyring.require(ref),
@@ -141,7 +141,8 @@ async function main(): Promise<void> {
       audit.append({ kind: 'model', role: r.role, baseUrl: r.baseUrl, model: r.model, ok: r.ok, errorKind: r.errorKind, errorStatus: r.errorStatus, errorDetail: r.errorDetail, provider: r.result?.provider, usage: r.result?.usage });
       shell?.pushStatus();
     },
-  });
+  };
+  const model = new ModelClient(modelOptions);
 
   const isPaused = () => store.getSetting('paused') === '1';
   const tools = new ToolRegistry(audit, { isPaused }).register(nowTool(config.user.timezone));
@@ -577,7 +578,9 @@ async function main(): Promise<void> {
       : undefined;
   if (knowledgeProfiles) renderPerson = (p) => knowledgeProfiles.renderFor(p);
   // K2: the first pass on backfillModel (cloud by default), hourly updates on model (local by default).
-  const knowledgeModel = (which: 'local' | 'cloud') => (which === 'cloud' ? { model, role: 'nightly' as const } : localModel ? { model: localModel, role: 'local' as const } : null);
+  // [knowledge] cloudModel: the same connection, key, gate and usage records as the nightly role, only the model swapped.
+  const knowledgeCloud = kc.cloudModel ? new ModelClient({ ...modelOptions, models: { ...config.models, nightly: { ...config.models.nightly, model: kc.cloudModel } } }) : model;
+  const knowledgeModel = (which: 'local' | 'cloud') => (which === 'cloud' ? { model: knowledgeCloud, role: 'nightly' as const } : localModel ? { model: localModel, role: 'local' as const } : null);
   const knowledge = knowledgeFile
     ? new KnowledgeCrawler({
         config: kc,

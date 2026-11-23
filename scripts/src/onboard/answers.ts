@@ -5,7 +5,7 @@
  * the nightly job use the chat's model and key, and every section setup doesn't show is kept
  * from the existing config. Pure, so it is unit-tested (scripts/test/onboard.test.ts).
  */
-import { AiosConfig, DEFAULT_PORT, EmbeddingsConfig, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig, WallpaperDim } from '@aios/shared';
+import { AiosConfig, DEFAULT_PORT, EmbeddingsConfig, KnowledgeConfig, LocalModelConfig, ModelRoleConfig, type SecretRef, SIGNAL_NUMBER, SpeechConfig, WallpaperDim } from '@aios/shared';
 import { z } from 'zod';
 
 export const MAIL_PASSWORD_REF: SecretRef = 'keyring:mail';
@@ -16,6 +16,8 @@ export interface ProviderPreset {
   blurb: string;
   keyUrl: string;
   defaultModel?: string;
+  /** The knowledge base's cloud model ([knowledge] cloudModel) for a new or unset config: the knowledge bake-off's pick. */
+  knowledgeModel?: string;
   baseUrl: string;
   extraBody: Record<string, unknown>;
   extraHeaders: Record<string, string>;
@@ -28,6 +30,7 @@ export function readPresets(raw: Record<string, unknown>): Record<string, Provid
     blurb: z.string().max(120),
     keyUrl: z.url({ protocol: /^https$/ }),
     defaultModel: z.string().min(1).max(200).optional(),
+    knowledgeModel: z.string().min(1).max(200).optional(),
     baseUrl: z.url({ protocol: /^https$/ }),
     extraBody: z.record(z.string(), z.unknown()),
     extraHeaders: z.record(z.string(), z.string()),
@@ -225,8 +228,19 @@ export function buildConfig(
     ui: { ...(base?.ui ?? { port: DEFAULT_PORT }), kiosk: a.desktop.autostart },
     screen: { ...(base?.screen ?? {}), monitor: a.monitor },
     signal: signalSection(a, base, found, signalLinked),
+    knowledge: knowledgeSection(base, preset, prevChat?.baseUrl === baseUrl),
   });
   return { config, secrets };
+}
+
+/**
+ * The knowledge base's cloud model: one set before is kept while the provider stays the same;
+ * otherwise the provider preset's pick (providers.json `knowledgeModel`), or none (the nightly model).
+ */
+function knowledgeSection(base: AiosConfig | null, preset: ProviderPreset | undefined, sameProvider: boolean): AiosConfig['knowledge'] {
+  const { cloudModel: before, ...rest } = base?.knowledge ?? KnowledgeConfig.parse({});
+  const cloudModel = (sameProvider ? before : undefined) ?? preset?.knowledgeModel;
+  return { ...rest, ...(cloudModel ? { cloudModel } : {}) };
 }
 
 /** SG1: on only with a linked number: the one just linked, or the one linked before. */

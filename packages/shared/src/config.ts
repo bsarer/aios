@@ -391,6 +391,12 @@ export const KnowledgeConfig = z.strictObject({
   backfillDays: z.int().min(0).max(730).default(183),
   /** K2: the first pass runs on the cloud nightly role ("cloud", the default) or the local model ("local"). */
   backfillModel: z.enum(['local', 'cloud']).default('cloud'),
+  /**
+   * The model id for the knowledge base's cloud reading, on the nightly role's connection and key
+   * (only the model swapped). Leave out to use the nightly model. Setup fills it from the provider
+   * preset's `knowledgeModel` (providers.json) when it is not set.
+   */
+  cloudModel: z.string().trim().min(1).max(200).optional(),
   /** K2/K3: at most this many emails (after the filters below) and files in the first pass, newest first. */
   backfillMaxMails: z.int().min(0).max(50_000).default(5000),
   backfillMaxFiles: z.int().min(0).max(5000).default(300),

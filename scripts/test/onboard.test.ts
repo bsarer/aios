@@ -58,6 +58,26 @@ describe('R2 answers: only what needs the person is asked', () => {
     expect(JSON.stringify(config)).not.toContain('abcdefghij');
   });
 
+  it("gives the knowledge base the provider preset's cloud model, keeps one set before, and drops it with the provider", () => {
+    const pick = presets.openrouter!.knowledgeModel!;
+    expect(pick).toBeTruthy();
+    const first = buildConfig(answers(), null, presets, all, GMAIL).config;
+    expect(first.knowledge.cloudModel).toBe(pick);
+    expect(first.models.nightly.model).toBe('anthropic/claude-haiku-5.5');
+    // An install from before: Settings' Save fills it in and keeps the rest of the section.
+    const { cloudModel: _c, ...old } = first.knowledge;
+    const before = AiosConfig.parse({ ...first, knowledge: { ...old, dailyBudgetUsd: 3 } });
+    expect(before.knowledge.cloudModel).toBeUndefined();
+    const saved = buildConfig(answers({ ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: '' }, mail: { address: 'baris@gmail.com', password: '' } }), before, presets, all, GMAIL).config;
+    expect(saved.knowledge).toMatchObject({ cloudModel: pick, dailyBudgetUsd: 3 });
+    // One the user chose stays.
+    const chosen = AiosConfig.parse({ ...first, knowledge: { ...first.knowledge, cloudModel: 'z-ai/glm-5.3' } });
+    expect(buildConfig(answers({ ai: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', key: '' }, mail: { address: 'baris@gmail.com', password: '' } }), chosen, presets, all, GMAIL).config.knowledge.cloudModel).toBe('z-ai/glm-5.3');
+    // Another provider: an OpenRouter id would not fit, so the nightly model is used.
+    const groq = buildConfig(answers({ ai: { provider: 'groq', model: 'some-model', key: KEY } }), chosen, presets, all, GMAIL).config;
+    expect(groq.knowledge.cloudModel).toBeUndefined();
+  });
+
   it('turns a feature off when its app is missing, whatever the tick says', () => {
     const { config } = buildConfig(answers(), null, presets, none, GMAIL);
     expect(config.docs.enabled).toBe(false);

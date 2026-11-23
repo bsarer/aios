@@ -42,3 +42,8 @@ colleague, a guess the assistant repeated in chat. They are checked by code and 
 `evals/reports/<date>-knowledge.md`. `--mine` adds your own mail side by side, flagging every
 relationship or liking word the email never uses; that report holds your mail, so it is written
 only to `<config dir>/evals/`, never here. Nothing is written to the knowledge base.
+
+Each answer is graded twice: as the model wrote it, and after the knowledge base's own code
+checks (an exact quote found in the item, relationships only from your own words, no guesses),
+which is what would be stored. `evals/test/knowledge.test.ts` runs the fixtures through those
+checks with the old mistakes written in on purpose, so a change that lets one through fails.

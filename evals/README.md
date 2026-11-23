@@ -30,15 +30,14 @@ the cheapest model that passed every instruction and injection task.
 ## Knowledge bake-off
 
 ```sh
-pnpm --filter @aios/evals knowledge             # fixtures only
-pnpm --filter @aios/evals knowledge --mine 20   # plus 20 of your own recent emails
+pnpm --filter @aios/evals knowledge             # the local model and every model in knowledge-models.toml
+pnpm --filter @aios/evals knowledge --only z-ai/glm-5.3 --repeat 3
 ```
 
-The local model (`[models.local]`) against the cloud model the knowledge base's first pass uses
-(`[models.nightly]`, or `--cloud <id>`), both with the knowledge base's real extraction requests.
-The fixtures (`src/knowledge-fixtures.ts`) are invented items built from known failures: a
-relationship guessed from a surname, a city visited turned into a liking, a stranger turned into a
-colleague, a guess the assistant repeated in chat. They are checked by code and reported in
-`evals/reports/<date>-knowledge.md`. `--mine` adds your own mail side by side, flagging every
-relationship or liking word the email never uses; that report holds your mail, so it is written
-only to `<config dir>/evals/`, never here. Nothing is written to the knowledge base.
+The local model (`[models.local]`, Ollama) against each cloud model in `knowledge-models.toml`,
+on the chat role's connection and key, all with the knowledge base's own extraction requests.
+Only invented items (`src/knowledge-fixtures.ts`), built from known failures: a relationship
+guessed from a surname, a city visited turned into a liking, a stranger turned into a colleague,
+a guess the assistant repeated in chat, plus real facts so writing nothing doesn't score well.
+Code checks them; the report is `evals/reports/<date>-knowledge.md`. Ids missing from the
+provider's live list are skipped and named. Nothing is written to the knowledge base.

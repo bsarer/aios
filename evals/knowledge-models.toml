@@ -1,0 +1,17 @@
+# Cloud models compared by `pnpm --filter @aios/evals knowledge` against the local model.
+# Connection (base URL, key, provider routing) comes from the chat role in the config; only the
+# model changes. Ids are checked against the provider's live list at run time; missing ones are
+# skipped and named in the report. Chosen by Baris, 2026-11-23.
+
+[[cloud]]
+model = "anthropic/claude-haiku-5.5"          # Astra's default since the October bake-off
+[[cloud]]
+model = "openai/gpt-6-luna"
+[[cloud]]
+model = "deepseek/deepseek-v4.1-flash-1017"
+[[cloud]]
+model = "moonshotai/kimi-k3.1-pro"
+[[cloud]]
+model = "z-ai/glm-5.3"
+[[cloud]]
+model = "qwen/qwen3.8-27b"

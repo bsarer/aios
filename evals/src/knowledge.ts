@@ -1,42 +1,24 @@
 /**
- * `pnpm --filter @aios/evals knowledge [--mine N] [--cloud model-id] [--repeat N]`
+ * `pnpm --filter @aios/evals knowledge [--only model-id] [--repeat N]`
  *
- * Knowledge bake-off: the local model ([models.local]) against the cloud model the first pass
- * uses ([models.nightly], or --cloud to try another id on the same connection). Both get exactly
- * the requests the knowledge base sends (`mailRequest`, `chatRequest`, `calendarRequest` from
- * core), so this measures the model, with today's prompt.
+ * Knowledge bake-off: the local model ([models.local], Ollama) against each cloud model in
+ * evals/knowledge-models.toml, on the chat role's connection (OpenRouter and Astra's own key, only
+ * the model swapped). Every model gets exactly the requests the knowledge base sends
+ * (`mailRequest`, `chatRequest`, `calendarRequest` from core), so this measures the model with
+ * today's prompt.
  *
- * 1. Fixtures (`knowledge-fixtures.ts`): invented items with traps and real facts, checked by
- *    code. Report: evals/reports/<date>-knowledge.md and .json, safe to commit.
- * 2. With --mine N: up to N of the user's own recent emails (half sent, half received, bulk and
- *    automated mail skipped like the knowledge base does). Both models' notes side by side, with
- *    every relationship or liking word that isn't in the email itself flagged. This report holds
- *    the user's mail, so it is written only to <config dir>/evals/, never to the repo, and only
- *    counts are printed.
- *
- * Nothing is written to the knowledge base, the ledger or memory. The extractor has no tools here
- * either: only structured calls.
+ * Only invented items (`knowledge-fixtures.ts`): traps and real facts, checked by code. No real
+ * mail is read. Report: evals/reports/<date>-knowledge.md and .json, safe to commit. Nothing is
+ * written to the knowledge base, the ledger, memory or config, and the extractor has no tools:
+ * only structured calls.
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  ExtractedNotes,
-  Keyring,
-  MailClient,
-  ModelClient,
-  type ModelRequest,
-  ModelError,
-  calendarRequest,
-  chatRequest,
-  cleanExtracted,
-  cleanPages,
-  mailRequest,
-  ownText,
-  sanitize,
-  skipReason,
-} from '@aios/core';
+import { ExtractedNotes, Keyring, ModelClient, ModelError, type ModelRequest, calendarRequest, chatRequest, cleanExtracted, cleanPages, mailRequest } from '@aios/core';
 import { configDir, parseConfig } from '@aios/shared';
+import { parse as parseToml } from 'smol-toml';
+import { z } from 'zod';
 import { FIXTURES, FIXTURE_USER, type Fixture, type FixtureItem } from './knowledge-fixtures.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -46,8 +28,6 @@ function flag(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-type Side = 'local' | 'cloud';
-const ROLE: Record<Side, ModelRequest['role']> = { local: 'local', cloud: 'nightly' };
 
 export interface Extraction {
   ok: boolean;
@@ -113,148 +93,116 @@ export function unsupportedWords(line: string, source: string): string[] {
 const fmtUsd = (n: number) => `$${n.toFixed(4)}`;
 const sum = (xs: (number | null)[]) => xs.reduce<number>((a, b) => a + (b ?? 0), 0);
 
-async function main(): Promise<void> {
-  const mine = Number(flag('mine') ?? 0);
-  const repeat = Math.max(1, Number(flag('repeat') ?? 1));
-  const config = parseConfig(await readFile(join(configDir(), 'config.toml'), 'utf8'));
-  if (!config.models.local) throw new Error('no [models.local] in the config: there is no local model to compare');
-  const keyring = new Keyring();
-  const cloudModel = flag('cloud') ?? config.models.nightly.model;
-  const models = { ...config.models, nightly: { ...config.models.nightly, model: cloudModel } };
-  const client = new ModelClient({ models, resolveKey: (ref) => keyring.require(ref) });
-  const names: Record<Side, string> = { local: config.models.local.model, cloud: cloudModel };
-  console.log(`local: ${names.local}\ncloud: ${names.cloud}\n`);
+/** Which OpenRouter ids exist now; null when the listing can't be read (then every id is tried). */
+async function liveIds(baseUrl: string): Promise<Set<string> | null> {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/models`);
+    if (!res.ok) return null;
+    const Listing = z.looseObject({ data: z.array(z.looseObject({ id: z.string() })) });
+    return new Set(Listing.parse(await res.json()).data.map((d) => d.id));
+  } catch {
+    return null;
+  }
+}
 
-  // ── 1. Fixtures ──
-  const rows: { id: string; what: string; side: Side; run: number; ex: Extraction; checks: CheckResult[] }[] = [];
-  for (let r = 0; r < repeat; r++) {
-    for (const [n, f] of FIXTURES.entries()) {
-      for (const side of ['local', 'cloud'] as const) {
-        const ex = await extractOnce(client, fixtureRequest(ROLE[side], f.item, n));
-        const checks = ex.ok ? grade(f, ex.lines) : f.checks.map((c) => ({ label: c.label, pass: false, culprit: ex.error }));
-        rows.push({ id: f.id, what: f.what, side, run: r, ex, checks });
-        console.log(`${side.padEnd(5)}  ${checks.every((c) => c.pass) ? 'PASS' : 'FAIL'}  ${f.id}  ${ex.ms} ms${ex.error ? `  ${ex.error}` : ''}`);
+const Candidates = z.strictObject({ cloud: z.array(z.strictObject({ model: z.string().min(1).max(200) })).min(1) });
+
+interface Contender {
+  label: string;
+  client: ModelClient;
+  role: ModelRequest['role'];
+}
+
+async function main(): Promise<void> {
+  const repeat = Math.max(1, Number(flag('repeat') ?? 1));
+  const only = flag('only');
+  const config = parseConfig(await readFile(join(configDir(), 'config.toml'), 'utf8'));
+  const keyring = new Keyring();
+  const resolveKey = (ref: Parameters<Keyring['require']>[0]) => keyring.require(ref);
+  const contenders: Contender[] = [];
+  const skipped: string[] = [];
+
+  // The local model, exactly as Astra calls it.
+  if (config.models.local) contenders.push({ label: `local ${config.models.local.model}`, client: new ModelClient({ models: config.models, resolveKey }), role: 'local' });
+  else skipped.push('local: no [models.local] in the config');
+
+  // Each cloud model on the chat role's connection (OpenRouter, Astra's key), only the model swapped.
+  const base = config.models.chat;
+  const cands = Candidates.parse(parseToml(await readFile(join(here, '..', 'knowledge-models.toml'), 'utf8')));
+  const live = await liveIds(base.baseUrl);
+  for (const { model } of cands.cloud) {
+    if (only && model !== only) continue;
+    if (live && !live.has(model)) {
+      skipped.push(`${model}: not in the provider's model list today`);
+      continue;
+    }
+    const role = { ...base, model };
+    contenders.push({ label: model, client: new ModelClient({ models: { ...config.models, chat: role, triage: role, nightly: role }, resolveKey }), role: 'nightly' });
+  }
+  console.log(`contenders:\n  ${contenders.map((c) => c.label).join('\n  ')}${skipped.length ? `\nskipped:\n  ${skipped.join('\n  ')}` : ''}\n`);
+
+  const rows: { id: string; who: string; run: number; ex: Extraction; checks: CheckResult[] }[] = [];
+  for (const c of contenders) {
+    for (let r = 0; r < repeat; r++) {
+      for (const [n, f] of FIXTURES.entries()) {
+        const ex = await extractOnce(c.client, fixtureRequest(c.role, f.item, n));
+        const checks = ex.ok ? grade(f, ex.lines) : f.checks.map((k) => ({ label: k.label, pass: false, culprit: ex.error }));
+        rows.push({ id: f.id, who: c.label, run: r, ex, checks });
+        console.log(`${c.label}  ${checks.every((k) => k.pass) ? 'PASS' : 'FAIL'}  ${f.id}  ${ex.ms} ms${ex.error ? `  ${ex.error}` : ''}`);
       }
     }
   }
+
   const date = new Date().toISOString().slice(0, 10);
-  const score = (side: Side) => {
-    const cs = rows.filter((x) => x.side === side).flatMap((x) => x.checks);
-    return { pass: cs.filter((c) => c.pass).length, total: cs.length };
-  };
+  const summary = contenders.map((c) => {
+    const xs = rows.filter((x) => x.who === c.label);
+    const cs = xs.flatMap((x) => x.checks);
+    const traps = xs.flatMap((x) => x.checks.filter((_k, i) => FIXTURES.find((f) => f.id === x.id)!.checks[i]!.forbid));
+    const facts = xs.flatMap((x) => x.checks.filter((_k, i) => FIXTURES.find((f) => f.id === x.id)!.checks[i]!.expect));
+    return {
+      who: c.label,
+      pass: cs.filter((k) => k.pass).length,
+      total: cs.length,
+      guesses: traps.filter((k) => !k.pass).length,
+      traps: traps.length,
+      facts: facts.filter((k) => k.pass).length,
+      factTotal: facts.length,
+      errors: xs.filter((x) => !x.ex.ok).length,
+      avgMs: Math.round(sum(xs.map((x) => x.ex.ms)) / Math.max(1, xs.length)),
+      usd: sum(xs.map((x) => x.ex.usd)),
+    };
+  });
   const md: string[] = [
     `# Knowledge bake-off, ${date}`,
     '',
-    `Local: \`${names.local}\` · Cloud: \`${names.cloud}\` · ${repeat} run${repeat > 1 ? 's' : ''} · today's extraction prompt`,
+    `Invented emails, chat and calendar only. Every model gets the knowledge base's own extraction request, unchanged. ${repeat} run${repeat > 1 ? 's' : ''}.`,
     '',
-    '| | Checks passed | Errors | Avg time | Cost |',
-    '|---|---|---|---|---|',
-    ...(['local', 'cloud'] as const).map((s) => {
-      const xs = rows.filter((x) => x.side === s);
-      const sc = score(s);
-      return `| ${s} \`${names[s]}\` | ${sc.pass} of ${sc.total} | ${xs.filter((x) => !x.ex.ok).length} | ${Math.round(sum(xs.map((x) => x.ex.ms)) / xs.length)} ms | ${fmtUsd(sum(xs.map((x) => x.ex.usd)))} |`;
-    }),
+    '| Model | Checks passed | Guesses stated as facts | Real facts kept | Errors | Avg time | Cost |',
+    '|---|---|---|---|---|---|---|',
+    ...summary.map((s) => `| \`${s.who}\` | ${s.pass} of ${s.total} | ${s.guesses} of ${s.traps} traps | ${s.facts} of ${s.factTotal} | ${s.errors} | ${(s.avgMs / 1000).toFixed(1)} s | ${fmtUsd(s.usd)} |`),
     '',
+    ...(skipped.length ? ['Skipped:', ...skipped.map((s) => `- ${s}`), ''] : []),
   ];
   for (const f of FIXTURES) {
     md.push(`## ${f.id}`, '', f.what, '');
-    for (const side of ['local', 'cloud'] as const) {
-      for (const x of rows.filter((y) => y.id === f.id && y.side === side)) {
-        md.push(`**${side}**${repeat > 1 ? ` (run ${x.run + 1})` : ''}: ${x.checks.map((c) => `${c.pass ? '✅' : '❌'} ${c.label}${c.culprit ? ` (“${c.culprit}”)` : ''}`).join('; ')}`, '');
-        md.push(...(x.ex.lines.length ? x.ex.lines.map((l) => `- ${l}`) : [x.ex.error ? `- error: ${x.ex.error}` : '- (nothing)']), '');
-      }
+    for (const x of rows.filter((y) => y.id === f.id)) {
+      md.push(`**\`${x.who}\`**${repeat > 1 ? ` (run ${x.run + 1})` : ''}: ${x.checks.map((k) => `${k.pass ? '✅' : '❌'} ${k.label}${k.culprit ? ` (“${k.culprit}”)` : ''}`).join('; ')}`, '');
+      md.push(...(x.ex.lines.length ? x.ex.lines.map((l) => `- ${l}`) : [x.ex.error ? `- error: ${x.ex.error}` : '- (nothing)']), '');
     }
   }
   const outDir = join(here, '..', 'reports');
   await mkdir(outDir, { recursive: true });
   await writeFile(join(outDir, `${date}-knowledge.md`), md.join('\n'));
-  await writeFile(join(outDir, `${date}-knowledge.json`), JSON.stringify({ date, models: names, repeat, rows: rows.map(({ what: _w, ...r }) => r) }, null, 2));
-  console.log(`\nfixtures: local ${score('local').pass}/${score('local').total}, cloud ${score('cloud').pass}/${score('cloud').total}\nwrote evals/reports/${date}-knowledge.md and .json`);
-
-  // ── 2. The user's own mail (stays on this computer) ──
-  if (mine > 0) await ownMail(config, keyring, client, names, mine, date);
-}
-
-async function ownMail(config: ReturnType<typeof parseConfig>, keyring: Keyring, client: ModelClient, names: Record<Side, string>, n: number, date: string): Promise<void> {
-  const mail = new MailClient({
-    host: config.mail.imap.host,
-    port: config.mail.imap.port,
-    tls: config.mail.imap.tls,
-    user: config.mail.username,
-    password: async () => (await keyring.require(config.mail.passwordRef)).reveal(),
-  });
-  const kc = config.knowledge;
-  const listed = await mail.list({ since: new Date(Date.now() - 45 * 86_400_000), limit: 300, skipCategories: kc.skipCategories });
-  const sent = listed.filter((m) => m.id.startsWith('Sent:'));
-  const got = listed.filter((m) => !m.id.startsWith('Sent:') && !skipReason(m, false, kc));
-  const pick = [...sent.slice(0, Math.ceil(n / 2)), ...got.slice(0, Math.floor(n / 2))];
-  const totals: Record<Side, { notes: number; flagged: number; errors: number; ms: number; usd: number }> = {
-    local: { notes: 0, flagged: 0, errors: 0, ms: 0, usd: 0 },
-    cloud: { notes: 0, flagged: 0, errors: 0, ms: 0, usd: 0 },
-  };
-  const md: string[] = [
-    `# Knowledge bake-off on your own mail, ${date}`,
-    '',
-    `Local: \`${names.local}\` · Cloud: \`${names.cloud}\`. ⚠️ marks a relationship or liking word the email itself never uses: the model supplied it.`,
-    'This file holds your email subjects and what the models wrote about them. It stays on this computer.',
-    '',
-  ];
-  const sections: string[] = [];
-  for (const [i, s] of pick.entries()) {
-    const m = await mail.read(s.id);
-    if (!m) continue;
-    const isSent = s.id.startsWith('Sent:');
-    const who = (a: { name: string; address: string }) => (a.name ? `${a.name} <${a.address}>` : a.address);
-    const body = m.text ? m.text : m.html ? sanitize({ html: m.html }, { maxChars: 12_000 }) : '';
-    const source = `${m.from ? who(m.from) : ''}\n${m.to.map(who).join(', ')}\n${m.subject}\n${ownText(body)}`;
-    sections.push(`## ${i + 1}. ${isSent ? 'Sent' : 'Received'}: ${m.subject.replace(/[\r\n]+/g, ' ').slice(0, 120) || '(no subject)'}`, '');
-    for (const side of ['local', 'cloud'] as const) {
-      const req = mailRequest(ROLE[side], config.user.name, {
-        id: m.id,
-        sentByUser: isSent,
-        from: m.from ? who(m.from) : '(unknown)',
-        to: [...m.to, ...m.cc].slice(0, 10).map(who),
-        date: m.date?.toISOString().slice(0, 16).replace('T', ' ') ?? '(no date)',
-        subject: m.subject,
-        body: { text: m.text, html: m.html },
-      });
-      const ex = await extractOnce(client, req);
-      const t = totals[side];
-      t.ms += ex.ms;
-      t.usd += ex.usd ?? 0;
-      if (!ex.ok) t.errors++;
-      t.notes += ex.lines.length;
-      sections.push(`**${side}** (${ex.ms} ms)`, '');
-      if (!ex.ok) sections.push(`- error: ${ex.error}`);
-      else if (!ex.lines.length) sections.push('- (nothing)');
-      for (const l of ex.lines) {
-        const bad = unsupportedWords(l, source);
-        if (bad.length) t.flagged++;
-        sections.push(`- ${bad.length ? `⚠️ (${bad.join(', ')}) ` : ''}${l}`);
-      }
-      sections.push('');
-    }
-    console.log(`own mail ${i + 1}/${pick.length} done`);
-  }
-  md.push(
-    '| | Notes and facts | ⚠️ unsupported words | Errors | Total time | Cost |',
-    '|---|---|---|---|---|---|',
-    ...(['local', 'cloud'] as const).map((s) => `| ${s} | ${totals[s].notes} | ${totals[s].flagged} | ${totals[s].errors} | ${Math.round(totals[s].ms / 1000)} s | ${fmtUsd(totals[s].usd)} |`),
-    '',
-    ...sections,
-  );
-  const dir = join(configDir(), 'evals');
-  await mkdir(dir, { recursive: true });
-  const path = join(dir, `${date}-knowledge-own-mail.md`);
-  await writeFile(path, md.join('\n'), { mode: 0o600 });
-  console.log(`\nown mail (${pick.length} emails):`);
-  for (const s of ['local', 'cloud'] as const) console.log(`  ${s}: ${totals[s].notes} lines, ${totals[s].flagged} with unsupported words, ${totals[s].errors} errors, ${Math.round(totals[s].ms / 1000)} s, ${fmtUsd(totals[s].usd)}`);
-  console.log(`wrote ${path} (stays on this computer)`);
+  await writeFile(join(outDir, `${date}-knowledge.json`), JSON.stringify({ date, repeat, skipped, summary, rows }, null, 2));
+  console.log(`\n${md.slice(0, 6 + summary.length).join('\n')}\nwrote evals/reports/${date}-knowledge.md and .json`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main().then(() => process.exit(0), (err: unknown) => {
-    console.error(`knowledge bake-off failed: ${(err as Error).message}`);
-    process.exit(1);
-  });
+  main().then(
+    () => process.exit(0),
+    (err: unknown) => {
+      console.error(`knowledge bake-off failed: ${(err as Error).message}`);
+      process.exit(1);
+    },
+  );
 }

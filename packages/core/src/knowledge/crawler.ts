@@ -42,24 +42,24 @@ import { type ModelClient, ModelError, type ModelErrorKind, type ModelRequest } 
 import type { Store } from '../store.js';
 import {
   DOC_TEXT_CHARS,
+  type Dropped,
   ExtractedNotes,
+  type ItemRequest,
   PageSummary,
-  TidiedNotes,
-  calendarRequest,
-  chatRequest,
+  calendarItem,
+  chatItem,
   cleanExtracted,
   cleanPages,
+  docItem,
+  mailItem,
   pageSummaryRequest,
-  cleanTidied,
-  docRequest,
-  mailRequest,
-  mergeNotes,
-  tidyRequest,
+  personOf,
 } from './extract.js';
-import { type Knowledge, type KnowledgeFile, type ModelSection, type Note, SECTION_LIMITS, cleanNote } from './file.js';
-import { type Item, type ItemKind, KnowledgeLedger, PRIORITY, type Phase, type Progress } from './ledger.js';
+import { type Fact, KnowledgeFacts, ME, originOf } from './facts.js';
+import { type Knowledge, type KnowledgeFile, MODEL_SECTIONS, type Note, SECTION_LIMITS, cleanNote } from './file.js';
+import { type Item, type ItemKind, type ItemSource, KnowledgeLedger, PRIORITY, type Phase, type Progress } from './ledger.js';
 import { skipReason } from './mailfilter.js';
-import { type FiledFact, type KnowledgeWiki, checkText } from './wiki.js';
+import { type FiledFact, type KnowledgeWiki, type PageFact, checkText, pageId } from './wiki.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -74,6 +74,12 @@ const MAX_CHUNK_MAILS = 5000;
 /** K3: more mail is listed while fewer than this many runs' worth wait, at most this many months a run. */
 const QUEUE_RUNS = 2;
 const MAX_CHUNKS_PER_RUN = 6;
+/** K5: on its first run, items read in the last this many days (at most this many) are read again under the new rules. */
+const REREAD_DAYS = 30;
+const REREAD_MAX = 400;
+const FACTS_VERSION = '1';
+/** K5: judgement (relationships, interests) comes from the user's own words, so these go to the cloud model when there is one. */
+const OWN_WORDS: ItemKind[] = ['sent', 'chat'];
 /** These mean no call will work right now: stop the run and try again later. */
 const STOP_KINDS = new Set<string>(['auth', 'credits', 'forbidden', 'rate_limited', 'timeout', 'unavailable', 'network', 'aborted', 'paused', 'cost_cap', 'key_missing', 'not_configured'] satisfies ModelErrorKind[]);
 
@@ -124,7 +130,10 @@ export interface KnowledgeRun {
   older: number;
   /** K3: emails left out this run as bulk, automated or from a skipped sender. */
   skipped: number;
-  tidied: boolean;
+  /** K5: facts left out by code's checks (no quote in the item, a guessed relationship…), by reason. */
+  dropped: Dropped;
+  /** K5: items read again on the first run under the new rules. */
+  reread: number;
   /** K4: wiki pages that got new facts or links, and summaries rewritten. */
   pages: number;
   summaries: number;
@@ -146,8 +155,13 @@ export interface KnowledgeProgress extends Progress {
 const sourceOf = (k: ItemKind): Note['source'] => (k === 'sent' || k === 'mail' ? 'mail' : k === 'file' ? 'files' : k);
 const senderName = (from: string) => from.replace(/\s*<[^>]*>\s*$/, '').replace(/^"|"$/g, '').trim() || from;
 
+/** A fact as a line in the file or on a page. */
+const asNote = (f: Fact): Note & PageFact => ({ text: f.text, source: f.source, ...(f.lastOn ? { on: f.lastOn } : {}), ...(f.mine ? { mine: true } : {}), ...(f.state === 'unconfirmed' ? { unconfirmed: true } : {}) });
+
 export class KnowledgeCrawler {
   readonly ledger: KnowledgeLedger;
+  /** K5: every fact with its quotes and sources. */
+  readonly facts: KnowledgeFacts;
   private running = false;
   private skippedThisRun = 0;
   private readonly now: () => number;
@@ -155,6 +169,7 @@ export class KnowledgeCrawler {
   constructor(private readonly o: KnowledgeCrawlerOptions) {
     this.now = o.now ?? Date.now;
     this.ledger = new KnowledgeLedger(o.store);
+    this.facts = new KnowledgeFacts(o.store);
   }
 
   private on(s: KnowledgeConfig['sources'][number]): boolean {
@@ -453,50 +468,74 @@ export class KnowledgeCrawler {
     return allDay ? `${day}, all day` : `${day} ${utcToLocal(ms, this.o.timeZone).slice(11, 16)}`;
   }
 
-  /** The request for one item, or null when there is nothing in it to read. */
-  private async requestFor(item: Item, role: ModelRequest['role'], events: CalEvent[] | null, now: number): Promise<ModelRequest | null> {
+  /** The request for one item and where its words came from, or null when there is nothing in it to read. */
+  private async requestFor(item: Item, role: ModelRequest['role'], events: CalEvent[] | null, now: number): Promise<{ req: ItemRequest; source: ItemSource } | null> {
     const name = this.o.userName;
     if (item.kind === 'sent' || item.kind === 'mail') {
       const m = await this.o.mail?.read(item.ref);
       if (!m) return null;
       const who = (a: { name: string; address: string }) => (a.name ? `${a.name} <${a.address}>` : a.address);
-      return mailRequest(role, name, {
-        id: m.id,
-        sentByUser: item.kind === 'sent',
-        from: m.from ? who(m.from) : '(unknown)',
-        to: [...m.to, ...m.cc].slice(0, 10).map(who),
-        date: m.date ? utcToLocal(m.date.getTime(), this.o.timeZone).replace('T', ' ') : '(no date)',
-        subject: m.subject,
-        body: { text: m.text, html: m.html },
-      });
+      const sent = item.kind === 'sent';
+      const day = m.date ? this.when(m.date.getTime(), true).replace(', all day', '') : '';
+      const to = m.to[0]?.name || m.to[0]?.address || '(unknown)';
+      const from = senderName(m.from?.name || m.from?.address || '(unknown)');
+      return {
+        req: mailItem(role, name, {
+          id: m.id,
+          sentByUser: sent,
+          from: m.from ? who(m.from) : '(unknown)',
+          to: [...m.to, ...m.cc].slice(0, 10).map(who),
+          date: m.date ? utcToLocal(m.date.getTime(), this.o.timeZone).replace('T', ' ') : '(no date)',
+          subject: m.subject,
+          body: { text: m.text, html: m.html },
+        }),
+        source: {
+          origin: sent ? 'user' : originOf(`mail:${m.from?.address ?? '(unknown)'}`),
+          label: cleanNote(`${sent ? `your email to ${to}` : `email from ${from}`}${day ? `, ${day}` : ''}: ${m.subject || '(no subject)'}`, 160),
+        },
+      };
     }
     if (item.kind === 'file') {
       const f = this.o.files?.get(item.ref);
       if (!f) return null;
       const text = this.o.files!.body(f.path, DOC_TEXT_CHARS);
       if (!text.trim() && !f.summary) return null;
-      return docRequest(role, name, { display: (this.o.displayPath ?? ((p: string) => p))(f.path), kind: f.kind, title: f.facts?.title, author: f.facts?.author, summary: f.summary, text });
+      const display = (this.o.displayPath ?? ((p: string) => p))(f.path);
+      return {
+        req: docItem(role, name, { display, kind: f.kind, title: f.facts?.title, author: f.facts?.author, summary: f.summary, text }),
+        source: { origin: originOf(`file:${f.path}`), label: cleanNote(`file ${display}`, 160) },
+      };
     }
     if (item.kind === 'chat') {
       const [from = 0, to = now] = item.ref.split('-').map(Number);
-      const turns = this.o.store.chatTurnsBetween(from, to).slice(-60);
+      // K5: only what the user typed. The assistant's replies repeat the knowledge base's own notes.
+      const turns = this.o.store
+        .chatTurnsBetween(from, to)
+        .filter((t) => t.role === 'user')
+        .slice(-60);
       if (!turns.length) return null;
-      return chatRequest(role, name, turns.map((t) => `${t.role === 'user' ? name : 'Astra'}: ${t.content.replace(/\s+/g, ' ').slice(0, t.role === 'user' ? 600 : 300)}`));
+      return {
+        req: chatItem(role, name, turns.map((t) => t.content.replace(/\s+/g, ' ').slice(0, 600))),
+        source: { origin: 'user', label: cleanNote(`what you typed in the chat, ${this.when(from, true).replace(', all day', '')}`, 160) },
+      };
     }
     if (!events?.length) return null;
-    return calendarRequest(
-      role,
-      name,
-      events.map((e) => {
-        const guests = e.attendees.filter((a) => !a.self).map((a) => a.name ?? a.email).slice(0, 6);
-        return `${this.when(e.startMs, e.allDay)}: ${e.title.slice(0, 200) || '(no title)'}${e.location ? ` at ${e.location.slice(0, 120)}` : ''}${guests.length ? ` with ${guests.join(', ')}` : ''}${e.startMs < now ? ' (past)' : ''}`;
-      }),
-    );
+    return {
+      req: calendarItem(
+        role,
+        name,
+        events.map((e) => {
+          const guests = e.attendees.filter((a) => !a.self).map((a) => a.name ?? a.email).slice(0, 6);
+          return `${this.when(e.startMs, e.allDay)}: ${e.title.slice(0, 200) || '(no title)'}${e.location ? ` at ${e.location.slice(0, 120)}` : ''}${guests.length ? ` with ${guests.join(', ')}` : ''}${e.startMs < now ? ' (past)' : ''}`;
+        }),
+      ),
+      // Every day's calendar is one origin: the same event read on two days confirms nothing.
+      source: { origin: 'calendar', label: 'your calendar' },
+    };
   }
 
-  /** Reads up to `limit` pending items of `phases`; stops early when the model can't be reached or the day's budget is spent. */
-  private async extract(choice: ModelChoice, phases: readonly Phase[], limit: number, events: CalEvent[] | null, now: number): Promise<{ tried: number; read: number; notes: number; error?: string }> {
-    const items = this.ledger.pending(limit, phases);
+  /** Reads these items; stops early when the model can't be reached or the day's budget is spent. */
+  private async extract(choice: ModelChoice, items: Item[], events: CalEvent[] | null, now: number, dropped: Dropped): Promise<{ tried: number; read: number; notes: number; error?: string }> {
     // The cloud takes a few at once; a laptop's local model one at a time.
     const lanes = choice.role === 'local' ? 1 : 3;
     let read = 0;
@@ -511,16 +550,18 @@ export class KnowledgeCrawler {
         }
         const item = items[next++]!;
         try {
-          const req = await this.requestFor(item, choice.role, events, now);
-          if (!req) {
+          const r = await this.requestFor(item, choice.role, events, now);
+          if (!r) {
             this.ledger.setExtracted(item.key, [], now);
             continue;
           }
-          const { value, result } = await choice.model.structured(req, 'knowledge_notes', ExtractedNotes);
+          const { value, result } = await choice.model.structured(r.req.request, 'knowledge_notes', ExtractedNotes);
           this.spend(choice, result?.usage?.costUsd, now);
-          const found = cleanExtracted(value);
-          const pages = this.o.wiki ? cleanPages(value) : [];
-          this.ledger.setExtracted(item.key, found, now, pages);
+          // K5: code checks every quote against the item; the local model only records what happened.
+          const check = { ...r.req.check, judgement: choice.role !== 'local' };
+          const found = cleanExtracted(value, check, dropped);
+          const pages = this.o.wiki ? cleanPages(value, check, dropped) : [];
+          this.ledger.setExtracted(item.key, found, now, pages, r.source);
           read++;
           notes += found.length + pages.reduce((n, p) => n + p.facts.length, 0);
         } catch (err) {
@@ -538,35 +579,169 @@ export class KnowledgeCrawler {
     return { tried: Math.min(next, items.length), read, notes, ...(stop ? { error: stop } : {}) };
   }
 
+  // ── K5: facts ──
+
+  /**
+   * K5's first run: every line in the file and on the pages becomes an unconfirmed fact (the
+   * user's own lines stay theirs), and recent items are read again under the new rules.
+   */
+  private upgrade(now: number): number {
+    if (this.setting.get('factsVersion') === FACTS_VERSION) return 0;
+    const k = this.o.file.read();
+    for (const s of MODEL_SECTIONS)
+      for (const n of k.sections[s]) {
+        if (n.mine) this.facts.addMine(ME, s, n.text, now);
+        else this.facts.addLegacy(ME, s, n.text, n.source, n.on, this.aboutOf(s, n.text), now);
+      }
+    const wiki = this.o.wiki;
+    if (wiki)
+      for (const p of wiki.all()) {
+        if (p.kind === 'saved') continue;
+        for (const f of p.facts) {
+          if (f.mine) this.facts.addMine(p.id, '', f.text, now);
+          else this.facts.addLegacy(p.id, '', f.text, f.source, f.on, null, now);
+        }
+        wiki.setFacts(p.id, this.facts.of(p.id).map(asNote), p.updated ?? utcToLocal(now, this.o.timeZone).replace('T', ' ').slice(0, 16));
+      }
+    const reread = this.ledger.requeueSince(now - REREAD_DAYS * DAY, REREAD_MAX, now);
+    this.setting.set('factsVersion', FACTS_VERSION);
+    this.o.audit.append({ kind: 'knowledge', event: 'facts_upgrade', facts: this.facts.count(), reread });
+    return reread;
+  }
+
+  /** The person page a people line is about ("Ana Lopez: …" → people/ana-lopez). */
+  private aboutOf(section: string, text: string): string | null {
+    if (section !== 'people') return null;
+    const who = personOf(text);
+    return who ? pageId('person', who) : null;
+  }
+
+  /** The user's edits to the file since it was last written: deleted lines are wrong, typed ones theirs. */
+  private syncFile(k: Knowledge, now: number): void {
+    for (const s of MODEL_SECTIONS) this.facts.sync(ME, s, k.sections[s].map((n) => ({ text: n.text, mine: !!n.mine })), now);
+  }
+
+  /** The file's model sections from the facts, by code: the user's own first, then known, then unconfirmed. */
+  private fromFacts(k: Knowledge): Knowledge {
+    const out: Knowledge = { ...k, sections: { ...k.sections } };
+    for (const s of MODEL_SECTIONS) {
+      const shown = this.facts.of(ME, s).slice(0, SECTION_LIMITS[s]);
+      this.facts.setShown(ME, s, shown.map((f) => f.id));
+      out.sections[s] = shown.map(asNote);
+    }
+    return out;
+  }
+
+  /** Files what has been read as facts with their quotes. Returns the pages that got facts. */
+  private fileFacts(extracted: Item[], now: number): { pages: Set<string>; added: number; pageFacts: number } {
+    const tz = this.o.timeZone;
+    const pages = new Set<string>();
+    let added = 0;
+    let pageFacts = 0;
+    for (const i of extracted) {
+      // Read before K5, with no quotes: K5's first run reads it again.
+      if (!i.source) continue;
+      const on = utcToLocal(i.at, tz).slice(0, 10);
+      const evidence = (f: { quote: string; byUser: boolean }) => ({
+        itemKey: i.key,
+        kind: i.kind,
+        quote: f.quote,
+        byUser: f.byUser,
+        origin: f.byUser ? 'user' : i.source!.origin,
+        label: i.source!.label,
+        on,
+        at: i.at,
+      });
+      for (const n of i.notes) {
+        const r = this.facts.add({ subject: ME, section: n.section, about: this.aboutOf(n.section, n.text), text: n.text, basis: n.basis, relation: n.relation, source: sourceOf(i.kind), on, evidence: evidence(n) }, now);
+        if ('id' in r && r.added) added++;
+      }
+      for (const p of i.pages) {
+        const id = pageId(p.kind, p.name);
+        if (!id) continue;
+        for (const f of p.facts) {
+          const r = this.facts.add({ subject: id, text: f.text, basis: f.basis, relation: f.relation, source: sourceOf(i.kind), on, evidence: evidence(f) }, now);
+          if ('id' in r) {
+            pages.add(id);
+            if (r.added) {
+              added++;
+              pageFacts++;
+            }
+          }
+        }
+      }
+    }
+    return { pages, added, pageFacts };
+  }
+
+  /** K5: where a fact came from, for /knowledge why. Written by code; quotes are shown as plain text. */
+  why(query: string): string {
+    const found = this.facts.search(query, 8);
+    if (!query.trim()) return 'Type /knowledge why and a few words from the line, for example /knowledge why Buket.';
+    if (!found.length) return `No line in the knowledge base matches "${cleanNote(query, 80)}".`;
+    const out = [`Where these lines came from. To take one out for good, type /knowledge wrong and its number.`];
+    for (const f of found) {
+      const where = f.subject === ME ? `About you, ${f.section}` : `Page ${f.subject}`;
+      const state = f.mine ? 'you wrote this' : f.state === 'known' ? (f.evidence.some((e) => e.byUser) ? 'known: in your own words' : 'known: two separate sources') : 'unconfirmed: one source so far';
+      out.push('', `#${f.id} ${f.text}`, `${where}. ${state}.`);
+      if (f.basis === 'legacy' && !f.evidence.length) out.push('Written before Astra kept sources, so where it came from is not known.');
+      for (const e of f.evidence.slice(0, 4)) out.push(`From ${e.label}: "${cleanNote(e.quote, 300)}"`);
+      if (f.evidence.length > 4) out.push(`and ${f.evidence.length - 4} more.`);
+    }
+    return out.join('\n');
+  }
+
+  /** K5: the user's typed /knowledge wrong: the fact is taken out of the file or page and never learned again. */
+  wrong(id: number): string {
+    const f = this.facts.get(id);
+    if (!f || f.state === 'wrong') return `There is no line #${id} to take out. Type /knowledge why and a few of its words to find its number.`;
+    const now = this.now();
+    this.facts.setWrong(id, now);
+    const stamp = utcToLocal(now, this.o.timeZone).replace('T', ' ').slice(0, 16);
+    if (f.subject === ME) {
+      const k = this.fromFacts(this.o.file.read());
+      k.updated = stamp;
+      this.o.file.write(k, utcToLocal(now, this.o.timeZone).slice(0, 10), this.o.config.keepDays);
+    } else this.o.wiki?.setFacts(f.subject, this.facts.of(f.subject).map(asNote), stamp);
+    this.o.audit.append({ kind: 'knowledge', event: 'wrong', subject: f.subject === ME ? 'me' : 'page', relation: !!f.relation });
+    return `Taken out: "${f.text}". Astra won't learn it again${f.relation ? `, or that this person is your ${f.relation}` : ''}.`;
+  }
+
   // ── The run ──
 
   private async update(): Promise<KnowledgeRun> {
     const now = this.now();
     const tz = this.o.timeZone;
     this.skippedThisRun = 0;
+    const reread = this.upgrade(now);
     const { found, freshMail } = await this.discover(now);
     const phase: Phase = this.backfilling() ? 'backfill' : 'hourly';
     let choice = phase === 'backfill' ? this.o.models.backfill : this.o.models.hourly;
     let budgetHit = false;
     // The first pass also takes new mail; when today's budget is spent, new mail goes on the hourly model.
-    let reads: [ModelChoice | null, Phase[]][] = [[choice, phase === 'backfill' ? ['backfill', 'hourly'] : ['hourly']]];
+    let reads: [ModelChoice | null, Phase[], readonly ItemKind[] | null][] = [[choice, phase === 'backfill' ? ['backfill', 'hourly'] : ['hourly'], null]];
     if (choice && this.overBudget(choice, now)) {
       budgetHit = true;
       choice = phase === 'backfill' && this.o.models.hourly && !this.overBudget(this.o.models.hourly, now) ? this.o.models.hourly : null;
-      reads = [[choice, ['hourly']]];
+      reads = [[choice, ['hourly'], null]];
     }
+    // K5: judgement calls go to the cloud. The user's own words (sent mail, chat) are read there
+    // first when the hourly model is the local one; the local model then only records what happened.
+    const cloud = this.o.models.backfill;
+    if (phase === 'hourly' && choice?.role === 'local' && cloud && cloud.role !== 'local' && !this.overBudget(cloud, now)) reads.unshift([cloud, ['hourly'], OWN_WORDS]);
     const older = this.olderModel(now);
-    if (older && phase === 'hourly') reads.push([older, ['older']]);
+    if (older && phase === 'hourly') reads.push([older, ['older'], null]);
     const evs = await this.events(now);
-    const run: KnowledgeRun = { by: choice ? 'model' : 'code', phase, found, read: 0, notes: 0, older: 0, skipped: this.skippedThisRun, tidied: false, pages: 0, summaries: 0 };
+    const run: KnowledgeRun = { by: choice ? 'model' : 'code', phase, found, read: 0, notes: 0, older: 0, skipped: this.skippedThisRun, dropped: {}, reread, pages: 0, summaries: 0 };
     let left = this.o.config.perRun;
-    for (const [m, phases] of reads) {
+    for (const [m, phases, kinds] of reads) {
       if (!m || left <= 0) continue;
       if (this.overBudget(m, now)) {
         budgetHit = true;
         continue;
       }
-      const r = await this.extract(m, phases, left, evs, now);
+      const items = kinds ? this.ledger.pendingOfKinds(left, kinds, phases) : this.ledger.pending(left, phases);
+      const r = await this.extract(m, items, evs, now, run.dropped);
       left -= r.tried;
       run.read += r.read;
       run.notes += r.notes;
@@ -576,13 +751,22 @@ export class KnowledgeCrawler {
     }
     if (budgetHit) run.error ??= 'budget';
 
+    // K5: the user's edits to the file first (a deleted line is wrong), then what has been read
+    // (this run, or an earlier one that stopped before filing) as facts with their quotes.
     let k: Knowledge = this.o.file.read();
-    // Merge what has been read (this run, or an earlier one that stopped before merging).
+    this.syncFile(k, now);
     const extracted = this.ledger.extracted(2000);
-    k = mergeNotes(
-      k,
-      extracted.flatMap((i) => i.notes.map((n) => ({ section: n.section as ModelSection, text: n.text, source: sourceOf(i.kind), on: utcToLocal(i.at, tz).slice(0, 10) }))),
-    );
+    const filed = this.fileFacts(extracted, now);
+    // No model for these items: code says what came in, from the headers, so the file still moves.
+    if (!choice && freshMail.length) {
+      for (const m of freshMail.slice(0, 8)) {
+        const text = cleanNote(
+          `${m.id.startsWith('Sent:') ? 'Sent' : 'Email from'} ${m.id.startsWith('Sent:') ? `to ${m.to[0]?.name || m.to[0]?.address || '(unknown)'}` : senderName(m.from?.name || m.from?.address || '(unknown)')}: ${m.subject}`,
+        );
+        if (text) this.facts.add({ subject: ME, section: 'recent', text, basis: 'code', source: 'mail', on: utcToLocal(m.date?.getTime() ?? now, tz).slice(0, 10) }, now);
+      }
+    }
+    k = this.fromFacts(k);
     // Upcoming: from the calendar by code, every run. Kept as it was when the calendar can't be read.
     if (evs) {
       k.sections.upcoming = evs
@@ -590,38 +774,12 @@ export class KnowledgeCrawler {
         .slice(0, SECTION_LIMITS.upcoming)
         .map((e) => ({ text: cleanNote(`${this.when(e.startMs, e.allDay)}: ${e.title || '(no title)'}${e.location ? ` at ${e.location}` : ''}`), source: 'calendar' as const, on: utcToLocal(e.startMs, tz).slice(0, 10) }));
     } else if (!this.on('calendar') || !this.o.calendar) k.sections.upcoming = [];
-    // No model for these items: code says what came in, so the file still moves.
-    if (!choice && freshMail.length) {
-      const lines: Note[] = freshMail.slice(0, 8).map((m) => ({
-        text: cleanNote(`${m.id.startsWith('Sent:') ? 'Sent' : 'Email from'} ${m.id.startsWith('Sent:') ? `to ${m.to[0]?.name || m.to[0]?.address || '(unknown)'}` : senderName(m.from?.name || m.from?.address || '(unknown)')}: ${m.subject}`),
-        source: 'mail',
-        on: utcToLocal(m.date?.getTime() ?? now, tz).slice(0, 10),
-      }));
-      k = mergeNotes(k, lines.filter((n) => n.text).map((n) => ({ ...n, section: 'recent' as const })));
-    }
-
-    // Once, when the first pass is done: fold near-duplicates together.
-    const tidy = this.o.models.backfill;
-    if (tidy && phase === 'backfill' && this.windowListed() && !this.ledger.backfillPending() && !this.setting.get('tidied') && !run.error && !this.overBudget(tidy, now)) {
-      try {
-        const { value, result } = await tidy.model.structured(tidyRequest(tidy.role, this.o.userName, k), 'knowledge_tidy', TidiedNotes);
-        this.spend(tidy, result?.usage?.costUsd, now);
-        const tidied = cleanTidied(k, value);
-        if (tidied) {
-          k = tidied;
-          run.tidied = true;
-        }
-        this.setting.set('tidied', String(now));
-      } catch (err) {
-        this.o.audit.append({ kind: 'knowledge', event: 'tidy_failed', error: err instanceof ModelError ? err.kind : (err as Error).message.slice(0, 200) });
-      }
-    }
 
     const stamp = utcToLocal(now, tz).replace('T', ' ').slice(0, 16);
     k.updated = stamp;
     this.o.file.write(k, utcToLocal(now, tz).slice(0, 10), this.o.config.keepDays);
-    // K4: the facts for wiki pages, filed by code, then the changed pages' summaries.
-    if (this.o.wiki) await this.updateWiki(this.o.wiki, extracted, choice, run, stamp, now);
+    // K4: pages and links filed by code, the pages' facts from the facts store, then the changed pages' summaries.
+    if (this.o.wiki) await this.updateWiki(this.o.wiki, extracted, filed, choice, run, stamp, now);
     this.ledger.setMerged(extracted.map((i) => i.key), now);
     this.setting.set('ranAt', String(now));
     const p = this.ledger.progress();
@@ -634,9 +792,11 @@ export class KnowledgeCrawler {
       found,
       read: run.read,
       notes: run.notes,
+      facts: filed.added,
+      dropped: run.dropped,
       older: run.older,
       skipped: run.skipped,
-      tidied: run.tidied,
+      reread: run.reread,
       pages: run.pages,
       summaries: run.summaries,
       mail: p.mail,
@@ -659,16 +819,26 @@ export class KnowledgeCrawler {
     }
   }
 
-  private async updateWiki(wiki: KnowledgeWiki, extracted: Item[], choice: ModelChoice | null, run: KnowledgeRun, stamp: string, now: number): Promise<void> {
-    const tz = this.o.timeZone;
+  private async updateWiki(wiki: KnowledgeWiki, extracted: Item[], filedFacts: { pages: Set<string>; pageFacts: number }, choice: ModelChoice | null, run: KnowledgeRun, stamp: string, now: number): Promise<void> {
+    const withFacts = filedFacts.pages;
+    // Pages and links first (code makes a page the first time a name is seen); facts come from the facts store.
     const facts: FiledFact[] = extracted.flatMap((i) =>
-      i.pages.flatMap((p) => {
-        const base = { kind: p.kind, name: p.name, links: p.links, source: sourceOf(i.kind), on: utcToLocal(i.at, tz).slice(0, 10) };
-        // The links ride on the first fact, or on an entry of their own when there are none.
-        return p.facts.length ? p.facts.map((text, n) => ({ ...base, text, links: n ? [] : p.links })) : [{ ...base, text: '' }];
-      }),
+      !i.source ? [] : i.pages.filter((p) => p.links.length || withFacts.has(pageId(p.kind, p.name) ?? '')).map((p) => ({ kind: p.kind, name: p.name, links: p.links, source: sourceOf(i.kind), text: '' })),
     );
     const filed = wiki.file(facts, stamp);
+    const changed = new Set(filed.changed);
+    for (const id of withFacts) {
+      const page = wiki.read(id);
+      if (!page) continue;
+      // The user's edits to the page since it was last written: a deleted line is wrong, a typed one theirs.
+      this.facts.sync(id, '', page.facts.map((f) => ({ text: f.text, mine: !!f.mine })), now);
+      const shown = this.facts.of(id).slice(0, 300);
+      this.facts.setShown(id, '', shown.map((f) => f.id));
+      wiki.setFacts(id, shown.map(asNote), stamp);
+      changed.add(id);
+    }
+    filed.changed = [...changed];
+    filed.facts = filedFacts.pageFacts;
     run.pages = filed.changed.length;
     // Pages waiting for a summary, oldest first; kept between runs (500 at most).
     let dirty = [...new Set([...this.dirtyPages(), ...filed.changed])].slice(-500);

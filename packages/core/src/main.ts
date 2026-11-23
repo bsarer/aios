@@ -617,6 +617,8 @@ async function main(): Promise<void> {
           knowledge: {
             view: () => knowledgeView(knowledgeFile, [progressText(knowledge.progress(), kc.backfillModel === 'cloud'), ...(knowledgeWiki ? [wikiLine(knowledgeWiki)] : [])].join('\n')),
             run: () => knowledge.run(),
+            why: (q: string) => knowledge.why(q),
+            wrong: (id: number) => knowledge.wrong(id),
             ...(knowledgeWiki
               ? {
                   check: () => knowledge.check(),

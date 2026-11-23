@@ -23,7 +23,7 @@ export type Command =
   | { name: 'todos' }
   | { name: 'pin'; text: string }
   | { name: 'unpin'; text: string }
-  | { name: 'knowledge'; update: boolean; check: boolean }
+  | { name: 'knowledge'; update: boolean; check: boolean; why?: string; wrong?: number | null }
   | { name: 'tone'; text: string }
   | { name: 'wallpaper'; text: string }
   | { name: 'feedback'; list: true }
@@ -83,8 +83,18 @@ export function parseCommand(text: string): Command | null {
       return { name: 'pin', text: rest.join(' ') };
     case 'unpin':
       return { name: 'unpin', text: rest.join(' ') };
-    case 'knowledge':
-      return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(rest.join(' ').trim()), check: /^check$/i.test(rest.join(' ').trim()) };
+    case 'knowledge': {
+      const r = rest.join(' ').trim();
+      // K5: "/knowledge why <words>" and "/knowledge wrong <number>" (or "#number").
+      const why = /^why\b\s*(.*)$/is.exec(r);
+      if (why) return { name: 'knowledge', update: false, check: false, why: why[1]!.slice(0, 200) };
+      const wrong = /^wrong\b\s*(.*)$/is.exec(r);
+      if (wrong) {
+        const n = /^#?(\d{1,9})$/.exec(wrong[1]!.trim());
+        return { name: 'knowledge', update: false, check: false, wrong: n ? Number(n[1]) : null };
+      }
+      return { name: 'knowledge', update: /^(update|now|refresh)$/i.test(r), check: /^check$/i.test(r) };
+    }
     case 'tone':
       return { name: 'tone', text: rest.join(' ') };
     case 'wallpaper':
@@ -124,6 +134,8 @@ export const HELP_TEXT = [
   '/knowledge  show the knowledge base Astra keeps about you from your mail, calendar, files and chat',
   '/knowledge update  update it now (it updates by itself every hour)',
   '/knowledge check  look for old commitments, duplicate pages and pages with no links',
+  '/knowledge why <words>  show where a line came from: the email, file or chat, and the exact words',
+  '/knowledge wrong <number>  take a wrong line out for good, so it is never learned again',
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
   '/wallpaper <sample or picture | off | light | medium | strong>  put a picture behind the chat, take it away, or change how much it is dimmed; /wallpaper samples lists the built-in ones',
   '/settings  open the settings window (the gear at the top does the same); /tone, /pin and /wallpaper change tone, tiles and wallpaper here',

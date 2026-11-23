@@ -13,6 +13,7 @@ import { AuditLog } from '../src/audit.js';
 import { zonedToUtc } from '../src/calendar/time.js';
 import type { Contact, ContactsApi } from '../src/contacts/google.js';
 import { KnowledgeCrawler } from '../src/knowledge/crawler.js';
+import { KnowledgeFacts } from '../src/knowledge/facts.js';
 import { KnowledgeFile } from '../src/knowledge/file.js';
 import { KnowledgePeople, MAX_RECIPIENTS, emailKey, personName, phoneKey } from '../src/knowledge/people.js';
 import { KnowledgeProfiles, type ProfileFact, type SignalSource, howYouKnow } from '../src/knowledge/profile.js';
@@ -280,5 +281,34 @@ describe('in the knowledge run', () => {
     expect(tool.untrustedOutput).toBe(true);
     const out = String(await tool.handler({ query: 'Ana Lopez' }, {} as never));
     expect(out).toMatch(/<untrusted source="knowledge"[^>]*>[\s\S]*## How you know them[\s\S]*Not stated[\s\S]*<\/untrusted>/);
+  });
+});
+
+describe('with the facts records', () => {
+  it('shows a relationship from the user\'s own words, never one a stranger wrote, and keeps the profile through the wiki\'s own writes', async () => {
+    const store = new Store(':memory:');
+    const dir = mkdtempSync(join(tmpdir(), 'aios-profiles-'));
+    const facts = new KnowledgeFacts(store);
+    const p = new KnowledgePeople(store, { addresses: [ME] }, TZ);
+    let profiles: KnowledgeProfiles | undefined;
+    const wiki = new KnowledgeWiki(join(dir, 'knowledge'), { renderPerson: (page) => profiles?.renderFor(page) ?? null });
+    profiles = new KnowledgeProfiles({ people: p, wiki, contactsPerRun: 0, timeZone: TZ, factsFor: (id) => facts.forSubject(id) });
+    p.noteMail(sent('mail:<1@x>', [ana]));
+    const ev = (byUser: boolean, quote: string, key: string) => ({ itemKey: key, kind: 'sent' as const, quote, byUser, origin: byUser ? 'me' : 'stranger', label: 'email', on: '2026-11-01', at: NOW });
+    facts.add({ subject: 'people/ana-lopez', text: 'Ana Lopez is a colleague', basis: 'stated', relation: 'colleague', source: 'mail', on: '2026-11-01', evidence: ev(false, 'your colleague Ana', 'mail:<9@x>') }, NOW);
+    await profiles.update([], '2026-11-10 10:00', NOW);
+    let md = readFileSync(wiki.pathOf('people/ana-lopez')!, 'utf8');
+    expect(md).toContain('## How you know them\n\n- Not stated');
+    facts.add({ subject: 'people/ana-lopez', text: 'Ana Lopez is your sister', basis: 'stated', relation: 'sister', source: 'mail', on: '2026-11-02', evidence: ev(true, 'my sister Ana', 'mail:<1@x>') }, NOW);
+    const known = facts.forSubject('people/ana-lopez').find((f) => f.relation === 'sister');
+    // The facts records decide what is known; the profile only shows what they say.
+    wiki.write({ ...wiki.read('people/ana-lopez')!, myNotes: 'Mine.' });
+    md = readFileSync(wiki.pathOf('people/ana-lopez')!, 'utf8');
+    expect(md).toContain('## Who they are');
+    // The user's own words make it known.
+    expect(known?.state).toBe('known');
+    expect(md).toContain('- Ana Lopez is your sister: "my sister Ana" (sent, 2026-11-01)');
+    expect(md).not.toContain('your colleague Ana');
+    expect(wiki.read('people/ana-lopez')!.myNotes).toBe('Mine.');
   });
 });

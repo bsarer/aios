@@ -99,9 +99,9 @@ import { WidgetBoard } from './widgets/widgets.js';
 import { KnowledgeCrawler, knowledgeView, progressText } from './knowledge/crawler.js';
 import { KnowledgeFile } from './knowledge/file.js';
 import { KnowledgePeople } from './knowledge/people.js';
-import { KnowledgeProfiles } from './knowledge/profile.js';
+import { KnowledgeProfiles, type ProfileFact } from './knowledge/profile.js';
 import { knowledgeReadTool, knowledgeSearchTool } from './knowledge/tool.js';
-import { KnowledgeWiki, wikiLine } from './knowledge/wiki.js';
+import { KnowledgeWiki, type WikiPage, wikiLine } from './knowledge/wiki.js';
 import { utcToLocal } from './calendar/time.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -558,7 +558,9 @@ async function main(): Promise<void> {
   const kc = config.knowledge;
   const knowledgeFile = kc.enabled ? new KnowledgeFile(join(configDir(), 'knowledge'), config.user.name) : undefined;
   // K4: the wiki pages beside it.
-  const knowledgeWiki = knowledgeFile && kc.wiki ? new KnowledgeWiki(knowledgeFile.dir) : undefined;
+  // Profiles: person pages are written with their profile sections (late bound: the profiles need the wiki).
+  let renderPerson: ((p: WikiPage) => string | null) | undefined;
+  const knowledgeWiki = knowledgeFile && kc.wiki ? new KnowledgeWiki(knowledgeFile.dir, { renderPerson: (p) => renderPerson?.(p) ?? null }) : undefined;
   // Profiles: a page per person you write to, from mail headers, Google Contacts and Signal. Code only.
   const knowledgeProfiles =
     knowledgeWiki && kc.profiles
@@ -569,8 +571,11 @@ async function main(): Promise<void> {
           contactsPerRun: kc.contactsPerRun,
           signal: signalInbox,
           timeZone: config.user.timezone,
+          // Only facts from the facts records (quotes and sources); "how you know them" shows only known ones that name a relationship.
+          factsFor: (id: string): ProfileFact[] => knowledge?.facts.forSubject(id) ?? [],
         })
       : undefined;
+  if (knowledgeProfiles) renderPerson = (p) => knowledgeProfiles.renderFor(p);
   // K2: the first pass on backfillModel (cloud by default), hourly updates on model (local by default).
   const knowledgeModel = (which: 'local' | 'cloud') => (which === 'cloud' ? { model, role: 'nightly' as const } : localModel ? { model: localModel, role: 'local' as const } : null);
   const knowledge = knowledgeFile
@@ -638,6 +643,8 @@ async function main(): Promise<void> {
           knowledge: {
             view: () => knowledgeView(knowledgeFile, [progressText(knowledge.progress(), kc.backfillModel === 'cloud'), ...(knowledgeWiki ? [wikiLine(knowledgeWiki)] : [])].join('\n')),
             run: () => knowledge.run(),
+            why: (q: string) => knowledge.why(q),
+            wrong: (id: number) => knowledge.wrong(id),
             ...(knowledgeWiki
               ? {
                   check: () => knowledge.check(),

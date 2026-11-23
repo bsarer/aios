@@ -27,7 +27,7 @@ export interface ProfileFact {
   text: string;
   state: 'unconfirmed' | 'known' | 'wrong';
   /** Set by code when the fact names a relationship ("sister", "manager"), only if its quote says it. */
-  relation?: string | undefined;
+  relation?: string | null | undefined;
   evidence: { quote: string; kind: string; on?: string | undefined }[];
 }
 
@@ -159,6 +159,12 @@ export class KnowledgeProfiles {
 
   get people(): KnowledgePeople {
     return this.o.people;
+  }
+
+  /** The wiki's renderPerson: a person page with its profile, or null when they have no record. */
+  renderFor(page: WikiPage): string | null {
+    const p = this.o.people.get(page.id);
+    return p ? renderProfile(this.o.people, p, page, (this.o.factsFor ?? (() => []))(page.id), this.o.timeZone) : null;
   }
 
   /** A person's page with its profile, as knowledge_search shows it; null when they have no record. */

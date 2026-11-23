@@ -96,6 +96,17 @@ const MIGRATIONS = [
    CREATE TABLE IF NOT EXISTS signal_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
                                result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
    CREATE INDEX IF NOT EXISTS signal_actions_state ON signal_actions(state);`,
+  // K5: the knowledge base's facts, each with the items and exact quotes behind it (`knowledge/facts.ts`).
+  // A fact the user marked wrong stays, so the same fact is never learned again.
+  `CREATE TABLE IF NOT EXISTS knowledge_facts (id INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT NOT NULL, section TEXT NOT NULL DEFAULT '', about TEXT,
+                                text TEXT NOT NULL, norm TEXT NOT NULL, basis TEXT NOT NULL, state TEXT NOT NULL, relation TEXT, source TEXT NOT NULL DEFAULT 'chat', mine INTEGER NOT NULL DEFAULT 0,
+                                shown INTEGER NOT NULL DEFAULT 0, first_on TEXT, last_on TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                                UNIQUE (subject, section, norm));
+   CREATE INDEX IF NOT EXISTS knowledge_facts_subject ON knowledge_facts(subject, state);
+   CREATE INDEX IF NOT EXISTS knowledge_facts_about ON knowledge_facts(about);
+   CREATE TABLE IF NOT EXISTS knowledge_evidence (fact_id INTEGER NOT NULL REFERENCES knowledge_facts(id), item_key TEXT NOT NULL, kind TEXT NOT NULL,
+                                   quote TEXT NOT NULL, by_user INTEGER NOT NULL, origin TEXT NOT NULL, label TEXT NOT NULL, on_day TEXT, at INTEGER NOT NULL,
+                                   PRIMARY KEY (fact_id, item_key));`,
   // Profiles: the people the user deals with, the addresses and numbers that name each one
   // (plain, checked: an address or digits), and when they wrote to each other (headers only,
   // never mail or message text). Facts about them live in the facts records, not here.

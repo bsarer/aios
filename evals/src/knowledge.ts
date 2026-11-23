@@ -16,7 +16,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ExtractedNotes, Keyring, ModelClient, ModelError, type ModelRequest, calendarRequest, chatRequest, cleanExtracted, cleanPages, mailRequest } from '@aios/core';
-import { configDir, parseConfig } from '@aios/shared';
+import { appIds, configDir, parseConfig } from '@aios/shared';
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
 import { FIXTURES, FIXTURE_USER, type Fixture, type FixtureItem } from './knowledge-fixtures.js';
@@ -118,6 +118,9 @@ async function main(): Promise<void> {
   const only = flag('only');
   const config = parseConfig(await readFile(join(configDir(), 'config.toml'), 'utf8'));
   const keyring = new Keyring();
+  // A source checkout reads AI OS's folder and keyring while ~/.config/aios/config.toml exists;
+  // the Astra package's own commands set ASTRA_PACKAGED=1 (brand.ts). Say which, so a stale key is easy to spot.
+  console.log(`config: ${join(configDir(), 'config.toml')}, keyring service: ${appIds().keyring}${appIds().legacy && process.env.ASTRA_PACKAGED !== '1' ? ' (AI OS names: run with ASTRA_PACKAGED=1 to use Astra\'s)' : ''}`);
   const resolveKey = (ref: Parameters<Keyring['require']>[0]) => keyring.require(ref);
   const contenders: Contender[] = [];
   const skipped: string[] = [];

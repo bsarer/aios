@@ -41,3 +41,7 @@ guessed from a surname, a city visited turned into a liking, a stranger turned i
 a guess the assistant repeated in chat, plus real facts so writing nothing doesn't score well.
 Code checks them; the report is `evals/reports/<date>-knowledge.md`. Ids missing from the
 provider's live list are skipped and named. Nothing is written to the knowledge base.
+
+On a computer that still has `~/.config/aios/config.toml`, a source checkout uses AI OS's config
+and keyring entry. To use the Astra package's own (`~/.config/astra`, keyring `astra`), run it as
+`ASTRA_PACKAGED=1 pnpm --filter @aios/evals knowledge`. The first line says which it used.

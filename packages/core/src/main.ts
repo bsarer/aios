@@ -80,7 +80,7 @@ import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
 import { Dictation } from './speech/dictation.js';
 import { Personality } from './personality.js';
-import { Wallpaper } from './wallpaper.js';
+import { Wallpaper, wallpaperSamples } from './wallpaper.js';
 import { FeedbackLog } from './feedback.js';
 import { Shell } from './shell.js';
 import { readBattery, readWifi } from './status/system.js';
@@ -581,7 +581,7 @@ async function main(): Promise<void> {
   // V2: the chat's microphone button, when [models.speech] is set.
   const dictation = config.models.speech ? new Dictation({ model, audit, maxSeconds: config.models.speech.maxSeconds }) : undefined;
   const themePath = omarchyThemePath();
-  const wallpaper = new Wallpaper(configDir());
+  const wallpaper = new Wallpaper(configDir(), () => wallpaperSamples());
   shell = new Shell({
     store,
     personality,

@@ -120,7 +120,7 @@ export interface ShellOptions {
   /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
   personality?: Pick<Personality, 'voice' | 'tone' | 'setTone'>;
   /** The picture behind the chat and /wallpaper. Without it, /wallpaper says it is off. */
-  wallpaper?: Pick<Wallpaper, 'current' | 'setFromPath' | 'setDim' | 'remove'>;
+  wallpaper?: Pick<Wallpaper, 'current' | 'setFromPath' | 'setDim' | 'remove' | 'samples' | 'sampleByName' | 'useSample'>;
   /** The home folder /wallpaper's paths start from. Default: the user's. */
   home?: string;
   /** The Settings gear and /settings: opens the setup window. Without it, they say to run `astra settings`. */
@@ -578,7 +578,8 @@ export class Shell {
     const w = this.o.wallpaper;
     if (!w) return say('The wallpaper is off here.');
     const word = text.toLowerCase();
-    const usage = 'For example /wallpaper ~/Pictures/beach.jpg. /wallpaper light, medium or strong changes how much it is dimmed, and /wallpaper off takes it away. Settings has it too.';
+    const names = w.samples().map((x) => x.id);
+    const usage = `${names.length ? `Pick a sample (${names.join(', ')}), for example /wallpaper ${names[0]}, or your own picture: /wallpaper ~/Pictures/beach.jpg.` : 'For example /wallpaper ~/Pictures/beach.jpg.'} /wallpaper light, medium or strong changes how much it is dimmed, and /wallpaper off takes it away. Settings has it too.`;
     if (!word) {
       const now = w.current();
       return say(now ? `The chat has a wallpaper, dimmed ${now.dim === 'light' ? 'lightly' : now.dim === 'strong' ? 'strongly' : 'a medium amount'}. ${usage}` : `The chat has no wallpaper. ${usage}`);
@@ -598,7 +599,14 @@ export class Shell {
       if (!r.ok) return say(r.error);
       return changed('dim', `Wallpaper dimmed ${dim.data === 'light' ? 'lightly' : dim.data === 'strong' ? 'strongly' : 'a medium amount'}.`, r.state);
     }
-    const r = w.setFromPath(text, this.o.home);
+    if (/^(samples|list)$/.test(word)) {
+      const all = w.samples();
+      if (!all.length) return say(`There are no sample wallpapers here. ${usage}`);
+      return say(`Sample wallpapers:\n${all.map((x) => `- ${x.id}: ${x.label}`).join('\n')}\nFor example /wallpaper ${all[0]!.id}.`);
+    }
+    // A sample's name, unless it reads as a path.
+    const sample = /^[~/.]|\//.test(text) ? null : w.sampleByName(text);
+    const r = sample ? w.useSample(sample.id) : w.setFromPath(text, this.o.home);
     if (!r.ok) return say(r.error);
     return changed('set', this.warm('Done! Your wallpaper is behind the chat now. /wallpaper strong dims it more if the text is hard to read.', 'Wallpaper set. /wallpaper strong dims it more if the text is hard to read.'), r.state);
   }

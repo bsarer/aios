@@ -289,14 +289,22 @@ describe('Wallpaper step: only Finish puts the picture behind the chat', () => {
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const { Wallpaper } = await import('@aios/core');
-    const wallpaper = new Wallpaper(mkdtempSync(join(tmpdir(), 'aios-setup-wp-')));
+    const { wallpaperSamples } = await import('@aios/core');
+    const wallpaper = new Wallpaper(mkdtempSync(join(tmpdir(), 'aios-setup-wp-')), () => wallpaperSamples({ themeDirs: [] }));
     return { wallpaper, t: await serve({ wallpaper }) };
   }
 
   it('checks the picked picture, keeps it in memory, and saves it only on Finish', async () => {
     const { wallpaper, t } = await withWallpaper();
     try {
-      expect(JSON.parse((await t.send('/s/tok/api/state')).body).wallpaper).toEqual({ available: true, current: null });
+      const listed = JSON.parse((await t.send('/s/tok/api/state')).body).wallpaper;
+      expect(listed).toMatchObject({ available: true, current: null });
+      expect(listed.samples[0]).toEqual({ id: 'dusk', label: 'Dusk hills' });
+      expect(JSON.stringify(listed)).not.toContain('/');
+      const card = await t.send('/s/tok/api/wallpaper-sample/dusk');
+      expect([card.status, card.headers['content-type']]).toEqual([200, 'image/jpeg']);
+      expect((await t.send('/s/tok/api/wallpaper-sample/..%2Fetc')).status).toBe(404);
+      expect((await t.send('/s/tok/api/wallpaper-sample/nope')).status).toBe(404);
       expect(JSON.parse((await upload(t.s.url, Buffer.from('<svg><script>alert(1)</script></svg>'))).body)).toMatchObject({ ok: false, message: expect.stringContaining('isn’t a picture') });
       expect((await upload(t.s.url, PNG, { origin: 'https://evil.example' })).status).toBe(403);
       expect((await upload(t.s.url, PNG, { 'content-type': 'image/png' })).status).toBe(415);
@@ -311,6 +319,12 @@ describe('Wallpaper step: only Finish puts the picture behind the chat', () => {
       // Keep changes only the dim; remove takes it off.
       await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'keep', dim: 'light' } } });
       expect(wallpaper.current()).toMatchObject({ dim: 'light' });
+      const sample = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'sample', sample: 'tide', dim: 'medium' } } });
+      expect(JSON.parse(sample.body).did).toContain('Put the sample wallpaper behind the chat.');
+      expect(wallpaper.currentSample()).toBe('tide');
+      expect(JSON.parse((await t.send('/s/tok/api/state')).body).wallpaper.current).toMatchObject({ sample: 'tide' });
+      const bad = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'sample', sample: 'nope', dim: 'medium' } } });
+      expect(JSON.parse(bad.body)).toMatchObject({ ok: false, step: 'wallpaper' });
       const off = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'remove', dim: 'light' } } });
       expect(JSON.parse(off.body).did).toContain('Took the wallpaper off the chat.');
       expect(wallpaper.current()).toBeNull();

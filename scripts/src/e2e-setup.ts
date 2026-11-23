@@ -13,13 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Page, chromium } from 'playwright-core';
-import { Wallpaper } from '@aios/core';
+import { Wallpaper, wallpaperSamples } from '@aios/core';
 import type { AiosConfig, SecretRef } from '@aios/shared';
 import { readPresets } from './onboard/answers.js';
 import { type SetupDeps, startSetupServer } from './onboard/server.js';
 import { type LinkRunner, SignalLinker } from './onboard/signal.js';
 import providers from '../providers.json' with { type: 'json' };
-import { WALLPAPER_ART } from '../../fixtures/wallpaper.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shotsArg = process.argv.indexOf('--shots');
@@ -101,7 +100,7 @@ async function until(ok: () => Promise<boolean>, ms = 5000): Promise<void> {
 const heading = (p: Page) => p.textContent('h1');
 
 async function main(): Promise<void> {
-  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, exits: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[], addons: [] as string[][], wallpaper: new Wallpaper(mkdtempSync(join(tmpdir(), 'aios-e2e-wallpaper-'))) };
+  const state = { config: null as AiosConfig | null, secrets: new Map<SecretRef, string>(), done: 0, exits: 0, installs: 0, mailTests: [] as { address: string; password: string; host: string }[], addons: [] as string[][], wallpaper: new Wallpaper(mkdtempSync(join(tmpdir(), 'aios-e2e-wallpaper-')), () => wallpaperSamples({ themeDirs: [] })) };
   const server = await startSetupServer(fakeDeps(state));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium' });
   const errors: string[] = [];
@@ -189,6 +188,17 @@ async function main(): Promise<void> {
     check((await page.isChecked('#app-voice')) && (await page.textContent('main'))?.includes('Running'), 'a running whisper.cpp server turns voice on');
     await next(page);
     check((await heading(page)) === 'Chat wallpaper' && (await page.textContent('main'))?.includes('No wallpaper'), 'the wallpaper step starts with none');
+    check((await page.locator('button.card[data-sample]').count()) === 4, 'the four samples are offered');
+    await page.click('button.card[data-sample="aurora"]');
+    await until(async () => (await page.locator('[data-testid="wp-preview"] img').evaluate((img) => (img as unknown as { naturalWidth: number }).naturalWidth)) > 0);
+    check((await page.getAttribute('[data-testid="wp-preview"] img', 'src'))?.endsWith('api/wallpaper-sample/aurora') === true, 'a sample shows in the preview');
+    if (shots) {
+      await page.click('button.card[data-sample="dusk"]');
+      await until(async () => (await page.locator('button.card[data-sample] img').evaluateAll((all) => all.every((img) => (img as unknown as { naturalWidth: number }).naturalWidth > 0))));
+      await page.setViewportSize({ width: 1280, height: 1000 });
+      await page.screenshot({ path: join(shots, 'settings-wallpaper-samples.png') });
+      await page.setViewportSize({ width: 1280, height: 720 });
+    }
     // Any real PNG will do: a picture of this page.
     const picture = await page.screenshot({ type: 'png' });
     await page.setInputFiles('#wp-file', { name: 'not-a-picture.png', mimeType: 'image/png', buffer: Buffer.from('<svg><script>alert(1)</script></svg>') });
@@ -199,18 +209,6 @@ async function main(): Promise<void> {
     check(state.wallpaper.current() === null, 'a picked picture shows in the preview, and nothing is saved yet');
     await page.click('button.card:has-text("Strong")');
     check((await page.getAttribute('[data-testid="wp-preview"]', 'data-dim')) === 'strong', 'the preview dims as chosen');
-    if (shots) {
-      // For the screenshot, the same drawn picture as the chat's checks (fixtures/wallpaper.ts).
-      const art = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-      await art.setContent(WALLPAPER_ART);
-      const drawn = await art.screenshot({ type: 'png' });
-      await art.close();
-      await page.setInputFiles('#wp-file', { name: 'dusk hills.png', mimeType: 'image/png', buffer: drawn });
-      await until(async () => ((await page.getAttribute('[data-testid="wp-preview"] img', 'src')) ?? '').length > 20_000);
-      await page.click('button.card:has-text("Medium")');
-      await page.screenshot({ path: join(shots, 'settings-wallpaper.png') });
-      await page.click('button.card:has-text("Strong")');
-    }
     await next(page);
     check((await page.textContent('main'))?.includes('You have 2 screens'), 'two screens ask which is Astra’s');
     check((await page.getAttribute('button.card[aria-pressed="true"]', 'aria-pressed')) === 'true' && (await page.textContent('button.card[aria-pressed="true"] b')) === 'eDP-1', 'the focused screen is picked');

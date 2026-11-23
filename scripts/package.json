@@ -14,7 +14,8 @@
     "calendar-login": "tsx src/calendar-login.ts",
     "doctor": "tsx src/doctor.ts",
     "backup": "tsx src/backup.ts",
-    "astra": "tsx src/astra.ts"
+    "astra": "tsx src/astra.ts",
+    "make-wallpapers": "tsx src/make-wallpapers.ts"
   },
   "dependencies": {
     "@aios/core": "workspace:*",

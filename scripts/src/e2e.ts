@@ -1232,6 +1232,14 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('/wallpaper light dims it less', await waitFor(async () => (await wallpaper.getAttribute('data-dim')) === 'light'));
     await shot(page, 'wallpaper-light');
+    const before = await wallpaper.getAttribute('style');
+    await input.fill('/wallpaper aurora');
+    await input.press('Enter');
+    check('/wallpaper aurora puts a built-in sample behind the chat', await waitFor(async () => (await wallpaper.getAttribute('style')) !== before), await lastNotice());
+    await input.fill('/wallpaper medium');
+    await input.press('Enter');
+    await waitFor(async () => (await wallpaper.getAttribute('data-dim')) === 'medium');
+    await shot(page, 'wallpaper-sample-aurora');
     await input.fill('/wallpaper off');
     await input.press('Enter');
     check('/wallpaper off takes it away', await waitFor(async () => (await wallpaper.count()) === 0));

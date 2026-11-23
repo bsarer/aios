@@ -65,7 +65,8 @@
   .wp .lines { position:absolute; left:22%; right:22%; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:10px; font-size:14px; }
   .wp .me { align-self:flex-end; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 12px; }
   .wp .none { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mute); }
-  input[type=file] { font:inherit; color:var(--dim); }
+  .cards.samples { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); }
+  .card img.thumb { display:block; width:100%; height:78px; object-fit:cover; border-radius:8px; margin-bottom:8px; }
   img.qr { background:#fff; padding:8px; border-radius:8px; display:block; margin:12px 0; }
 </style>
 </head>
@@ -332,8 +333,11 @@
     },
     wallpaper: () => {
       if (!S.wallpaper.available) return [el('h1', { text: 'Chat wallpaper' }), el('p', { class: 'lead', text: 'The wallpaper isn’t available in this version.' })];
-      const has = A.wallpaper.change === 'new' ? !!T.wallpaperPreview : A.wallpaper.change === 'keep' && !!S.wallpaper.current;
-      const src = A.wallpaper.change === 'new' ? T.wallpaperPreview : has ? base + 'api/wallpaper?v=' + S.wallpaper.current.version : '';
+      const W = A.wallpaper;
+      const has = W.change === 'new' ? !!T.wallpaperPreview : W.change === 'sample' ? !!W.sample : W.change === 'keep' && !!S.wallpaper.current;
+      const src = W.change === 'new' ? T.wallpaperPreview : W.change === 'sample' ? base + 'api/wallpaper-sample/' + W.sample : has ? base + 'api/wallpaper?v=' + S.wallpaper.current.version : '';
+      const chosen = W.change === 'sample' ? W.sample : W.change === 'keep' && S.wallpaper.current ? S.wallpaper.current.sample : null;
+      const samples = S.wallpaper.samples || [];
       const pick = el('input', { type: 'file', id: 'wp-file', hidden: true, 'aria-label': 'Wallpaper picture', accept: 'image/png,image/jpeg,image/webp,image/gif', disabled: T.wallpaperBusy, onchange: async (e) => {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
@@ -354,11 +358,14 @@
         el('div', { class: 'wp', 'data-dim': A.wallpaper.dim, 'data-testid': 'wp-preview' },
           has ? [el('img', { src, alt: '' }), el('div', { class: 'scrim' }), el('div', { class: 'lines' }, el('div', { class: 'me', text: 'What’s on today?' }), el('div', { text: 'You have two meetings: design review at 10 and lunch with Ana at 1.' }))]
             : el('div', { class: 'none', text: 'No wallpaper' })),
+        samples.length ? [el('label', { text: 'Samples' }),
+          el('div', { class: 'cards samples' }, samples.map((x) => el('button', { type: 'button', class: 'card', 'data-sample': x.id, 'aria-pressed': String(chosen === x.id), onclick: () => { W.change = 'sample'; W.sample = x.id; T.wallpaperPreview = ''; T.wallpaper = null; render(); } },
+            el('img', { class: 'thumb', src: base + 'api/wallpaper-sample/' + x.id, alt: '', loading: 'lazy' }), el('b', { text: x.label }))))] : null,
         pick,
         el('div', { class: 'row fixed gap' },
-          el('button', { type: 'button', class: 'btn', id: 'wp-choose', disabled: T.wallpaperBusy, onclick: () => pick.click() }, T.wallpaperBusy ? 'Checking…' : has ? 'Choose another picture…' : 'Choose a picture…'),
+          el('button', { type: 'button', class: 'btn', id: 'wp-choose', disabled: T.wallpaperBusy, onclick: () => pick.click() }, T.wallpaperBusy ? 'Checking…' : 'Use your own picture…'),
           has ? el('button', { type: 'button', class: 'btn ghost', onclick: () => { A.wallpaper.change = S.wallpaper.current ? 'remove' : 'keep'; T.wallpaperPreview = ''; T.wallpaper = null; render(); } }, 'No wallpaper') : null),
-        el('div', { class: 'hint', text: 'PNG, JPEG, WebP or GIF, up to 15 MB. Astra keeps a copy in its settings folder, so moving the original later is fine.' }),
+        el('div', { class: 'hint', text: 'Your own: PNG, JPEG, WebP or GIF, up to 15 MB. Astra keeps a copy in its settings folder, so moving the original later is fine.' }),
         T.wallpaper ? result(T.wallpaper) : null,
         has ? [el('label', { text: 'How much to dim it' }),
           el('div', { class: 'cards' }, dims.map(([id, name, hint]) => el('button', { type: 'button', class: 'card', 'aria-pressed': String(A.wallpaper.dim === id), onclick: () => { A.wallpaper.dim = id; render(); } }, el('b', { text: name }), el('small', { text: hint }))))] : null,
@@ -397,7 +404,7 @@
           el('li', { text: `Mail: ${A.mail.address}.` }),
           el('li', { text: `Folders: ${A.folders.join(', ')}.` }),
           A.signal.enabled && signalNumber() ? el('li', { text: `Signal: ${signalNumber()}.` }) : null,
-          A.wallpaper.change === 'new' ? el('li', { text: 'Wallpaper: your new picture behind the chat.' }) : A.wallpaper.change === 'remove' ? el('li', { text: 'Wallpaper: none.' }) : null),
+          A.wallpaper.change === 'new' ? el('li', { text: 'Wallpaper: your new picture behind the chat.' }) : A.wallpaper.change === 'sample' ? el('li', { text: `Wallpaper: ${((S.wallpaper.samples || []).find((x) => x.id === A.wallpaper.sample) || { label: 'a sample' }).label}.` }) : A.wallpaper.change === 'remove' ? el('li', { text: 'Wallpaper: none.' }) : null),
         T.finished && !T.finished.ok ? result(T.finished) : null,
       ];
     },

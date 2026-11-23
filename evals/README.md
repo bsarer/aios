@@ -26,3 +26,24 @@ How the default per role is picked (`src/report.ts`): the chat model must resist
 and error on at most 10% of tasks, then wins on tool and instruction score, then time to first
 token, then cost. Triage picks the best valid and agreeing classifications, then cost. Nightly picks
 the cheapest model that passed every instruction and injection task.
+
+## Knowledge bake-off
+
+```sh
+pnpm --filter @aios/evals knowledge             # fixtures only
+pnpm --filter @aios/evals knowledge --mine 20   # plus 20 of your own recent emails
+```
+
+The local model (`[models.local]`) against the cloud model the knowledge base's first pass uses
+(`[models.nightly]`, or `--cloud <id>`), both with the knowledge base's real extraction requests.
+The fixtures (`src/knowledge-fixtures.ts`) are invented items built from known failures: a
+relationship guessed from a surname, a city visited turned into a liking, a stranger turned into a
+colleague, a guess the assistant repeated in chat. They are checked by code and reported in
+`evals/reports/<date>-knowledge.md`. `--mine` adds your own mail side by side, flagging every
+relationship or liking word the email never uses; that report holds your mail, so it is written
+only to `<config dir>/evals/`, never here. Nothing is written to the knowledge base.
+
+Each answer is graded twice: as the model wrote it, and after the knowledge base's own code
+checks (an exact quote found in the item, relationships only from your own words, no guesses),
+which is what would be stored. `evals/test/knowledge.test.ts` runs the fixtures through those
+checks with the old mistakes written in on purpose, so a change that lets one through fails.

@@ -72,20 +72,40 @@ function rig(o: { config?: Partial<KnowledgeConfig> } = {}) {
       let v: unknown = { notes: [] };
       if (name === 'knowledge_page')
         v = user.includes('Page: Ana Lopez')
-          ? { summary: 'Ana Lopez is the sister helping with the **house move**; the movers now come on 10 Dec.', contradictions: ['The moving date is 3 Dec in one email and 10 Dec in a later one.'] }
+          ? { summary: 'Ana Lopez may be helping with the **house move**; the movers now come on 10 Dec.', contradictions: ['The moving date is 3 Dec in one email and 10 Dec in a later one.'] }
           : { summary: 'Moving house in December.', contradictions: [] };
-      // The tidy pass is K2's; here it fails, so the overview stays as read.
-      else if (name === 'knowledge_tidy') throw new Error('no tidy here');
+      // K5: each fact with its quote. "Sister" is a guess from someone else's email: code drops it.
       else if (user.includes('House move'))
         v = {
-          notes: [{ section: 'people', text: 'Ana Lopez: sister; helping with the house move.' }],
+          notes: [{ section: 'people', text: 'Ana Lopez: helping with the house move.', basis: 'observed', quote: 'The movers come on 3 Dec' }],
           pages: [
-            { kind: 'person', name: 'Ana Lopez', facts: ['Sister; helping with the house move.', 'Said the movers come on 3 Dec.'], links: [{ kind: 'project', name: 'House move' }] },
-            { kind: 'project', name: 'House move', facts: ['Movers booked for 3 Dec.'] },
+            {
+              kind: 'person',
+              name: 'Ana Lopez',
+              facts: [
+                { text: 'Sister; helping with the house move.', basis: 'stated', quote: 'Ana Lopez' },
+                { text: 'Helping with the house move.', basis: 'observed', quote: 'movers' },
+                { text: 'Said the movers come on 3 Dec.', basis: 'stated', quote: 'The movers come on 3 Dec.' },
+              ],
+              links: [{ kind: 'project', name: 'House move' }],
+            },
+            { kind: 'project', name: 'House move', facts: [{ text: 'Movers booked for 3 Dec.', basis: 'observed', quote: 'movers come on 3 Dec' }] },
           ],
         };
       else if (user.includes('Moving date'))
-        v = { notes: [], pages: [{ kind: 'person', name: 'Ana Lopez', facts: ['Said the movers come on 10 Dec now.', 'Sister; helping with the house move.'] }] };
+        v = {
+          notes: [],
+          pages: [
+            {
+              kind: 'person',
+              name: 'Ana Lopez',
+              facts: [
+                { text: 'Said the movers come on 10 Dec now.', basis: 'stated', quote: 'the movers come on 10 Dec now' },
+                { text: 'Helping with the house move.', basis: 'observed', quote: 'movers' },
+              ],
+            },
+          ],
+        };
       return { value: schema.parse(v), result: {} };
     },
   };
@@ -139,22 +159,27 @@ describe('K4 the wiki', () => {
     expect(run).toMatchObject({ read: 2, pages: 2, summaries: 2 });
 
     const ana = r.wiki.read('people/ana-lopez')!;
-    // Both emails' facts, newest first, deduplicated, with sources and dates.
-    expect(ana.facts.map((f) => `${f.text} ${f.on}`)).toEqual(['Said the movers come on 10 Dec now. 2026-11-09', 'Sister; helping with the house move. 2026-11-09', 'Said the movers come on 3 Dec. 2026-11-08']);
+    // Both emails' facts, newest first, deduplicated, with sources and dates. Two emails from
+    // Ana are one origin, so even the fact both say stays unconfirmed; the guessed sister is gone.
+    expect(ana.facts.map((f) => `${f.text} ${f.on}`)).toEqual(['Helping with the house move. 2026-11-09', 'Said the movers come on 10 Dec now. 2026-11-09', 'Said the movers come on 3 Dec. 2026-11-08']);
+    expect(ana.facts.every((f) => f.unconfirmed)).toBe(true);
+    expect(readFileSync(r.wiki.pathOf('people/ana-lopez')!, 'utf8')).toContain('- Helping with the house move. (mail, 2026-11-09, unconfirmed)');
     expect(ana.links).toEqual(['projects/house-move']);
     expect(r.wiki.read('projects/house-move')!.links).toEqual(['people/ana-lopez']);
     // The summary call's answer is stored as plain text, with what might not agree.
-    expect(ana.summary).toBe('Ana Lopez is the sister helping with the house move; the movers now come on 10 Dec.');
+    expect(ana.summary).toBe('Ana Lopez may be helping with the house move; the movers now come on 10 Dec.');
     expect(ana.contradictions).toEqual(['The moving date is 3 Dec in one email and 10 Dec in a later one.']);
 
     const summaries = r.requests.filter((q) => q.name === 'knowledge_page');
     expect(summaries).toHaveLength(2);
     for (const { req } of r.requests) expect(Object.keys(req).sort()).toEqual(['messages', 'role']);
     expect(summaries[0]!.req.messages.at(-1)!.content).toMatch(/<untrusted source="knowledge" id="[^"]+">/);
+    // The summary call sees which facts are only unconfirmed.
+    expect(summaries.find((q) => q.req.messages.at(-1)!.content!.includes('Page: Ana Lopez'))!.req.messages.at(-1)!.content).toContain('- [unconfirmed] Said the movers come on 10 Dec now.');
 
     const index = readFileSync(r.wiki.indexPath, 'utf8');
     expect(index).toContain('## People (1)');
-    expect(index).toContain('- [[people/ana-lopez]] Ana Lopez: Ana Lopez is the sister');
+    expect(index).toContain('- [[people/ana-lopez]] Ana Lopez: Ana Lopez may be helping');
     expect(readFileSync(r.wiki.logPath, 'utf8')).toMatch(/- 2026-11-10 10:00 Filed 4 facts on 2 pages \(2 new\), rewrote 2 summaries: /);
     // Counts only in the audit log.
     const audit = readFileSync(join(r.dir, 'audit.jsonl'), 'utf8');
@@ -229,7 +254,8 @@ describe('K4 knowledge_search and Save', () => {
     expect(out).toMatch(/^Knowledge base results for "Ana house move" \(2 pages/);
     expect(out).toContain('<untrusted source="knowledge" id="search">');
     expect(out.indexOf('# Ana Lopez')).toBeLessThan(out.indexOf('# House move'));
-    expect(out).toContain('[people] Ana Lopez: sister; helping with the house move.');
+    expect(out).toContain('[people] Ana Lopez: helping with the house move. (mail, 2026-11-08, unconfirmed)');
+    expect(out).toContain('never state it to the user as a fact');
     expect(await tool.handler({ query: 'zzz' }, {} as never)).toContain('Nothing in the knowledge base matches "zzz"');
     expect(chatSystemPrompt({ userName: 'John', now: 'now', knowledge: true, knowledgeSearch: true })).toContain('call knowledge_search with the name');
   });

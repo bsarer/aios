@@ -96,6 +96,16 @@ const MIGRATIONS = [
    CREATE TABLE IF NOT EXISTS signal_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
                                result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
    CREATE INDEX IF NOT EXISTS signal_actions_state ON signal_actions(state);`,
+  // Profiles: the people the user deals with, the addresses and numbers that name each one
+  // (plain, checked: an address or digits), and when they wrote to each other (headers only,
+  // never mail or message text). Facts about them live in the facts records, not here.
+  `CREATE TABLE IF NOT EXISTS knowledge_people (id TEXT PRIMARY KEY, name TEXT NOT NULL, why TEXT NOT NULL, contact TEXT, contact_name TEXT, organization TEXT,
+                                 contact_checked INTEGER, first_at INTEGER NOT NULL, last_at INTEGER NOT NULL, changed INTEGER NOT NULL DEFAULT 1);
+   CREATE TABLE IF NOT EXISTS knowledge_person_keys (kind TEXT NOT NULL, value TEXT NOT NULL, person TEXT NOT NULL, PRIMARY KEY (kind, value));
+   CREATE INDEX IF NOT EXISTS knowledge_person_keys_person ON knowledge_person_keys(person);
+   CREATE TABLE IF NOT EXISTS knowledge_person_events (person TEXT NOT NULL, source TEXT NOT NULL, ref TEXT NOT NULL, at INTEGER NOT NULL, dir TEXT NOT NULL,
+                                        subject TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1, mine INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (person, source, ref));
+   CREATE INDEX IF NOT EXISTS knowledge_person_events_at ON knowledge_person_events(person, at);`,
 ];
 
 export interface UsageRow {

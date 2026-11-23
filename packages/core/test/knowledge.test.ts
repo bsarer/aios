@@ -53,6 +53,8 @@ const CONFIG: KnowledgeConfig = {
   wiki: true,
   pageSummariesPerRun: 10,
   checkEveryDays: 7,
+  profiles: true,
+  contactsPerRun: 20,
 };
 
 function event(id: string, start: string, end: string, o: Partial<CalEvent> = {}): CalEvent {

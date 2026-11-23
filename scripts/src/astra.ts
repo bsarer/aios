@@ -7,9 +7,11 @@
  *   astra settings           change the answers, in the same window
  *   astra setup --terminal   the same questions in this terminal; --kiosk reinstalls only the service and kiosk
  *   astra stop               close the chat and stop Astra until you open it again (or log in)
- *   astra update [--check]   pull, build and install the newest version; settings stay (asks for
- *                            your password to install); --check only says whether there is one
- *   astra addons [--video] [--music] [--local] [--voice] [--signal]
+ *   astra update [--check] [--details]
+ *                            pull, build and install the newest version; settings stay (asks for
+ *                            your password to install); --check only says whether there is one;
+ *                            --details shows the commands' output (otherwise it goes to a log file)
+ *   astra addons [--video] [--music] [--local] [--voice] [--signal] [--details]
  *                            list the add-ons, or install them (videos, music controls, the
  *                            local AI and voice); asks for your password once
  *   astra doctor             check the install; one line per check, each with a fix
@@ -44,8 +46,8 @@ const SCRIPTS: Record<string, { file: string; flags: string[] }> = {
   setup: { file: 'setup.ts', flags: ['--kiosk', '--dry-run', '--terminal'] },
   settings: { file: 'onboard.ts', flags: [] },
   doctor: { file: 'doctor.ts', flags: [] },
-  update: { file: 'update.ts', flags: ['--check'] },
-  addons: { file: 'addons.ts', flags: ['--video', '--music', '--local', '--voice', '--signal'] },
+  update: { file: 'update.ts', flags: ['--check', '--details'] },
+  addons: { file: 'addons.ts', flags: ['--video', '--music', '--local', '--voice', '--signal', '--details'] },
   backup: { file: 'backup.ts', flags: [] },
   'calendar-login': { file: 'calendar-login.ts', flags: [] },
   uninstall: { file: 'uninstall.ts', flags: ['--purge', '--yes'] },

@@ -124,7 +124,8 @@ describe.skipIf(!tools)('install and upgrade', () => {
     writeFileSync(join(h.home, '.local', 'share', 'astra', 'app', 'VERSION'), 'edited\n');
     const r = h.sh([], { AIOS_REPO: repo });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('local changes');
+    expect(r.stdout).toContain('local changes');
+    expect(r.stdout).toMatch(/The full log: .*install-.*\.log/);
   });
 });
 

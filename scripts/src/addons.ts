@@ -6,7 +6,8 @@
  * release tag with its model, run as a user service on 127.0.0.1. signal-cli isn't in Arch's
  * repositories, so the Signal add-on downloads upstream's native build, checks its SHA-256 and
  * unpacks the one program into Astra's data folder. The setup window's Add-ons step opens a
- * terminal running this.
+ * terminal running this. It shows a short list of steps and a progress bar (progress.ts); what
+ * the commands print goes to a log file, shown with --details, by pressing d, or when a step fails.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -16,8 +17,10 @@ import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { dataDir } from '@aios/core';
+import { APP_NAME } from '@aios/shared';
 import { z } from 'zod';
 import raw from '../addons.json' with { type: 'json' };
+import { Progress, type StepDef, newLogPath } from './progress.js';
 import { noNewPrivileges } from './update.js';
 
 export const ADDON_IDS = ['video', 'music', 'local', 'voice', 'signal'] as const;
@@ -105,7 +108,10 @@ export function isGgml(head: Buffer): boolean {
 }
 
 export interface Step {
+  /** The step's line on the installer screen; empty when it belongs to the one before. */
   say: string;
+  /** About how long it takes (the progress bar's share). */
+  seconds?: number;
   cmd: string;
   args: string[];
   cwd?: string;
@@ -118,33 +124,39 @@ export function plan(ids: AddonId[], c: Catalog, w = whisperPaths(), haveSrc = f
   const chosen = ADDON_IDS.filter((id) => ids.includes(id));
   const steps: Step[] = [];
   const pkgs = [...new Set(chosen.flatMap((id) => c[id].packages))];
-  if (pkgs.length) steps.push({ say: `Installing ${pkgs.join(', ')}. sudo asks for your password:`, cmd: 'sudo', args: ['pacman', '-S', '--needed', '--noconfirm', ...pkgs] });
+  if (pkgs.length) steps.push({ say: `Installing ${pkgs.join(', ')}`, cmd: 'sudo', args: ['pacman', '-S', '--needed', '--noconfirm', ...pkgs] });
   for (const id of chosen) {
     const a = c[id];
-    if (a.systemService) steps.push({ say: `Starting ${a.systemService}...`, cmd: 'sudo', args: ['systemctl', 'enable', '--now', a.systemService] });
-    for (const m of a.pull ?? []) steps.push({ say: `Downloading the model ${m}...`, cmd: 'ollama', args: ['pull', m] });
+    if (a.systemService) steps.push({ say: `Starting ${a.systemService.replace(/\.service$/, '')}`, cmd: 'sudo', args: ['systemctl', 'enable', '--now', a.systemService] });
+    for (const m of a.pull ?? []) steps.push({ say: `Downloading the model ${m}`, cmd: 'ollama', args: ['pull', m] });
     const wh = a.whisper;
     if (wh) {
       steps.push(
         haveSrc
-          ? { say: `Updating whisper.cpp to ${wh.tag}...`, cmd: 'git', args: ['-C', w.src, 'fetch', '--depth', '1', 'origin', 'tag', wh.tag] }
-          : { say: `Downloading whisper.cpp ${wh.tag}...`, cmd: 'git', args: ['-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1', '--branch', wh.tag, wh.repo, w.src] },
+          ? { say: `Updating whisper.cpp to ${wh.tag}`, cmd: 'git', args: ['-C', w.src, 'fetch', '--depth', '1', 'origin', 'tag', wh.tag] }
+          : { say: `Downloading whisper.cpp ${wh.tag}`, cmd: 'git', args: ['-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1', '--branch', wh.tag, wh.repo, w.src] },
       );
       if (haveSrc) steps.push({ say: '', cmd: 'git', args: ['-C', w.src, 'checkout', '--quiet', wh.tag] });
       steps.push(
-        { say: 'Building whisper.cpp (a few minutes)...', cmd: 'cmake', args: ['-B', 'build', '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DWHISPER_BUILD_TESTS=OFF'], cwd: w.src },
+        { say: 'Building whisper.cpp (a few minutes)', seconds: 240, cmd: 'cmake', args: ['-B', 'build', '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DWHISPER_BUILD_TESTS=OFF'], cwd: w.src },
         { say: '', cmd: 'cmake', args: ['--build', 'build', '-j', '--config', 'Release', '--target', 'whisper-server'], cwd: w.src },
-        { say: `Downloading the speech model ${wh.model} (about 150 MB)...`, cmd: 'curl', args: ['-fL', '--retry', '3', '-o', join(w.models, `${wh.model}.part`), wh.modelUrl], mkdir: w.models },
+        { say: `Downloading the speech model (about 150 MB)`, seconds: 60, cmd: 'curl', args: ['-fL', '--retry', '3', '-o', join(w.models, `${wh.model}.part`), wh.modelUrl], mkdir: w.models },
       );
     }
     const sc = a.signalCli;
-    if (sc) steps.push({ say: `Downloading signal-cli ${sc.version} (about 120 MB)...`, cmd: 'curl', args: ['-fL', '--retry', '3', '--proto', '=https', '-o', sp.part, sc.url], mkdir: sp.dir });
+    if (sc) steps.push({ say: `Downloading signal-cli ${sc.version} (about 120 MB)`, seconds: 60, cmd: 'curl', args: ['-fL', '--retry', '3', '--proto', '=https', '-o', sp.part, sc.url], mkdir: sp.dir });
   }
   return steps;
 }
 
 export interface Runner {
-  run: (cmd: string, args: string[], cwd?: string) => number;
+  /** Runs one command; its output goes to the log, not the screen. */
+  run: (cmd: string, args: string[], cwd?: string) => number | Promise<number>;
+  /** Runs a command that talks to the person (sudo asking for the password, once, first). */
+  ask?: (say: string, cmd: string, args: string[]) => number | Promise<number>;
+  /** Shows the installer screen with these steps; begin(i) marks the one running. */
+  show?: (steps: StepDef[]) => void;
+  begin?: (i: number) => void;
   log: (line: string) => void;
   /** Steps that touch files, kept apart so the test can follow them. */
   finishVoice: (a: Addon) => Promise<string | null>;
@@ -161,18 +173,33 @@ export async function install(ids: AddonId[], c: Catalog, r: Runner, w = whisper
     r.log('The Signal add-on is only built for x86_64 computers, so it wasn’t installed.');
     return 1;
   }
-  for (const s of plan(ids, c, w, haveSrc, sp)) {
-    if (s.say) r.log(s.say);
+  const steps = plan(ids, c, w, haveSrc, sp);
+  // The screen's steps: each step with words, joined by the ones after it that have none.
+  const screen: StepDef[] = [];
+  const at: number[] = steps.map((s) => (s.say ? screen.push({ label: s.say, seconds: s.seconds ?? 15 }) - 1 : Math.max(0, screen.length - 1)));
+  const finishing = ids.includes('voice') || ids.includes('signal');
+  if (finishing) screen.push({ label: 'Finishing', seconds: 5 });
+  r.show?.(screen);
+  // The password once, before anything starts; the sudo steps then run without asking (-n).
+  const sudo = steps.some((s) => s.cmd === 'sudo');
+  if (sudo && r.ask && (await r.ask('Installing add-ons needs your password.', 'sudo', ['-v'])) !== 0) {
+    r.log('Without your password nothing could be installed; run astra addons again when you’re ready.');
+    return 1;
+  }
+  for (const [i, s] of steps.entries()) {
+    r.begin?.(at[i]!);
     if (s.cmd === 'ollama' && !r.waitForOllama()) {
       r.log('Ollama didn’t start. Check it with: systemctl status ollama');
       return 1;
     }
     if (s.mkdir) await mkdir(s.mkdir, { recursive: true });
-    if (r.run(s.cmd, s.args, s.cwd) !== 0) {
-      r.log(`That step failed (${s.cmd}). The lines above say why; run astra addons again to retry.`);
+    const args = s.cmd === 'sudo' && r.ask ? ['-n', ...s.args] : s.args;
+    if ((await r.run(s.cmd, args, s.cwd)) !== 0) {
+      r.log(`That step didn’t finish (${s.say || screen[at[i]!]?.label || s.cmd}); run astra addons again to retry.`);
       return 1;
     }
   }
+  if (finishing) r.begin?.(screen.length - 1);
   for (const [id, finish] of [['voice', r.finishVoice], ['signal', r.finishSignal]] as const) {
     if (!ids.includes(id)) continue;
     const err = await finish(c[id]);
@@ -204,8 +231,8 @@ export function realFinishVoice(w = whisperPaths(), run: Runner['run']) {
     await chmod(w.server, 0o755);
     await mkdir(join(w.unit, '..'), { recursive: true });
     await writeFile(w.unit, whisperUnit(w.server, model, wh.port));
-    run('systemctl', ['--user', 'daemon-reload']);
-    if (run('systemctl', ['--user', 'enable', '--now', w.service]) !== 0) return `Couldn’t start ${w.service}. Check it with: systemctl --user status ${w.service}`;
+    await run('systemctl', ['--user', 'daemon-reload']);
+    if ((await run('systemctl', ['--user', 'enable', '--now', w.service])) !== 0) return `Couldn’t start ${w.service}. Check it with: systemctl --user status ${w.service}`;
     return null;
   };
 }
@@ -224,7 +251,7 @@ export function realFinishSignal(sp = signalPaths(), run: Runner['run']) {
     }
     rmSync(sp.unpack, { recursive: true, force: true });
     await mkdir(sp.unpack, { recursive: true });
-    const code = run('tar', ['-xzf', sp.part, '-C', sp.unpack, '--no-same-owner', '--no-same-permissions', 'signal-cli']);
+    const code = await run('tar', ['-xzf', sp.part, '-C', sp.unpack, '--no-same-owner', '--no-same-permissions', 'signal-cli']);
     rmSync(sp.part, { force: true });
     if (code !== 0) {
       rmSync(sp.unpack, { recursive: true, force: true });
@@ -261,15 +288,19 @@ async function main(argv: string[]): Promise<number> {
     console.log('This terminal can’t ask for your password (it was started with "no new privileges"). Open a terminal yourself (Super+Enter) and run: astra addons ' + ids.map((i) => `--${i}`).join(' '));
     return 1;
   }
-  const run = (cmd: string, args: string[], cwd?: string) => {
-    const r = spawnSync(cmd, args, { stdio: 'inherit', ...(cwd ? { cwd } : {}) });
-    return r.error ? 127 : (r.status ?? 1);
-  };
   const w = whisperPaths();
   await mkdir(w.dir, { recursive: true });
-  return install(ids, c, {
+  let screen: Progress | undefined;
+  const run: Runner['run'] = (cmd, args, cwd) => screen!.run(cmd, args, cwd);
+  const code = await install(ids, c, {
     run,
-    log: (l) => console.log(l),
+    ask: (say, cmd, args) => screen!.ask(say, cmd, args),
+    show: (steps) => {
+      screen = new Progress({ title: `Installing ${APP_NAME} add-ons`, steps, logPath: newLogPath('addons'), details: argv.includes('--details'), input: process.stdin });
+      screen.start();
+    },
+    begin: (i) => screen?.begin(i),
+    log: (l) => (screen ? screen.note(l) : console.log(l)),
     finishVoice: realFinishVoice(w, run),
     finishSignal: realFinishSignal(signalPaths(), run),
     waitForOllama: () => {
@@ -280,6 +311,8 @@ async function main(argv: string[]): Promise<number> {
       return false;
     },
   }, w);
+  screen?.end(code === 0);
+  return code;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

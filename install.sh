@@ -5,6 +5,7 @@
 #   ./install.sh --ref main       install a branch or tag instead
 #   ./install.sh --check          only check this computer's prerequisites; change nothing
 #   ./install.sh --restore FILE   put back a `pnpm backup` archive first, then install
+#   ./install.sh --details        show what git and pnpm print (otherwise it goes to a log file)
 #
 # Astra goes into ~/.local/share/astra/app (AIOS_DIR to change it), cloned from AIOS_REPO (default:
 # this clone's origin, else https://github.com/bsarer/aios.git). Then it runs `pnpm run setup`
@@ -28,6 +29,52 @@ NODE_MIN=22.13
 HYPRLAND_MIN=0.55
 
 say() { printf '%s\n' "$*"; }
+DETAILS=${AIOS_DETAILS:-}
+LOG=''
+
+# Runs a step quietly, like an installer: one line with a spinner, its output in $LOG. On failure
+# it shows the log's last lines and where the whole log is. --details shows everything instead.
+quietly() {
+  local label=$1
+  shift
+  if [[ -n $DETAILS ]]; then
+    say "• $label"
+    "$@"
+    return
+  fi
+  if [[ -z $LOG ]]; then
+    local dir="$DATA_HOME/$APP_DIR/logs"
+    mkdir -p "$dir" && chmod 700 "$dir"
+    LOG="$dir/install-$(date +%Y-%m-%d-%H-%M-%S).log"
+    : >"$LOG" && chmod 600 "$LOG"
+  fi
+  printf '\n== %s ==\n' "$label" >>"$LOG"
+  local code=0 start=$SECONDS pid
+  # In the background, so it is a subshell that keeps set -e (an `|| code=$?` would turn it off).
+  "$@" >>"$LOG" 2>&1 </dev/null &
+  pid=$!
+  if [[ -t 1 ]]; then
+    local i=0 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    printf '\033[?25l'
+    while kill -0 "$pid" 2>/dev/null; do
+      printf '\r  \033[36m%s\033[0m %s  \033[2m%d:%02d\033[0m ' "${spin:i++%10:1}" "$label" $(((SECONDS - start) / 60)) $(((SECONDS - start) % 60))
+      sleep 0.12
+    done
+    printf '\r\033[K\033[?25h'
+  fi
+  wait "$pid" || code=$?
+  if ((code == 0)); then
+    say "  ✓ $label"
+    return 0
+  fi
+  say "  ✗ $label"
+  say ""
+  say "  What happened (the last lines of the log):"
+  tail -n 15 "$LOG" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/^/  │ /'
+  say ""
+  say "  The full log: $LOG"
+  return "$code"
+}
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
 # True when version $1 >= $2 (dotted numbers; anything after the numbers is ignored).
@@ -193,7 +240,8 @@ main() {
       --ref) ref=${2:?--ref needs a tag or branch}; shift ;;
       --check) check=1 ;;
       --restore) restore=${2:?--restore needs a backup file}; shift ;;
-      -h | --help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
+      --details) DETAILS=1 ;;
+      -h | --help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
       *) die "unknown option $1 (see --help)" ;;
     esac
     shift
@@ -218,10 +266,14 @@ main() {
     # The backup decides which names this install has (R1).
     [[ -n $AIOS_DIR_GIVEN ]] || AIOS_DIR="$DATA_HOME/$APP_DIR/app"
   fi
-  fetch_source "$ref"
+  say ""
+  say "Installing Astra:"
+  quietly "Getting Astra" fetch_source "$ref" || exit 1
+  [[ -n $DETAILS ]] || say "    $(git -C "$AIOS_DIR" describe --tags --always 2>/dev/null) in $AIOS_DIR"
   cd "$AIOS_DIR"
-  pnpm install --frozen-lockfile
-  pnpm --filter @aios/ui build
+  quietly "Installing what Astra needs (a few minutes)" pnpm install --frozen-lockfile || exit 1
+  quietly "Preparing the chat screen" pnpm --filter @aios/ui build || exit 1
+  say ""
   # setup asks questions; read them from the terminal even when this script came through a pipe.
   local args=()
   [[ -f $CONFIG_HOME/$APP_DIR/config.toml ]] && args=(--kiosk)

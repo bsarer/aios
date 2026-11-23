@@ -1,7 +1,7 @@
 /** U1: `astra update` runs its steps in order, stops at the first that fails, and --check changes nothing. Pretend commands only. */
 import { describe, expect, it } from 'vitest';
 import type { UpdateCheck } from '@aios/core';
-import { type UpdateSteps, noNewPrivileges, update } from '../src/update.js';
+import { type UpdateSteps, noNewPrivileges, update, updateSteps } from '../src/update.js';
 
 const available: UpdateCheck = { state: 'available', from: 'a'.repeat(40), to: 'b'.repeat(40), branch: 'origin/main', behind: 2, changes: ['Setup in a window', 'Voice'] };
 
@@ -29,8 +29,10 @@ describe('astra update', () => {
     expect(t.ran).toEqual([
       'git -C /home/j/astra-src diff --quiet HEAD',
       'git -C /home/j/astra-src merge --ff-only @{u}',
+      'sudo -v',
       '/home/j/astra-src/packaging/arch/build.sh -s',
-      'sudo pacman -U --noconfirm /home/j/astra-src/packaging/arch/out/astra-0.2.0-1-x86_64.pkg.tar.zst',
+      'sudo -v',
+      'sudo -n pacman -U --noconfirm /home/j/astra-src/packaging/arch/out/astra-0.2.0-1-x86_64.pkg.tar.zst',
       'systemctl --user restart astra.service',
     ]);
     expect(t.log.join('\n')).toContain('settings, keys and data are unchanged');
@@ -47,13 +49,29 @@ describe('astra update', () => {
   });
 
   it('stops at the first step that fails, before installing anything', async () => {
-    for (const [fail, said] of [['diff', 'aren’t committed'], ['merge', 'commits of its own'], ['build.sh', 'build failed'], ['pacman', 'Installing failed']] as const) {
+    for (const [fail, said] of [['diff', 'aren’t committed'], ['merge', 'commits of its own'], ['sudo -v', 'Without your password'], ['build.sh', 'build failed'], ['pacman', 'Installing failed']] as const) {
       const t = steps(available, fail);
       expect(await update('/s', 'astra.service', t.s)).toBe(1);
       expect(t.log.join('\n')).toMatch(new RegExp(said.replace('’', '.')));
       expect(t.ran.some((l) => l.startsWith('systemctl'))).toBe(false);
-      if (fail !== 'pacman') expect(t.ran.some((l) => l.startsWith('sudo'))).toBe(false);
+      if (fail !== 'pacman') expect(t.ran.some((l) => l.includes('pacman'))).toBe(false);
     }
+  });
+
+  it('shows friendly steps in order, asks for the password through ask, never through the log', async () => {
+    const t = steps(available);
+    const shown: string[][] = [];
+    const begun: number[] = [];
+    const asked: string[] = [];
+    t.s.show = (st) => shown.push(st.map((x) => x.label));
+    t.s.begin = (i) => begun.push(i);
+    t.s.ask = (say, cmd, args) => (asked.push([cmd, ...args].join(' ')), 0);
+    expect(await update('/s', 'astra.service', t.s)).toBe(0);
+    expect(shown).toEqual([['Getting the new version', 'Building the update (a few minutes)', 'Installing it', 'Restarting Astra']]);
+    expect(begun).toEqual([0, 1, 2, 3]);
+    expect(asked).toEqual(['sudo -v', 'sudo -v']);
+    expect(t.ran.filter((l) => l.startsWith('sudo'))).toEqual(['sudo -n pacman -U --noconfirm /s/packaging/arch/out/astra-0.2.0-1-x86_64.pkg.tar.zst']);
+    expect(updateSteps(false).map((x) => x.label)).not.toContain('Restarting Astra');
   });
 
   it('notices a terminal where sudo can’t ask for the password', () => {

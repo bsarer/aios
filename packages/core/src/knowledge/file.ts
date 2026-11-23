@@ -1,4 +1,7 @@
 /**
+ * K5: the model sections are written from the facts (`facts.ts`); deleting a line here marks
+ * that fact wrong, and a line typed without a source is the user's own.
+ *
  * K1: the knowledge base file, `~/.config/aios/knowledge/about-me.md`. Plain Markdown the user
  * can read and edit: a few sections of "- note (source)" lines that the hourly crawler rewrites,
  * and a "My notes" section that is the user's own and kept exactly as written.
@@ -37,7 +40,12 @@ export interface Note {
   on?: string | undefined;
   /** K2: a line the user typed (no source after it): never dropped or rewritten by AI OS. */
   mine?: boolean | undefined;
+  /** K5: only one origin says it (or it was written before quotes were kept): shown as "unconfirmed". */
+  unconfirmed?: boolean | undefined;
 }
+
+/** "(mail, 2026-10-03, unconfirmed)": a note's source, day and, when only one origin says it, that it is unconfirmed. */
+export const sourceTail = (n: { source: string; on?: string | undefined; unconfirmed?: boolean | undefined }) => `(${n.source}${n.on ? `, ${n.on}` : ''}${n.unconfirmed ? ', unconfirmed' : ''})`;
 
 export interface Knowledge {
   sections: Record<Section, Note[]>;
@@ -63,7 +71,7 @@ export function cleanNote(s: string, max = NOTE_CHARS): string {
     .slice(0, max);
 }
 
-export const SOURCE_TAIL = new RegExp(`\\s*\\((${KNOWLEDGE_SOURCES.join('|')})(?:,\\s*(\\d{4}-\\d{2}-\\d{2}))?\\)\\s*$`);
+export const SOURCE_TAIL = new RegExp(`\\s*\\((${KNOWLEDGE_SOURCES.join('|')})(?:,\\s*(\\d{4}-\\d{2}-\\d{2}))?(,\\s*unconfirmed)?\\)\\s*$`);
 
 export function parseKnowledge(md: string): Knowledge {
   const k = emptyKnowledge();
@@ -89,7 +97,7 @@ export function parseKnowledge(md: string): Knowledge {
     const m = SOURCE_TAIL.exec(b[1]!);
     // A line the user typed without a source counts as chat: their own words.
     const text = cleanNote(m ? b[1]!.slice(0, m.index) : b[1]!);
-    if (text) k.sections[current].push({ text, source: (m?.[1] as KnowledgeSource | undefined) ?? 'chat', ...(m?.[2] ? { on: m[2] } : {}), ...(m ? {} : { mine: true }) });
+    if (text) k.sections[current].push({ text, source: (m?.[1] as KnowledgeSource | undefined) ?? 'chat', ...(m?.[2] ? { on: m[2] } : {}), ...(m?.[3] ? { unconfirmed: true } : {}), ...(m ? {} : { mine: true }) });
   }
   k.myNotes = mine.join('\n').trim();
   for (const s of ORDER) k.sections[s] = k.sections[s].slice(0, SECTION_LIMITS[s]);
@@ -100,13 +108,13 @@ export function renderKnowledge(k: Knowledge, userName: string): string {
   const out = [
     `# About ${cleanNote(userName) || 'you'}`,
     '',
-    `_Updated ${k.updated ?? 'never'} by Astra from your mail, calendar, files and chat. These are notes from outside text, not memory: Astra never acts on them. Edit or delete any line; write your own under "${MY_NOTES}", which is never changed._`,
+    `_Updated ${k.updated ?? 'never'} by Astra from your mail, calendar, files and chat. These are notes from outside text, not memory: Astra never acts on them. "unconfirmed" means only one source says it so far. To see where a line came from, type /knowledge why and a few of its words. Delete a wrong line (or type /knowledge wrong) and it won't be learned again; write your own under "${MY_NOTES}", which is never changed._`,
     '',
   ];
   for (const s of ORDER) {
     out.push(`## ${SECTION_TITLES[s]}`, '');
     const notes = k.sections[s];
-    out.push(...(notes.length ? notes.map((n) => (n.mine ? `- ${n.text}` : `- ${n.text} (${n.source}${n.on ? `, ${n.on}` : ''})`)) : ['- (nothing yet)']), '');
+    out.push(...(notes.length ? notes.map((n) => (n.mine ? `- ${n.text}` : `- ${n.text} ${sourceTail(n)}`)) : ['- (nothing yet)']), '');
   }
   out.push(`## ${MY_NOTES}`, '', k.myNotes, '');
   return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;

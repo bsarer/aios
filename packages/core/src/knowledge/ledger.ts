@@ -25,17 +25,34 @@ export type ItemState = 'pending' | 'extracted' | 'merged' | 'empty' | 'failed';
 /** backfill: the first pass's window; hourly: new since then; older (K3): mail before the window. */
 export type Phase = 'backfill' | 'hourly' | 'older';
 
-export interface ExtractedNote {
-  section: ModelSection;
+/** K5: a fact code checked against the item: its exact quote, and whether that is the user's own words. */
+export interface CheckedFact {
   text: string;
+  basis: 'stated' | 'observed';
+  quote: string;
+  byUser: boolean;
+  /** The relationship to the user it names ("sister"), only from the user's own words. */
+  relation: string | null;
+}
+
+export interface ExtractedNote extends CheckedFact {
+  section: ModelSection;
 }
 
 /** K4: what one item says about one person, project or organisation, for its wiki page. */
 export interface ExtractedPage {
   kind: PageKind;
   name: string;
-  facts: string[];
+  facts: CheckedFact[];
   links: { kind: PageKind; name: string }[];
+}
+
+/** K5: where an item's words came from, for each fact's evidence: written by code from headers. */
+export interface ItemSource {
+  /** Hashed sender, file or "user": two items from one origin don't confirm each other. */
+  origin: string;
+  /** A short plain line: "email from Selin Arslan: Your book". */
+  label: string;
 }
 
 export interface Item {
@@ -50,6 +67,8 @@ export interface Item {
   notes: ExtractedNote[];
   /** K4: facts for wiki pages. */
   pages: ExtractedPage[];
+  /** K5: where the item's words came from; null for items read before K5. */
+  source: ItemSource | null;
   attempts: number;
   priority: number;
 }
@@ -66,10 +85,15 @@ interface Row {
   priority: number;
 }
 
-/** Notes are stored as a list (K2), or with K4's pages as { notes, pages }. */
+/**
+ * Notes are stored as { notes, pages, source } (K5). Before K5 they were a list (K2) or
+ * { notes, pages } (K4) with no quotes: those are left out, and K5's first run reads the item again.
+ */
 const toItem = (r: Row): Item => {
-  const v = r.notes ? (JSON.parse(r.notes) as ExtractedNote[] | { notes: ExtractedNote[]; pages: ExtractedPage[] }) : [];
-  return { ...r, notes: Array.isArray(v) ? v : v.notes, pages: Array.isArray(v) ? [] : v.pages };
+  const v = r.notes ? (JSON.parse(r.notes) as unknown) : null;
+  const k5 = !!v && typeof v === 'object' && !Array.isArray(v) && 'source' in v;
+  const s = k5 ? (v as { notes: ExtractedNote[]; pages: ExtractedPage[]; source: ItemSource }) : null;
+  return { ...r, notes: s?.notes ?? [], pages: s?.pages ?? [], source: s?.source ?? null };
 };
 
 /** Priorities (0 first). Sent mail first: the user's own words say most. */
@@ -143,15 +167,39 @@ export class KnowledgeLedger {
     return (this.db.prepare(`SELECT * FROM knowledge_items WHERE state = 'pending' AND phase IN (${marks}) ORDER BY priority, at DESC LIMIT ?`).all(...phases, limit) as Row[]).map(toItem);
   }
 
+  /** K5: waiting items of these kinds only (the user's own words go to the cloud model). */
+  pendingOfKinds(limit: number, kinds: readonly ItemKind[], phases: readonly Phase[]): Item[] {
+    if (!kinds.length || !phases.length || limit <= 0) return [];
+    const k = kinds.map(() => '?').join(', ');
+    const p = phases.map(() => '?').join(', ');
+    return (this.db.prepare(`SELECT * FROM knowledge_items WHERE state = 'pending' AND kind IN (${k}) AND phase IN (${p}) ORDER BY priority, at DESC LIMIT ?`).all(...kinds, ...phases, limit) as Row[]).map(toItem);
+  }
+
   extracted(limit: number): Item[] {
     return (this.db.prepare("SELECT * FROM knowledge_items WHERE state = 'extracted' ORDER BY at DESC LIMIT ?").all(limit) as Row[]).map(toItem);
   }
 
-  setExtracted(key: string, notes: ExtractedNote[], now: number, pages: ExtractedPage[] = []): void {
+  setExtracted(key: string, notes: ExtractedNote[], now: number, pages: ExtractedPage[] = [], source: ItemSource = { origin: '', label: '' }): void {
     const any = notes.length > 0 || pages.length > 0;
     this.db
       .prepare('UPDATE knowledge_items SET state = ?, notes = ?, updated_at = ? WHERE key = ?')
-      .run(any ? 'extracted' : 'empty', any ? JSON.stringify(pages.length ? { notes, pages } : notes) : null, now, key);
+      .run(any ? 'extracted' : 'empty', any ? JSON.stringify({ notes, pages, source }) : null, now, key);
+  }
+
+  /**
+   * K5: reads items again under the new rules: those read since `since` (newest first, at most
+   * `limit`), and any read before K5 whose notes still wait. The calendar is read fresh each day anyway.
+   */
+  requeueSince(since: number, limit: number, now: number): number {
+    return this.db.transaction(() => {
+      const waiting = this.db.prepare("UPDATE knowledge_items SET state = 'pending', notes = NULL, attempts = 0, updated_at = ? WHERE state = 'extracted'").run(now).changes;
+      const keys = (
+        this.db.prepare("SELECT key FROM knowledge_items WHERE state IN ('merged', 'empty') AND kind != 'calendar' AND at >= ? ORDER BY at DESC LIMIT ?").all(since, limit) as { key: string }[]
+      ).map((r) => r.key);
+      const again = this.db.prepare("UPDATE knowledge_items SET state = 'pending', phase = 'hourly', notes = NULL, attempts = 0, updated_at = ? WHERE key = ?");
+      for (const k of keys) again.run(now, k);
+      return waiting + keys.length;
+    })();
   }
 
   /** One more failed try; `failed` after `maxAttempts`. */

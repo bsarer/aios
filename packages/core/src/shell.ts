@@ -104,6 +104,10 @@ export interface ShellOptions {
   knowledge?: {
     view: () => string;
     run: () => Promise<{ by: 'model' | 'code'; error?: string } | null>;
+    /** K5: /knowledge why <words>: where the matching lines came from, written by code. */
+    why?: (query: string) => string;
+    /** K5: /knowledge wrong <number>: the user's own typing takes a line out for good. There is no tool for it. */
+    wrong?: (id: number) => string;
     /** K4: /knowledge check, written by code. */
     check?: () => string;
     /** K4: files a reply the user saved (their click) as a wiki page; its id, or null. */
@@ -741,6 +745,12 @@ export class Shell {
         const k = this.o.knowledge;
         if (!k) return say('The knowledge base is off. Turn it on with enabled = true under [knowledge] in your config.');
         if (cmd.check) return say(k.check ? k.check() : 'The knowledge wiki is off (wiki = false under [knowledge]).');
+        if (cmd.why !== undefined) return say(k.why ? k.why(cmd.why) : 'Sources are not kept here.');
+        if (cmd.wrong !== undefined) {
+          if (!k.wrong) return say('Lines can only be taken out by editing the file here.');
+          if (cmd.wrong === null) return say('Type /knowledge wrong and the line\'s number. /knowledge why and a few of its words shows the numbers.');
+          return say(k.wrong(cmd.wrong));
+        }
         if (!cmd.update) return say(k.view());
         if (this.paused) return say('I am paused, so the knowledge base waits. Type /resume to continue.');
         say('Updating your knowledge base. This can take a few minutes.');

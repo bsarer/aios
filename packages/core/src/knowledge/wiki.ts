@@ -21,7 +21,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import type { KnowledgeSource } from '@aios/shared';
-import { type Knowledge, SOURCE_TAIL, cleanNote, writeAtomic } from './file.js';
+import { type Knowledge, SOURCE_TAIL, cleanNote, sourceTail, writeAtomic } from './file.js';
 
 export const PAGE_KINDS = ['person', 'project', 'org'] as const;
 export type PageKind = (typeof PAGE_KINDS)[number];
@@ -50,6 +50,16 @@ export interface PageFact {
   on?: string | undefined;
   /** A line the user typed (no source after it): kept as written. */
   mine?: boolean | undefined;
+  /** K5: only one origin says it so far, or it was written before quotes were kept. */
+  unconfirmed?: boolean | undefined;
+}
+
+/** K5: one fact's line on a page: "- text (mail, 2026-10-03, unconfirmed)", or as typed for the user's own. */
+export const factLine = (f: PageFact) => (f.mine ? `- ${f.text}` : `- ${f.text} ${sourceTail(f)}`);
+
+/** K5: a page's Facts section (heading included), for renderPage and the person profiles. */
+export function renderFacts(facts: PageFact[]): string[] {
+  return ['## Facts', '', ...(facts.length ? facts.map(factLine) : ['- (nothing yet)']), ''];
 }
 
 export interface WikiPage {
@@ -150,7 +160,7 @@ export function parsePage(md: string, id: string, kind: WikiKind): WikiPage {
     }
     const m = SOURCE_TAIL.exec(b[1]!);
     const text = cleanNote(m ? b[1]!.slice(0, m.index) : b[1]!, FACT_CHARS);
-    if (text) p.facts.push({ text, source: (m?.[1] as KnowledgeSource | undefined) ?? 'chat', ...(m?.[2] ? { on: m[2] } : {}), ...(m ? {} : { mine: true }) });
+    if (text) p.facts.push({ text, source: (m?.[1] as KnowledgeSource | undefined) ?? 'chat', ...(m?.[2] ? { on: m[2] } : {}), ...(m?.[3] ? { unconfirmed: true } : {}), ...(m ? {} : { mine: true }) });
   }
   p.summary = cleanNote(summary.join(' '), SUMMARY_CHARS);
   if (p.summary === '(not written yet)') p.summary = '';
@@ -165,16 +175,13 @@ export function renderPage(p: WikiPage): string {
   const out = [
     `# ${cleanNote(p.title, TITLE_CHARS) || p.id}`,
     '',
-    `_${KIND_TITLES[p.kind]}. Updated ${p.updated ?? 'never'} by Astra from your mail, calendar, files and chat. Notes from outside text, not memory: Astra never acts on them. Edit or delete any line; write your own under "${MY_NOTES}"._`,
+    `_${KIND_TITLES[p.kind]}. Updated ${p.updated ?? 'never'} by Astra from your mail, calendar, files and chat. Notes from outside text, not memory: Astra never acts on them. "unconfirmed" means only one source says it so far. Delete a wrong line and it won't be learned again; write your own under "${MY_NOTES}"._`,
     '',
     '## Summary',
     '',
     p.summary || '(not written yet)',
     '',
-    '## Facts',
-    '',
-    ...(p.facts.length ? p.facts.map((f) => (f.mine ? `- ${f.text}` : `- ${f.text} (${f.source}${f.on ? `, ${f.on}` : ''})`)) : ['- (nothing yet)']),
-    '',
+    ...renderFacts(p.facts),
   ];
   if (p.contradictions.length) out.push('## Might not agree', '', ...p.contradictions.map((c) => `- ${c}`), '');
   out.push('## Links', '', ...(p.links.length ? p.links.map((l) => `- [[${l}]]`) : ['- (none yet)']), '', `## ${MY_NOTES}`, '', p.myNotes, '');
@@ -204,8 +211,19 @@ export interface FileResult {
   skipped: number;
 }
 
+export interface WikiOptions {
+  /**
+   * People profiles: the text of a person's page, or null to use renderPage. Must keep the
+   * page's title, "## Facts" (renderFacts) and "## My notes" so the page reads back the same.
+   */
+  renderPerson?: ((p: WikiPage) => string | null) | undefined;
+}
+
 export class KnowledgeWiki {
-  constructor(readonly dir: string) {}
+  constructor(
+    readonly dir: string,
+    private readonly opts: WikiOptions = {},
+  ) {}
 
   get indexPath(): string {
     return join(this.dir, 'index.md');
@@ -245,7 +263,17 @@ export class KnowledgeWiki {
     // A folder someone swapped for a symbolic link is never written through.
     if (lstatSync(folder, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error('page folder is a link');
     mkdirSync(folder, { recursive: true, mode: 0o700 });
-    writeAtomic(path, renderPage(p));
+    writeAtomic(path, (p.kind === 'person' ? this.opts.renderPerson?.(p) : null) ?? renderPage(p));
+  }
+
+  /** K5: a page's facts as the facts store has them now (written by code); false when there is no such page. */
+  setFacts(id: string, facts: PageFact[], stamp: string): boolean {
+    const p = this.read(id);
+    if (!p) return false;
+    p.facts = facts.slice(0, MAX_FACTS);
+    p.updated = stamp;
+    this.write(p);
+    return true;
   }
 
   /** Every page's id, by folder. */

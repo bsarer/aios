@@ -1,22 +1,22 @@
 /**
- * K2: reading one email, document, chat stretch or calendar week into a few notes, and merging
- * notes into the file.
+ * K2: reading one email, document, chat stretch or calendar week into a few notes and page facts.
  *
  * Extraction is one small structured call per item, so even a small local model has an easy
  * job. Like triage it has no tools: the requests have no `tools` field and the client it gets
  * can only make structured calls (test). Everything from the item (headers, body, file name and
  * text) is sanitized and inside one <untrusted> wrapper.
  *
- * Merging is code: notes are deduplicated, a person keeps their newest note, and each section
- * keeps its newest notes up to its limit. Once, after the first pass, a tidy call (no tools,
- * the notes inside <untrusted>) can rewrite the sections to fold near-duplicates together.
+ * K5: each note and fact comes back with its basis and an exact quote, and code keeps only what
+ * `evidence.ts` checks against the item's text; the facts are stored with their quotes in
+ * `facts.ts`, never merged by a model.
  */
 import { z } from 'zod';
 import type { ModelRequest } from '../model.js';
-import { KNOWLEDGE_EXTRACT_SYSTEM_PROMPT, KNOWLEDGE_PAGE_SYSTEM_PROMPT, KNOWLEDGE_TIDY_SYSTEM_PROMPT } from '../prompts.js';
+import { KNOWLEDGE_EXTRACT_LOCAL_RULES, KNOWLEDGE_EXTRACT_SYSTEM_PROMPT, KNOWLEDGE_PAGE_SYSTEM_PROMPT } from '../prompts.js';
 import { sanitize, wrapUntrusted } from '../untrusted.js';
-import { type Knowledge, MODEL_SECTIONS, type ModelSection, type Note, SECTION_LIMITS, cleanNote } from './file.js';
-import type { ExtractedNote, ExtractedPage } from './ledger.js';
+import { type Candidate, type ItemText, QUOTE_CHARS, checkFact } from './evidence.js';
+import { MODEL_SECTIONS, cleanNote } from './file.js';
+import type { CheckedFact, ExtractedNote, ExtractedPage } from './ledger.js';
 import { PAGE_KINDS, type WikiPage, pageId } from './wiki.js';
 
 export const MAIL_TEXT_CHARS = 3000;
@@ -27,19 +27,29 @@ export const MAX_PAGES_PER_ITEM = 8;
 export const MAX_FACTS_PER_PAGE = 6;
 
 const PageRef = z.strictObject({ kind: z.enum(PAGE_KINDS), name: z.string().min(1).max(300) });
+/** K5: where a note comes from. "inferred" is allowed so a model can be honest; code never keeps it. */
+const Basis = z.enum(['stated', 'observed', 'inferred']);
+const Quote = z.string().max(1000);
 
 /**
  * The extractor's answer. Loose on length, so a long note is cut rather than failing the item.
  * K4: `pages` names the people, projects and organisations the item is about, with facts for
- * each one's page and links to the others. Code files them; a page can only gain facts.
+ * each one's page and links to the others. K5: every note and fact has a basis and a quote.
  */
 export const ExtractedNotes = z.strictObject({
-  notes: z.array(z.strictObject({ section: z.enum(MODEL_SECTIONS), text: z.string().min(1).max(1000) })).max(40),
+  notes: z.array(z.strictObject({ section: z.enum(MODEL_SECTIONS), text: z.string().min(1).max(1000), basis: Basis, quote: Quote })).max(40),
   pages: z
-    .array(z.strictObject({ ...PageRef.shape, facts: z.array(z.string().min(1).max(1000)).max(20), links: z.array(PageRef).max(20).optional() }))
+    .array(
+      z.strictObject({
+        ...PageRef.shape,
+        facts: z.array(z.strictObject({ text: z.string().min(1).max(1000), basis: Basis, quote: Quote })).max(20),
+        links: z.array(PageRef).max(20).optional(),
+      }),
+    )
     .max(30)
     .optional(),
 });
+export type ExtractedAnswer = z.infer<typeof ExtractedNotes>;
 
 /**
  * The text a person wrote in this email: quoted replies ("> …", "On … wrote:", forwarded and
@@ -78,61 +88,103 @@ export interface DocItemInput {
   text: string;
 }
 
+/**
+ * K5: a request, with the item's text as the model sees it (to check quotes against) and the
+ * part that is the user's own words.
+ */
+export interface ItemRequest {
+  request: ModelRequest;
+  check: Omit<ItemText, 'judgement'>;
+}
+
 const request = (role: ModelRequest['role'], user: string): ModelRequest => ({
   role,
   messages: [
-    { role: 'system', content: KNOWLEDGE_EXTRACT_SYSTEM_PROMPT },
+    // The local model only records what happened (K5): judgement is left to the cloud model.
+    { role: 'system', content: role === 'local' ? `${KNOWLEDGE_EXTRACT_SYSTEM_PROMPT}\n${KNOWLEDGE_EXTRACT_LOCAL_RULES}` : KNOWLEDGE_EXTRACT_SYSTEM_PROMPT },
     { role: 'user', content: user },
   ],
 });
 
 /** One email. Headers and body are all inside the wrapper: anyone can write them. */
-export function mailRequest(role: ModelRequest['role'], userName: string, m: MailItemInput): ModelRequest {
+export function mailItem(role: ModelRequest['role'], userName: string, m: MailItemInput): ItemRequest {
   const body = m.body.text ? m.body.text : m.body.html ? sanitize({ html: m.body.html }, { maxChars: MAIL_TEXT_CHARS * 4 }) : '';
-  const text = [`From: ${m.from}`, `To: ${m.to.join(', ')}`, `Date: ${m.date}`, `Subject: ${m.subject}`, '', ownText(body)].join('\n');
-  return request(
-    role,
-    [
-      `Person: ${userName}`,
-      m.sentByUser ? `An email ${userName} wrote and sent (their own words):` : `An email ${userName} received:`,
-      wrapUntrusted('email', m.id, sanitize({ text }, { maxChars: MAIL_TEXT_CHARS })),
-    ].join('\n'),
+  const own = ownText(body);
+  const text = sanitize({ text: [`From: ${m.from}`, `To: ${m.to.join(', ')}`, `Date: ${m.date}`, `Subject: ${m.subject}`, '', own].join('\n') }, { maxChars: MAIL_TEXT_CHARS });
+  return {
+    request: request(
+      role,
+      [`Person: ${userName}`, m.sentByUser ? `An email ${userName} wrote and sent (their own words):` : `An email ${userName} received (someone else's words):`, wrapUntrusted('email', m.id, text)].join('\n'),
+    ),
+    // Only the body of the user's own email is their words: not its headers, nor anything quoted.
+    check: { text, own: m.sentByUser ? sanitize({ text: own }, { maxChars: MAIL_TEXT_CHARS }) : '' },
+  };
+}
+
+export const mailRequest = (role: ModelRequest['role'], userName: string, m: MailItemInput): ModelRequest => mailItem(role, userName, m).request;
+
+/** One document from the user's folders. Not counted as the user's own words: files come from anywhere. */
+export function docItem(role: ModelRequest['role'], userName: string, d: DocItemInput): ItemRequest {
+  const text = sanitize(
+    {
+      text: [`File: ${d.display} (${d.kind})`, ...(d.title ? [`Title: ${d.title}`] : []), ...(d.author ? [`Author: ${d.author}`] : []), ...(d.summary ? [`Description: ${d.summary}`] : []), '', d.text].join(
+        '\n',
+      ),
+    },
+    { maxChars: DOC_TEXT_CHARS },
   );
+  return { request: request(role, [`Person: ${userName}`, `A document in ${userName}'s folders:`, wrapUntrusted('document', 'file', text)].join('\n')), check: { text, own: '' } };
 }
 
-/** One document from the user's folders. */
-export function docRequest(role: ModelRequest['role'], userName: string, d: DocItemInput): ModelRequest {
-  const text = [
-    `File: ${d.display} (${d.kind})`,
-    ...(d.title ? [`Title: ${d.title}`] : []),
-    ...(d.author ? [`Author: ${d.author}`] : []),
-    ...(d.summary ? [`Description: ${d.summary}`] : []),
-    '',
-    d.text,
-  ].join('\n');
-  return request(role, [`Person: ${userName}`, `A document in ${userName}'s folders:`, wrapUntrusted('document', 'file', sanitize({ text }, { maxChars: DOC_TEXT_CHARS }))].join('\n'));
+export const docRequest = (role: ModelRequest['role'], userName: string, d: DocItemInput): ModelRequest => docItem(role, userName, d).request;
+
+/**
+ * K5: the user's own chat lines since the last stretch, and nothing the assistant wrote: its
+ * replies repeat what the knowledge base guessed, so reading them back would confirm the guess.
+ */
+export function chatItem(role: ModelRequest['role'], userName: string, lines: string[]): ItemRequest {
+  const text = sanitize({ text: lines.join('\n') }, { maxChars: 8000 });
+  return { request: request(role, [`Person: ${userName}`, `What ${userName} typed to their assistant (their own words):`, wrapUntrusted('chat', 'chat', text)].join('\n')), check: { text, own: text } };
 }
 
-/** The chat since the last stretch: the user's own messages and the assistant's replies (which can quote email). */
-export function chatRequest(role: ModelRequest['role'], userName: string, lines: string[]): ModelRequest {
-  return request(role, [`Person: ${userName}`, `${userName}'s recent chat with their assistant:`, wrapUntrusted('chat', 'chat', sanitize({ text: lines.join('\n') }, { maxChars: 8000 }))].join('\n'));
+export const chatRequest = (role: ModelRequest['role'], userName: string, lines: string[]): ModelRequest => chatItem(role, userName, lines).request;
+
+/** The calendar from a week back to a week ahead. Anyone can send an invite, so none of it is the user's words. */
+export function calendarItem(role: ModelRequest['role'], userName: string, lines: string[]): ItemRequest {
+  const text = sanitize({ text: lines.join('\n') }, { maxChars: 6000 });
+  return { request: request(role, [`Person: ${userName}`, `${userName}'s calendar, a week back to a week ahead:`, wrapUntrusted('calendar', 'calendar', text)].join('\n')), check: { text, own: '' } };
 }
 
-/** The calendar from a week back to a week ahead. */
-export function calendarRequest(role: ModelRequest['role'], userName: string, lines: string[]): ModelRequest {
-  return request(role, [`Person: ${userName}`, `${userName}'s calendar, a week back to a week ahead:`, wrapUntrusted('calendar', 'calendar', sanitize({ text: lines.join('\n') }, { maxChars: 6000 }))].join('\n'));
+export const calendarRequest = (role: ModelRequest['role'], userName: string, lines: string[]): ModelRequest => calendarItem(role, userName, lines).request;
+
+/** Why facts were left out, counted for the audit log and the eval. */
+export type Dropped = Partial<Record<'inferred' | 'no_quote' | 'quote_not_found' | 'relation' | 'liking' | 'judgement' | 'empty', number>>;
+
+function checked(c: Candidate & { text: string }, item: ItemText, dropped: Dropped): CheckedFact | null {
+  const text = cleanNote(c.text, 300);
+  if (!text) {
+    dropped.empty = (dropped.empty ?? 0) + 1;
+    return null;
+  }
+  const v = checkFact({ ...c, text }, item);
+  if (!v.ok) {
+    dropped[v.why] = (dropped[v.why] ?? 0) + 1;
+    return null;
+  }
+  return { text, basis: c.basis as CheckedFact['basis'], quote: cleanNote(v.quote, QUOTE_CHARS), byUser: v.byUser, relation: v.relation };
 }
 
-/** The extractor's notes, cleaned to one plain line each, deduplicated and capped. */
-export function cleanExtracted(v: z.infer<typeof ExtractedNotes>): ExtractedNote[] {
+/** The extractor's notes that pass the checks, cleaned to one plain line each, deduplicated and capped. */
+export function cleanExtracted(v: ExtractedAnswer, item: ItemText, dropped: Dropped = {}): ExtractedNote[] {
   const seen = new Set<string>();
   const out: ExtractedNote[] = [];
   for (const n of v.notes) {
-    const text = cleanNote(n.text);
-    const key = `${n.section}:${text.toLowerCase()}`;
-    if (!text || seen.has(key)) continue;
+    const f = checked({ text: n.text, basis: n.basis, quote: n.quote, aboutUser: true, section: n.section }, item, dropped);
+    if (!f) continue;
+    const key = `${n.section}:${normal(f.text)}`;
+    if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ section: n.section, text });
+    out.push({ section: n.section, ...f });
     if (out.length >= MAX_NOTES_PER_ITEM) break;
   }
   return out;
@@ -140,9 +192,11 @@ export function cleanExtracted(v: z.infer<typeof ExtractedNotes>): ExtractedNote
 
 /**
  * K4: the extractor's pages, cleaned by code: names and facts to plain lines, pages with no
- * usable name (one that makes no slug: "../..") left out, at most 8 pages, 6 facts and 6 links each.
+ * usable name (one that makes no slug: "../..") left out, at most 8 pages, 6 facts and 6 links
+ * each. K5: only facts that pass the checks; links only between pages with a checked fact or
+ * a name that is in the item.
  */
-export function cleanPages(v: z.infer<typeof ExtractedNotes>): ExtractedPage[] {
+export function cleanPages(v: ExtractedAnswer, item: ItemText, dropped: Dropped = {}): ExtractedPage[] {
   const byId = new Map<string, ExtractedPage>();
   for (const p of v.pages ?? []) {
     const name = cleanNote(p.name, 80);
@@ -153,9 +207,9 @@ export function cleanPages(v: z.infer<typeof ExtractedNotes>): ExtractedPage[] {
       if (byId.size >= MAX_PAGES_PER_ITEM) continue;
       byId.set(id, page);
     }
-    for (const f of p.facts) {
-      const text = cleanNote(f, 300);
-      if (text && page.facts.length < MAX_FACTS_PER_PAGE && !page.facts.some((x) => normal(x) === normal(text))) page.facts.push(text);
+    for (const raw of p.facts) {
+      const f = checked({ text: raw.text, basis: raw.basis, quote: raw.quote, aboutUser: false }, item, dropped);
+      if (f && page.facts.length < MAX_FACTS_PER_PAGE && !page.facts.some((x) => normal(x.text) === normal(f.text))) page.facts.push(f);
     }
     for (const l of p.links ?? []) {
       const lname = cleanNote(l.name, 80);
@@ -163,39 +217,17 @@ export function cleanPages(v: z.infer<typeof ExtractedNotes>): ExtractedPage[] {
       if (lid && lid !== id && page.links.length < MAX_FACTS_PER_PAGE && !page.links.some((x) => pageId(x.kind, x.name) === lid)) page.links.push({ kind: l.kind, name: lname });
     }
   }
-  return [...byId.values()].filter((p) => p.facts.length || p.links.length);
+  // A page needs a checked fact, or a name the item really has: no page for someone made up.
+  return [...byId.values()].filter((p) => p.facts.length || (p.links.length && ` ${normal(item.text)} `.includes(` ${normal(p.name)} `)));
 }
 
-/** "Ana Lopez: sister…" → "ana lopez": a person's note is replaced by a newer one about them. */
-function personKey(text: string): string | null {
+/** "Ana Lopez: emailed about…" → "Ana Lopez": the person a people note is about. */
+export function personOf(text: string): string | null {
   const m = /^([^:]{2,60}):/.exec(text);
-  return m ? m[1]!.trim().toLowerCase() : null;
+  return m ? m[1]!.trim() : null;
 }
 
 const normal = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-
-/**
- * Merges new notes into the current ones, by code. Lines the user typed are always
- * kept; otherwise each section keeps its newest notes, and a person keeps only their newest one.
- */
-export function mergeNotes(current: Knowledge, add: (Note & { section: ModelSection })[]): Knowledge {
-  const k: Knowledge = { ...current, sections: { ...current.sections } };
-  for (const s of MODEL_SECTIONS) {
-    const all = [...k.sections[s], ...add.filter((n) => n.section === s).map(({ section: _s, ...n }) => n)];
-    const byKey = new Map<string, Note>();
-    for (const n of all) {
-      const key = (s === 'people' ? personKey(n.text) : null) ?? normal(n.text);
-      const had = byKey.get(key);
-      // The user's own lines win; then the newer note (undated notes from before K2 count as oldest).
-      if (!had || (!had.mine && (n.mine || (n.on ?? '0000') >= (had.on ?? '0000')))) byKey.set(key, n);
-    }
-    const kept = [...byKey.values()];
-    const own = kept.filter((n) => n.mine);
-    const rest = kept.filter((n) => !n.mine).sort((a, b) => (b.on ?? '0000').localeCompare(a.on ?? '0000'));
-    k.sections[s] = [...own, ...rest.slice(0, Math.max(0, SECTION_LIMITS[s] - own.length))];
-  }
-  return k;
-}
 
 // ── K4: a page's summary, rewritten when it gets new facts ──
 
@@ -205,8 +237,14 @@ export const PageSummary = z.strictObject({
   contradictions: z.array(z.string().min(1).max(1000)).max(10),
 });
 
+/** K5: each fact says whether it is known or unconfirmed, so the summary can't state a guess as a fact. */
 export function pageSummaryRequest(role: ModelRequest['role'], userName: string, p: WikiPage): ModelRequest {
-  const lines = [`Page: ${p.title} (${p.kind})`, `Summary now: ${p.summary || '(none)'}`, 'Facts, newest first:', ...p.facts.slice(0, PAGE_FACTS_IN_SUMMARY).map((f) => `- ${f.text} (${f.source}${f.on ? `, ${f.on}` : ''})`)];
+  const lines = [
+    `Page: ${p.title} (${p.kind})`,
+    `Summary now: ${p.summary || '(none)'}`,
+    'Facts, known first, newest first within each:',
+    ...p.facts.slice(0, PAGE_FACTS_IN_SUMMARY).map((f) => `- ${f.unconfirmed ? '[unconfirmed] ' : f.mine ? '[the user wrote this] ' : '[known] '}${f.text} (${f.source}${f.on ? `, ${f.on}` : ''})`),
+  ];
   return {
     role,
     messages: [
@@ -214,43 +252,4 @@ export function pageSummaryRequest(role: ModelRequest['role'], userName: string,
       { role: 'user', content: [`Person: ${userName}`, 'One page of their knowledge wiki:', wrapUntrusted('knowledge', p.id, sanitize({ text: lines.join('\n') }, { maxChars: 20_000 }))].join('\n') },
     ],
   };
-}
-
-// ── Tidy (once, after the first pass) ──
-
-const TidyNote = z.strictObject({ text: z.string().min(1).max(1000), source: z.enum(['mail', 'calendar', 'files', 'chat']), on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
-export const TidiedNotes = z.strictObject(Object.fromEntries(MODEL_SECTIONS.map((s) => [s, z.array(TidyNote).max(60)])) as Record<ModelSection, z.ZodArray<typeof TidyNote>>);
-
-export function tidyRequest(role: ModelRequest['role'], userName: string, k: Knowledge): ModelRequest {
-  const lines = MODEL_SECTIONS.flatMap((s) => [`[${s}]`, ...k.sections[s].filter((n) => !n.mine).map((n) => `- ${n.text} (${n.source}${n.on ? `, ${n.on}` : ''})`)]);
-  return {
-    role,
-    messages: [
-      { role: 'system', content: KNOWLEDGE_TIDY_SYSTEM_PROMPT },
-      { role: 'user', content: [`Person: ${userName}`, 'Notes:', wrapUntrusted('knowledge', 'notes', sanitize({ text: lines.join('\n') }, { maxChars: 30_000 }))].join('\n') },
-    ],
-  };
-}
-
-/** The tidied sections, cleaned; null when the answer would lose most of the notes. */
-export function cleanTidied(before: Knowledge, v: z.infer<typeof TidiedNotes>): Knowledge | null {
-  const k: Knowledge = { ...before, sections: { ...before.sections } };
-  let had = 0;
-  let has = 0;
-  for (const s of MODEL_SECTIONS) {
-    had += before.sections[s].length;
-    const seen = new Set<string>();
-    const notes: Note[] = [];
-    for (const n of v[s]) {
-      const text = cleanNote(n.text);
-      if (!text || seen.has(normal(text))) continue;
-      seen.add(normal(text));
-      notes.push({ text, source: n.source, ...(n.on ? { on: n.on } : {}) });
-    }
-    // The user's own lines are never dropped by a model.
-    const own = before.sections[s].filter((n) => n.mine && !seen.has(normal(n.text)));
-    k.sections[s] = [...own, ...notes].slice(0, SECTION_LIMITS[s]);
-    has += k.sections[s].length;
-  }
-  return had >= 10 && has < had / 3 ? null : k;
 }

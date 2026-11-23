@@ -345,7 +345,7 @@ Long-term memory is plain Markdown you own, in `~/.config/aios/memory/`:
 
 Chat commands: `/remember <text>` offers a card directly, `/memory` shows everything, `/forget <text>` removes a fact, `/export` writes one Markdown file with all of it.
 A suggestion made while email text was in the model's context is labelled as such on its card. Nothing is written without a click.
-Each chat request fits a token budget (`[memory] contextTokens`, default 8000): the system prompt, the profile, recalled facts and summaries (SQLite FTS5), then as many recent turns as fit.
+Each chat request fits a token budget (`[memory] contextTokens`, default 32000): the system prompt, the profile, recalled facts and summaries (SQLite FTS5), the request being answered (always whole, with its tool results), then as many earlier turns as fit. Earlier exchanges that read email, invites, documents or the knowledge base are folded into a one-line note before the budget is counted.
 
 ## Quick start
 

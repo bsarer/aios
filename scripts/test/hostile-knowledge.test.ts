@@ -53,6 +53,7 @@ const CONFIG: KnowledgeConfig = {
   model: 'local',
   backfillDays: 90,
   backfillModel: 'cloud',
+  localOnly: false,
   backfillMaxMails: 600,
   backfillMaxFiles: 300,
   perRun: 40,

@@ -78,9 +78,12 @@ const MAX_CHUNKS_PER_RUN = 6;
 /** K5: on its first run, items read in the last this many days (at most this many) are read again under the new rules. */
 const REREAD_DAYS = 30;
 const REREAD_MAX = 400;
-const FACTS_VERSION = '1';
+/** '2' (K6): read again once more, now that reading is on the cloud model rather than the local one. */
+const FACTS_VERSION = '2';
 /** K5: judgement (relationships, interests) comes from the user's own words, so these go to the cloud model when there is one. */
 const OWN_WORDS: ItemKind[] = ['sent', 'chat'];
+/** K6: the cloud model can't be used now; the local fallback reads instead. */
+const CLOUD_DOWN = new Set<string>(['budget', 'key_missing', 'auth', 'credits', 'forbidden', 'cost_cap', 'not_configured'] satisfies (ModelErrorKind | 'budget')[]);
 /** These mean no call will work right now: stop the run and try again later. */
 const STOP_KINDS = new Set<string>(['auth', 'credits', 'forbidden', 'rate_limited', 'timeout', 'unavailable', 'network', 'aborted', 'paused', 'cost_cap', 'key_missing', 'not_configured'] satisfies ModelErrorKind[]);
 
@@ -107,7 +110,13 @@ export interface KnowledgeCrawlerOptions {
   /** Display name for a real file path (F1's FileRoots.display). */
   displayPath?: ((path: string) => string) | undefined;
   /** Null when that model isn't there: its items wait. `older` (K3): for mail before the window. */
-  models: { backfill: ModelChoice | null; hourly: ModelChoice | null; older?: ModelChoice | null | undefined };
+  models: {
+    backfill: ModelChoice | null;
+    hourly: ModelChoice | null;
+    older?: ModelChoice | null | undefined;
+    /** K6: the local model, used when the cloud can't be (no key, no credit, the cap or budget spent). */
+    fallback?: ModelChoice | null | undefined;
+  };
   isPaused: () => boolean;
   quietHours?: { start: string; end: string } | undefined;
   /** K4: the wiki pages beside the file; none when [knowledge] wiki is off. */
@@ -727,10 +736,16 @@ export class KnowledgeCrawler {
     let budgetHit = false;
     // The first pass also takes new mail; when today's budget is spent, new mail goes on the hourly model.
     let reads: [ModelChoice | null, Phase[], readonly ItemKind[] | null][] = [[choice, phase === 'backfill' ? ['backfill', 'hourly'] : ['hourly'], null]];
+    const fallback = this.o.models.fallback ?? null;
     if (choice && this.overBudget(choice, now)) {
       budgetHit = true;
       choice = phase === 'backfill' && this.o.models.hourly && !this.overBudget(this.o.models.hourly, now) ? this.o.models.hourly : null;
       reads = [[choice, ['hourly'], null]];
+      // K6: with the cloud's budget spent for today, the local model keeps the reading going.
+      if (!choice && fallback) {
+        choice = fallback;
+        reads = [[fallback, phase === 'backfill' ? ['backfill', 'hourly'] : ['hourly'], null]];
+      }
     }
     // K5: judgement calls go to the cloud. The user's own words (sent mail, chat) are read there
     // first when the hourly model is the local one; the local model then only records what happened.
@@ -747,8 +762,18 @@ export class KnowledgeCrawler {
         budgetHit = true;
         continue;
       }
-      const items = kinds ? this.ledger.pendingOfKinds(left, kinds, phases) : this.ledger.pending(left, phases);
-      const r = await this.extract(m, items, evs, now, run.dropped);
+      const pick = () => (kinds ? this.ledger.pendingOfKinds(left, kinds, phases) : this.ledger.pending(left, phases));
+      let r = await this.extract(m, pick(), evs, now, run.dropped);
+      // K6: the cloud can't be used (no key, no credit, the daily cap or budget): the rest of this
+      // read goes to the local model, so new items don't wait. Not for older mail, which can wait.
+      if (r.error && CLOUD_DOWN.has(r.error) && fallback && m !== fallback && !phases.includes('older')) {
+        this.o.audit.append({ kind: 'knowledge', event: 'fallback_local', reason: r.error });
+        if (r.error === 'budget') budgetHit = true;
+        left -= r.tried;
+        run.read += r.read;
+        run.notes += r.notes;
+        r = await this.extract(fallback, pick(), evs, now, run.dropped);
+      }
       left -= r.tried;
       run.read += r.read;
       run.notes += r.notes;
@@ -925,7 +950,7 @@ export function progressText(p: Progress & Partial<KnowledgeProgress>, backfillO
   if (p.older?.total || p.olderBackTo) {
     const done = p.older?.done ?? 0;
     const total = p.older?.total ?? 0;
-    const when = p.olderMail === 'local-overnight' ? 'overnight on the local model' : 'every five minutes';
+    const when = p.olderMail === 'local-overnight' ? 'overnight' : 'every five minutes';
     lines.push(`Older mail: ${done} of ${total} read${p.olderBackTo ? `, listed back to ${p.olderBackTo}` : ''}.${total > done || p.olderBackTo ? ` It continues ${when}.` : ''}`);
   }
   if (p.skipped) lines.push(`Skipped ${p.skipped} bulk or automated emails.`);

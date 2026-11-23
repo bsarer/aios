@@ -580,7 +580,9 @@ async function main(): Promise<void> {
   // K2: the first pass on backfillModel (cloud by default), hourly updates on model (local by default).
   // [knowledge] cloudModel: the same connection, key, gate and usage records as the nightly role, only the model swapped.
   const knowledgeCloud = kc.cloudModel ? new ModelClient({ ...modelOptions, models: { ...config.models, nightly: { ...config.models.nightly, model: kc.cloudModel } } }) : model;
-  const knowledgeModel = (which: 'local' | 'cloud') => (which === 'cloud' ? { model: knowledgeCloud, role: 'nightly' as const } : localModel ? { model: localModel, role: 'local' as const } : null);
+  // K6: all reading on the cloud model, with the local model only as the fallback; or local only, by choice.
+  const knowledgeLocal = localModel ? { model: localModel, role: 'local' as const } : null;
+  const knowledgeMain = kc.localOnly ? knowledgeLocal : { model: knowledgeCloud, role: 'nightly' as const };
   const knowledge = knowledgeFile
     ? new KnowledgeCrawler({
         config: kc,
@@ -596,7 +598,7 @@ async function main(): Promise<void> {
         files: fileCatalog,
         displayPath: fileRoots ? (p: string) => fileRoots.display(p) : undefined,
         // K3: older mail on the local model overnight by default, or the cloud under the knowledge budget.
-        models: { backfill: knowledgeModel(kc.backfillModel), hourly: knowledgeModel(kc.model), older: kc.olderMail === 'off' ? null : knowledgeModel(kc.olderMail === 'cloud' ? 'cloud' : 'local') },
+        models: { backfill: knowledgeMain, hourly: knowledgeMain, older: kc.olderMail === 'off' ? null : knowledgeMain, fallback: kc.localOnly ? null : knowledgeLocal },
         isPaused,
         quietHours: config.notifications.quietHours,
         wiki: knowledgeWiki,
@@ -644,7 +646,7 @@ async function main(): Promise<void> {
     ...(knowledge && knowledgeFile
       ? {
           knowledge: {
-            view: () => knowledgeView(knowledgeFile, [progressText(knowledge.progress(), kc.backfillModel === 'cloud'), ...(knowledgeWiki ? [wikiLine(knowledgeWiki)] : [])].join('\n')),
+            view: () => knowledgeView(knowledgeFile, [progressText(knowledge.progress(), !kc.localOnly), ...(knowledgeWiki ? [wikiLine(knowledgeWiki)] : [])].join('\n')),
             run: () => knowledge.run(),
             why: (q: string) => knowledge.why(q),
             wrong: (id: number) => knowledge.wrong(id),

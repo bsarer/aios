@@ -21,7 +21,7 @@ import { KnowledgeFacts, ME } from '../src/knowledge/facts.js';
 import { KnowledgeFile, emptyKnowledge } from '../src/knowledge/file.js';
 import { KnowledgeWiki } from '../src/knowledge/wiki.js';
 import type { FullMessage, ListedMail } from '../src/mail/imap.js';
-import type { ModelRequest } from '../src/model.js';
+import { ModelError, type ModelRequest } from '../src/model.js';
 import { Store } from '../src/store.js';
 
 const TZ = 'Europe/Istanbul';
@@ -182,7 +182,7 @@ function mailbox(mails: { id: string; from: string; address: string; to?: string
 }
 
 /** A model that writes what the old prompt made models write: a "sister" for Buket, and the user's sister Ece from their own mail. */
-function rig(o: { config?: Partial<KnowledgeConfig>; before?: (file: KnowledgeFile, store: Store) => void } = {}) {
+function rig(o: { config?: Partial<KnowledgeConfig>; before?: (file: KnowledgeFile, store: Store) => void; cloudFails?: 'key_missing' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'aios-facts-'));
   const store = new Store(':memory:');
   const audit = new AuditLog(join(dir, 'audit.jsonl'));
@@ -215,6 +215,14 @@ function rig(o: { config?: Partial<KnowledgeConfig>; before?: (file: KnowledgeFi
       return { value: schema.parse(v), result: {} };
     },
   };
+  const cloudModel = o.cloudFails
+    ? {
+        structured: async (req: ModelRequest) => {
+          requests.push(req);
+          throw new ModelError(o.cloudFails!, 'no key');
+        },
+      }
+    : model;
   const crawler = new KnowledgeCrawler({
     config: { ...KnowledgeSchema.parse({}), backfillDays: 30, olderMail: 'off', perRun: 40, ...o.config },
     userName: 'John',
@@ -224,7 +232,8 @@ function rig(o: { config?: Partial<KnowledgeConfig>; before?: (file: KnowledgeFi
     store,
     audit,
     mail: box,
-    models: { backfill: { model: model as never, role: 'nightly' }, hourly: { model: model as never, role: 'local' } },
+    // K6: everything on the cloud, the local model only as the fallback (main.ts).
+    models: { backfill: { model: cloudModel as never, role: 'nightly' }, hourly: { model: cloudModel as never, role: 'nightly' }, fallback: { model: model as never, role: 'local' } },
     isPaused: () => false,
     wiki,
     now: () => now,
@@ -330,5 +339,23 @@ describe('K5 the crawler', () => {
     expect(r.crawler.why('Jacksonville')).toContain('Written before Astra kept sources');
     // Only once.
     expect((await r.crawler.run())!.reread).toBe(0);
+  });
+
+  it('reads on the cloud, and on the local model only when the cloud can\'t be used', async () => {
+    const r = rig();
+    await r.crawler.run();
+    expect(new Set(r.requests.filter((q) => q.messages.at(-1)!.content!.includes('<untrusted source="email"')).map((q) => q.role))).toEqual(new Set(['nightly']));
+    // No key for the cloud: the same items go to the local model, which only records what happened.
+    const down = rig({ cloudFails: 'key_missing' });
+    const run = (await down.crawler.run())!;
+    expect(run.read).toBe(2);
+    const roles = down.requests.filter((q) => q.messages.at(-1)!.content!.includes('<untrusted source="email"')).map((q) => q.role);
+    expect(roles).toContain('local');
+    expect(down.file.read().sections.people.map((n) => n.text)).toEqual(['Buket Sarer: asked to see the flat on Thursday']);
+    expect(readFileSync(down.audit, 'utf8')).toContain('"event":"fallback_local","reason":"key_missing"');
+    // Spent today's knowledge budget: the local model reads too.
+    const spent = rig({ config: { dailyBudgetUsd: 0 } });
+    await spent.crawler.run();
+    expect(spent.requests.filter((q) => q.messages.at(-1)!.content!.includes('<untrusted source="email"')).every((q) => q.role === 'local')).toBe(true);
   });
 });

@@ -115,7 +115,8 @@ describe('installer screen', () => {
 
 describe('astra addons on the installer screen', () => {
   const c: Catalog = readCatalog();
-  const w = whisperPaths('/home/j/.local/share/astra', '/home/j');
+  const home = mkdtempSync(join(tmpdir(), 'astra-addons-'));
+  const w = whisperPaths(join(home, '.local', 'share', 'astra'), home);
   const noop = { finishVoice: async () => null, finishSignal: async () => null, waitForOllama: () => true };
 
   it('asks for the password once first, then runs sudo without asking, one screen line per step', async () => {

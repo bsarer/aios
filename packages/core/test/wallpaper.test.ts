@@ -17,7 +17,7 @@ import { Shell } from '../src/shell.js';
 import { Store } from '../src/store.js';
 import { ALPHA_TOOLS } from '../src/tools/definitions.js';
 import { ToolRegistry } from '../src/tools/registry.js';
-import { WALLPAPER_IMAGE, WALLPAPER_MAX_BYTES, Wallpaper, wallpaperPath, wallpaperType } from '../src/wallpaper.js';
+import { WALLPAPER_IMAGE, WALLPAPER_MAX_BYTES, WALLPAPER_SAMPLES, Wallpaper, shippedWallpapersDir, wallpaperPath, wallpaperSamples, wallpaperType } from '../src/wallpaper.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('rest of a png')]);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('jpeg')]);
@@ -111,7 +111,11 @@ function rig() {
       return r;
     },
   };
-  const wallpaper = new Wallpaper(f.config);
+  const shipped = join(f.root, 'shipped');
+  mkdirSync(shipped);
+  writeFileSync(join(shipped, 'dusk.jpg'), JPEG);
+  writeFileSync(join(shipped, 'aurora.jpg'), JPEG);
+  const wallpaper = new Wallpaper(f.config, () => wallpaperSamples({ shipped, themeDirs: [] }));
   const tools = new ToolRegistry(audit);
   const shell = new Shell({
     store: new Store(':memory:'),
@@ -185,6 +189,62 @@ describe('/wallpaper in the chat', () => {
     expect(parseCommand('/wallpaper  ~/a  b.png')).toEqual({ name: 'wallpaper', text: '~/a  b.png' });
     expect(parseCommand('/background off')).toEqual({ name: 'wallpaper', text: 'off' });
     expect(HELP_TEXT).toContain('/wallpaper');
+  });
+});
+
+describe('sample wallpapers', () => {
+  it('ships each sample as a small JPEG drawn for Astra', () => {
+    const all = wallpaperSamples({ themeDirs: [] });
+    expect(all.map((x) => x.id)).toEqual(WALLPAPER_SAMPLES.map((x) => x.id));
+    for (const x of all) {
+      const bytes = readFileSync(x.path);
+      expect(wallpaperType(bytes)).toBe('image/jpeg');
+      expect(bytes.byteLength).toBeLessThan(150 * 1024);
+      expect(x.path.startsWith(shippedWallpapersDir())).toBe(true);
+    }
+  });
+
+  it('adds the current Omarchy theme’s backgrounds by plain names, at most 12', () => {
+    const f = folders();
+    const theme = join(f.root, 'theme', 'backgrounds');
+    mkdirSync(theme, { recursive: true });
+    writeFileSync(join(theme, '1-Kanagawa Wave.png'), PNG);
+    writeFileSync(join(theme, 'notes.txt'), 'x');
+    for (let i = 0; i < 20; i++) writeFileSync(join(theme, `bg-${String(i).padStart(2, '0')}.jpg`), JPEG);
+    const all = wallpaperSamples({ shipped: join(f.root, 'none'), themeDirs: [join(f.root, 'missing'), theme] });
+    expect(all).toHaveLength(12);
+    expect(all[0]).toMatchObject({ id: 'theme-1-kanagawa-wave', label: 'Theme: 1-Kanagawa Wave' });
+    expect(all.every((x) => /^theme-[a-z0-9-]+$/.test(x.id) && !x.path.endsWith('.txt'))).toBe(true);
+  });
+
+  it('copies a sample in and remembers which one, checked by its bytes', () => {
+    const f = folders();
+    writeFileSync(join(f.root, 'fake.jpg'), '<svg><script></script></svg>');
+    const w = new Wallpaper(f.config, () => [
+      { id: 'dusk', label: 'Dusk hills', path: join(shippedWallpapersDir(), 'dusk.jpg') },
+      { id: 'fake', label: 'Fake', path: join(f.root, 'fake.jpg') },
+    ]);
+    expect(w.sampleByName('Dusk Hills')?.id).toBe('dusk');
+    expect(w.useSample('dusk', 'strong')).toMatchObject({ ok: true, state: { dim: 'strong' } });
+    expect(w.currentSample()).toBe('dusk');
+    expect(w.useSample('fake').ok).toBe(false);
+    expect(w.useSample('nope').ok).toBe(false);
+    expect(w.currentSample()).toBe('dusk');
+  });
+
+  it('/wallpaper picks a sample by name and lists them; a path still wins', async () => {
+    const r = rig();
+    await r.shell.handle({ type: 'send', text: '/wallpaper samples' });
+    expect(r.notices().at(-1)).toContain('- dusk: Dusk hills');
+    await r.shell.handle({ type: 'send', text: '/wallpaper Aurora' });
+    expect(r.sent().at(-1)).toMatchObject({ dim: 'medium' });
+    expect(r.wallpaper.currentSample()).toBe('aurora');
+    writeFileSync(join(r.f.home, 'dusk'), PNG);
+    await r.shell.handle({ type: 'send', text: '/wallpaper ~/dusk' });
+    expect(r.wallpaper.currentSample()).toBeNull();
+    await r.shell.handle({ type: 'send', text: '/wallpaper' });
+    expect(r.notices().at(-1)).toContain('Pick a sample (dusk, aurora)');
+    expect(r.requests).toHaveLength(0);
   });
 });
 

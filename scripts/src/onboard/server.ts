@@ -6,6 +6,7 @@
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import type { AiosConfig, SecretRef, Wallpaper as WallpaperState } from '@aios/shared';
 import { type Wallpaper, WALLPAPER_MAX_BYTES, checkWallpaperBytes } from '@aios/core';
@@ -52,7 +53,7 @@ export interface SetupDeps {
   /** SG1: linking the phone to Signal. Without it, the Signal step says linking isn't available. */
   signal?: { start(): Promise<LinkState>; readonly status: LinkState; cancel(): void };
   /** The picture behind the chat, in the config folder. Without it, the Wallpaper step says it isn't available. */
-  wallpaper?: Pick<Wallpaper, 'current' | 'file' | 'set' | 'setDim' | 'remove'>;
+  wallpaper?: Pick<Wallpaper, 'current' | 'file' | 'set' | 'setDim' | 'remove' | 'samples' | 'useSample' | 'currentSample'>;
   /** Opens the chat and closes the setup window. */
   done: () => void;
   /** Closes the setup window without saving anything or opening the chat (the Exit button). */
@@ -87,7 +88,9 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       const wallpaper: WallpaperState | undefined = deps.wallpaper?.current();
       return {
         existing: summarize(existing, deps.presets),
-        wallpaper: deps.wallpaper ? { available: true, current: wallpaper ?? null } : { available: false, current: null },
+        wallpaper: deps.wallpaper
+          ? { available: true, current: wallpaper ? { ...wallpaper, sample: deps.wallpaper.currentSample() } : null, samples: deps.wallpaper.samples().map((x) => ({ id: x.id, label: x.label })) }
+          : { available: false, current: null, samples: [] },
         presets: Object.entries(deps.presets).map(([id, p]) => ({ id, label: p.label, blurb: p.blurb, keyUrl: p.keyUrl, defaultModel: p.defaultModel ?? '' })),
         ...look,
       };
@@ -136,6 +139,7 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       const answers = SetupAnswers.parse(body);
       // Checked before anything is written, so a missing picture never leaves a half-saved setup.
       if (answers.wallpaper.change === 'new' && deps.wallpaper && !pickedWallpaper) throw new SetupError('wallpaper', 'Pick the picture again.');
+      if (answers.wallpaper.change === 'sample' && deps.wallpaper && !deps.wallpaper.samples().some((x) => x.id === answers.wallpaper.sample)) throw new SetupError('wallpaper', 'Pick a sample again.');
       const existing = await deps.readConfig();
       const look = await deps.look();
       const s = serversFor(answers.mail.address, await deps.mx(answers.mail.address));
@@ -164,6 +168,11 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
     const wp = deps.wallpaper;
     if (!wp) return [];
     if (w.change === 'remove') return wp.remove() ? ['Took the wallpaper off the chat.'] : [];
+    if (w.change === 'sample') {
+      const r = w.sample ? wp.useSample(w.sample, w.dim) : null;
+      if (!r?.ok) throw new SetupError('wallpaper', r?.error ?? 'Pick a sample again.');
+      return ['Put the sample wallpaper behind the chat.'];
+    }
     if (w.change === 'new') {
       if (!pickedWallpaper) return [];
       const r = wp.set(pickedWallpaper, w.dim);
@@ -198,6 +207,16 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       if (!f) return void send(res, 404, { ok: false });
       res.writeHead(200, { 'content-type': f.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
       return void res.end(f.bytes);
+    }
+    // A sample's picture, for its card in the Wallpaper step: only a listed sample, checked by its bytes.
+    const sampleRoute = /^api\/wallpaper-sample\/([a-z0-9][a-z0-9-]{0,63})$/.exec(route);
+    if (req.method === 'GET' && sampleRoute) {
+      const s = deps.wallpaper?.samples().find((x) => x.id === sampleRoute[1]);
+      const bytes = s ? await readFile(s.path).catch(() => null) : null;
+      const c = bytes && bytes.byteLength <= WALLPAPER_MAX_BYTES ? checkWallpaperBytes(bytes) : null;
+      if (!bytes || !c?.ok) return void send(res, 404, { ok: false });
+      res.writeHead(200, { 'content-type': c.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      return void res.end(bytes);
     }
     // A picture picked in the window: raw bytes, checked here and kept in memory until Finish.
     if (req.method === 'POST' && route === 'api/wallpaper') {

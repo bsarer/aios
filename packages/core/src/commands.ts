@@ -125,7 +125,7 @@ export const HELP_TEXT = [
   '/knowledge update  update it now (it updates by itself every hour)',
   '/knowledge check  look for old commitments, duplicate pages and pages with no links',
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
-  '/wallpaper <picture | off | light | medium | strong>  put a picture behind the chat, take it away, or change how much it is dimmed',
+  '/wallpaper <sample or picture | off | light | medium | strong>  put a picture behind the chat, take it away, or change how much it is dimmed; /wallpaper samples lists the built-in ones',
   '/settings  open the settings window (the gear at the top does the same); /tone, /pin and /wallpaper change tone, tiles and wallpaper here',
   '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',
   '/clear   clear the chat and start a new conversation (the Clear button at the top does the same; /new too)',

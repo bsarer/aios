@@ -111,9 +111,12 @@ export const SetupAnswers = z.strictObject({
   monitor: z.union([z.literal(''), z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/)]).default(''),
   /**
    * The picture behind the chat. `new` uses the picture this window was sent (POST wallpaper);
-   * `remove` takes the current one away; `keep` leaves it and only sets the dim.
+   * `sample` copies the named sample in; `remove` takes the current one away; `keep` leaves it
+   * and only sets the dim.
    */
-  wallpaper: z.strictObject({ change: z.enum(['keep', 'new', 'remove']), dim: WallpaperDim }).default({ change: 'keep', dim: 'medium' }),
+  wallpaper: z
+    .strictObject({ change: z.enum(['keep', 'new', 'remove', 'sample']), dim: WallpaperDim, sample: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).optional() })
+    .default({ change: 'keep', dim: 'medium' }),
 });
 export type SetupAnswers = z.infer<typeof SetupAnswers>;
 

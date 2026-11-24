@@ -108,7 +108,7 @@
   let step = 0, seen = 0, S = null, editing = false;
   const A = { name: '', timezone: '', ai: { provider: 'openrouter', baseUrl: '', model: '', key: '' }, local: null,
     mail: { address: '', password: '', imap: { host: '', port: 993 }, smtp: { host: '', port: 465 } },
-    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '', signal: { enabled: false }, wallpaper: { change: 'keep', dim: 'medium' }, chat: { fade: true } };
+    folders: [], apps: { docs: true, video: true, builder: true, voice: true }, desktop: { autostart: true, hyprland: true, bar: true }, monitor: '', signal: { enabled: false }, wallpaper: { change: 'keep', dim: 'medium' }, chat: { fade: true }, frames: { enabled: false, folder: '~/Pictures', count: 2 } };
   const T = { ai: null, mail: null, mailProvider: undefined, finished: null, addons: null, pick: new Set(), signal: null, signalPoll: null, wallpaper: null, wallpaperPreview: '', wallpaperBusy: false };
 
   function okToLeave() {
@@ -373,6 +373,16 @@
         el('div', { class: 'toggle' },
           el('input', { type: 'checkbox', id: 'chat-fade', checked: A.chat.fade, onchange: (e) => { A.chat.fade = e.target.checked; } }),
           el('div', {}, el('label', { for: 'chat-fade', class: 'flat' }, 'Fade older messages'), el('span', { text: 'As time passes, older messages slowly dim so the chat doesn’t look cluttered. Your latest exchange and anything waiting for you stay clear, and scrolling up brings everything back.' }))),
+        el('div', { class: 'toggle' },
+          el('input', { type: 'checkbox', id: 'frames-on', checked: A.frames.enabled, onchange: (e) => { A.frames.enabled = e.target.checked; render(); } }),
+          el('div', {}, el('label', { for: 'frames-on', class: 'flat' }, 'Photo frames beside the chat'), el('span', { text: 'A few small photos from a folder you pick stand to the left of the chat, like frames on a desk. Each one changes to another photo every 15 minutes. They show on wide screens only.' }))),
+        A.frames.enabled ? [
+          el('label', { for: 'frames-folder', text: 'Photos folder' }),
+          bind(A.frames, 'folder', { id: 'frames-folder', type: 'text', spellcheck: 'false', placeholder: '~/Pictures' }),
+          el('div', { class: 'hint', text: 'Photos in this folder and the folders right inside it. PNG, JPEG, WebP or GIF; hidden files are skipped.' }),
+          el('label', { text: 'How many frames' }),
+          el('div', { class: 'cards' }, [[1, 'One'], [2, 'Two'], [3, 'Three']].map(([n, name]) => el('button', { type: 'button', class: 'card', 'data-frames': String(n), 'aria-pressed': String(A.frames.count === n), onclick: () => { A.frames.count = n; render(); } }, el('b', { text: name })))),
+        ] : null,
       ];
     },
     desktop: () => {
@@ -407,7 +417,8 @@
           el('li', { text: `Mail: ${A.mail.address}.` }),
           el('li', { text: `Folders: ${A.folders.join(', ')}.` }),
           A.signal.enabled && signalNumber() ? el('li', { text: `Signal: ${signalNumber()}.` }) : null,
-          A.wallpaper.change === 'new' ? el('li', { text: 'Wallpaper: your new picture behind the chat.' }) : A.wallpaper.change === 'sample' ? el('li', { text: `Wallpaper: ${((S.wallpaper.samples || []).find((x) => x.id === A.wallpaper.sample) || { label: 'a sample' }).label}.` }) : A.wallpaper.change === 'remove' ? el('li', { text: 'Wallpaper: none.' }) : null),
+          A.wallpaper.change === 'new' ? el('li', { text: 'Wallpaper: your new picture behind the chat.' }) : A.wallpaper.change === 'sample' ? el('li', { text: `Wallpaper: ${((S.wallpaper.samples || []).find((x) => x.id === A.wallpaper.sample) || { label: 'a sample' }).label}.` }) : A.wallpaper.change === 'remove' ? el('li', { text: 'Wallpaper: none.' }) : null,
+          A.frames.enabled ? el('li', { text: `Photo frames: ${A.frames.count} from ${A.frames.folder.trim() || '~/Pictures'}.` }) : null),
         T.finished && !T.finished.ok ? result(T.finished) : null,
       ];
     },
@@ -470,7 +481,7 @@
     A.folders = e ? [...e.folders] : offered.filter((f) => ['~/Documents', '~/Downloads', '~/Pictures', '~/Music', '~/Videos'].includes(f));
     if (e) for (const f of e.folders) if (!offered.includes(f)) S.folders.push({ path: f });
     if (!e) A.apps.voice = !!S.apps.speech;
-    if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; A.signal.enabled = !!(e.signal && e.signal.enabled); A.chat.fade = e.fade !== false; }
+    if (e) { A.apps = { ...e.apps }; A.desktop.autostart = e.autostart; A.monitor = e.monitor; A.signal.enabled = !!(e.signal && e.signal.enabled); A.chat.fade = e.fade !== false; if (e.frames) A.frames = { ...e.frames }; }
     if (!A.monitor && S.screens.length > 1) A.monitor = (S.screens.find((s) => s.focused) || S.screens[0]).name;
     if (S.wallpaper && S.wallpaper.current) A.wallpaper.dim = S.wallpaper.current.dim;
     if (e) { seen = STEPS.length - 1; T.mailProvider = undefined; }

@@ -180,6 +180,64 @@ body {
 }
 
 /*
+ * Photo frames (Settings, components/PhotoFrames.tsx): small photos standing in the space left of
+ * the chat, centred in it, a little tilted like frames on a desk. The frame takes the theme's
+ * text colour, so it is a pale frame on a dark theme and a dark one on a light theme. Only on a
+ * screen wide enough to have room beside the chat, and not while the inbox has moved it aside.
+ */
+.photo-frames {
+  --gutter: calc((100vw - 760px) / 2);
+  --w: min(172px, calc(var(--gutter) - 72px), calc(((100vh - 200px) / var(--n) - 30px) * 0.78));
+  position: fixed;
+  top: 50%;
+  left: calc((var(--gutter) - var(--w)) / 2);
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.4s ease;
+}
+.photo-frames[data-hidden] { opacity: 0; }
+@media (max-width: 1199px) { .photo-frames { display: none; } }
+.photo-frame {
+  margin: 0;
+  width: var(--w);
+  padding: 7px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  box-shadow:
+    0 1px 2px color-mix(in srgb, black 30%, transparent),
+    0 14px 28px -12px color-mix(in srgb, black 55%, transparent);
+  transform: rotate(var(--tilt));
+  opacity: 0.94;
+}
+.photo-frame .photo {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--fg) 20%, var(--bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, black 18%, transparent);
+}
+.photo-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+@keyframes photo-in { from { opacity: 0; } to { opacity: 1; } }
+.photo-frame .photo-in { animation: photo-in 2.4s ease-in-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .photo-frame .photo-in { animation: none; }
+  .photo-frames { transition: none; }
+}
+
+/*
  * MU2: the now-playing line above the message box. Quiet like the faded messages: muted text at
  * low strength, a little more on hover; paused music is quieter still. Slides in gently.
  */

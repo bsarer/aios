@@ -93,3 +93,4 @@ export * from './knowledge/wiki.js';
 export { type Evidence as KnowledgeEvidence, type Fact as KnowledgeFact, type FactState, KnowledgeFacts } from './knowledge/facts.js';
 export * from './knowledge/evidence.js';
 export * from './wallpaper.js';
+export * from './frames.js';

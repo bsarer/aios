@@ -26,6 +26,7 @@ import { type Page, chromium } from 'playwright-core';
 import { utcToLocal, zonedToUtc } from '@aios/core';
 import { FAKE_CLIENT_ID, calendarFixtures, startFakeGoogleCalendar } from '../../fixtures/calendar.js';
 import { makeDocFixture } from '../../fixtures/documents.js';
+import { FRAME_ART } from '../../fixtures/frames.js';
 import { WALLPAPER_ART } from '../../fixtures/wallpaper.js';
 import { type FixtureMail, john, makePdf } from '../../fixtures/mail.js';
 import { composeFixture } from './compose.js';
@@ -562,7 +563,9 @@ async function main(): Promise<void> {
       // T2: the brief is due from midnight here, so it comes at boot whatever time the test runs.
       `[brief]\nafter = "00:00"\n` +
       `[models.speech]\nbaseUrl = "http://127.0.0.1:${mockPort}"\nmaxSeconds = 10\n` +
-      `[ui]\nport = ${port}\nkiosk = false\n`,
+      `[ui]\nport = ${port}\nkiosk = false\n` +
+      // Photo frames beside the chat, from photos drawn below before the page first connects.
+      `[frames]\nenabled = true\nfolder = "~/Pictures/Frames"\ncount = 2\n`,
   );
 
   let coreLog = '';
@@ -608,6 +611,13 @@ async function main(): Promise<void> {
   writeFileSync(fakeMic, encodeWav(Float32Array.from({ length: 4 * 48_000 }, (_, i) => (i < 3 * 48_000 ? 0.3 * Math.sin((2 * Math.PI * 220 * i) / 48_000) : 0)), 48_000));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'chromium', args: ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${fakeMic}`] });
   try {
+    mkdirSync(join(tmp, 'Pictures', 'Frames'), { recursive: true });
+    const draw = await browser.newPage({ viewport: { width: 480, height: 600 } });
+    for (const a of FRAME_ART) {
+      await draw.setContent(a.html);
+      writeFileSync(join(tmp, 'Pictures', 'Frames', a.name), await draw.screenshot({ type: 'png' }));
+    }
+    await draw.close();
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.context().grantPermissions(['microphone'], { origin: `http://127.0.0.1:${port}` });
     // Newer Chromium returns a Promise from scrollIntoView(); mimic it so effects that leak the return value fail here.
@@ -632,6 +642,19 @@ async function main(): Promise<void> {
     check('agent idle at start', (await agentState.innerText()).toLowerCase().includes('idle'));
     const costBefore = await page.getByTestId('cost').innerText();
     await shot(page, '1-boot');
+
+    // Photo frames: two small photos left of the chat, each loaded from /frame by its number only.
+    const frameImgs = page.locator('[data-testid="photo-frame"] img');
+    check('two photo frames stand beside the chat', await waitFor(async () => (await page.getByTestId('photo-frame').count()) === 2));
+    const frameSrc = await frameImgs.first().getAttribute('src');
+    check('a frame names only its number and the time', /^\/frame\/0\?t=\d+&v=[0-9a-f]{12}$/.test(frameSrc ?? ''), frameSrc ?? '');
+    check('the frames load their photos', await waitFor(async () => (await frameImgs.evaluateAll((els) => els.every((e) => (e as unknown as { complete: boolean; naturalWidth: number }).complete && (e as unknown as { naturalWidth: number }).naturalWidth > 0))) === true));
+    const frameBox = await page.getByTestId('photo-frame').first().boundingBox();
+    const chatBox = await page.locator('[data-testid="chat"] > div').boundingBox();
+    check('the frames stay out of the conversation', frameBox !== null && chatBox !== null && frameBox.x + frameBox.width < chatBox.x, JSON.stringify({ frameBox, chatBox }));
+    // Each photo fades in over a couple of seconds.
+    if (shots) await sleep(3000);
+    await shot(page, 'photo-frames');
 
     // 2. Streaming chat.
     await input.fill('hello');

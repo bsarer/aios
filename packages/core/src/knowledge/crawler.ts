@@ -65,6 +65,7 @@ import { type FiledFact, type KnowledgeWiki, type PageFact, checkText, pageId } 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
+const YEAR = 365.25 * DAY;
 const MAX_ATTEMPTS = 3;
 const MAX_HOURLY_MAILS = 100;
 const MAX_HOURLY_FILES = 50;
@@ -214,9 +215,15 @@ export class KnowledgeCrawler {
     return !this.windowListed() || this.ledger.backfillOpen();
   }
 
-  /** K3: where older mail stops: `olderMailMonths` before the window. */
-  private olderFrom(): number {
-    return this.num('windowFrom') - this.o.config.olderMailMonths * CHUNK;
+  /** `mailYears`: no mail before this is listed or read (0 when there is no limit). */
+  private mailCutoff(now: number): number {
+    const years = this.o.config.mailYears;
+    return years > 0 ? now - Math.round(years * YEAR) : 0;
+  }
+
+  /** K3: where older mail stops: `olderMailMonths` before the window, and never before `mailYears`. */
+  private olderFrom(now = this.now()): number {
+    return Math.max(this.num('windowFrom') - this.o.config.olderMailMonths * CHUNK, this.mailCutoff(now));
   }
 
   private olderOn(): boolean {
@@ -236,7 +243,7 @@ export class KnowledgeCrawler {
   private olderDue(now: number): boolean {
     const m = this.olderModel(now);
     if (!m || this.overBudget(m, now) || !this.windowListed() || this.ledger.backfillOpen()) return false;
-    return this.ledger.pendingCount('older') > 0 || this.num('cursor') > this.olderFrom();
+    return this.ledger.pendingCount('older') > 0 || this.num('cursor') > this.olderFrom(now);
   }
 
   // ── K3: spending ──
@@ -269,9 +276,9 @@ export class KnowledgeCrawler {
     const listingOlder = this.olderOn() && this.windowListed() && cursor > 0;
     return {
       ...this.ledger.progress(),
-      windowDays: c.backfillDays,
+      windowDays: c.mailYears > 0 ? Math.min(c.backfillDays, Math.round(c.mailYears * 365.25)) : c.backfillDays,
       olderMail: c.olderMail,
-      olderBackTo: listingOlder ? this.day(Math.max(cursor, this.olderFrom())) : null,
+      olderBackTo: listingOlder ? this.day(Math.max(cursor, this.olderFrom(now))) : null,
       skipped: this.num('skipped'),
       spentToday: this.spentToday(now),
       spentTotal: this.num('spentTotal'),
@@ -327,6 +334,10 @@ export class KnowledgeCrawler {
   private async listMail(since: number, before: number | undefined, limit: number, phase: Phase, now: number): Promise<{ added: number; fresh: ListedMail[] } | null> {
     if (!this.o.mail || !this.on('mail') || limit <= 0) return { added: 0, fresh: [] };
     const c = this.o.config;
+    // `mailYears`: nothing before the cutoff, not even listed.
+    const cutoff = this.mailCutoff(now);
+    since = Math.max(since, cutoff);
+    if (before !== undefined && before <= since) return { added: 0, fresh: [] };
     let found: ListedMail[];
     try {
       found = await this.o.mail.list({ since: new Date(since), before: before === undefined ? undefined : new Date(before), limit, skipCategories: c.skipCategories });
@@ -334,6 +345,8 @@ export class KnowledgeCrawler {
       this.o.audit.append({ kind: 'knowledge', event: 'mail_error', error: (err as Error).message.slice(0, 200) });
       return null;
     }
+    // IMAP's SINCE counts whole days: drop what is still older than the cutoff.
+    if (cutoff) found = found.filter((m) => !m.date || m.date.getTime() >= cutoff);
     const key = (m: ListedMail) => `mail:${m.messageId ?? m.id}`;
     const items: { key: string; kind: ItemKind; ref: string; at: number; phase: Phase; priority: number }[] = [];
     const fresh: ListedMail[] = [];
@@ -390,7 +403,7 @@ export class KnowledgeCrawler {
     // As far back as the reading has listed; nothing yet means nothing to go through.
     const windowFrom = this.num('windowFrom');
     if (!windowFrom) return 0;
-    const stop = Math.min(windowFrom, this.num('cursor') || windowFrom);
+    const stop = Math.max(Math.min(windowFrom, this.num('cursor') || windowFrom), this.mailCutoff(now));
     if (!this.num('peopleStart')) {
       this.setting.set('peopleStart', String(now));
       this.setting.set('peopleCursor', String(now));
@@ -407,7 +420,9 @@ export class KnowledgeCrawler {
         this.o.audit.append({ kind: 'knowledge', event: 'mail_error', error: (err as Error).message.slice(0, 200) });
         break;
       }
+      const cutoff = this.mailCutoff(now);
       for (const m of found) {
+        if (cutoff && m.date && m.date.getTime() < cutoff) continue;
         const sent = this.mailKind(m) === 'sent';
         if (stage === 'sent' && sent) {
           this.noteHeaders(m, true, now);
@@ -451,6 +466,12 @@ export class KnowledgeCrawler {
   private async discover(now: number): Promise<{ found: number; freshMail: ListedMail[] }> {
     const c = this.o.config;
     this.checkAccount(now);
+    // `mailYears`: waiting mail that has fallen out of the window is not read (what was read stays).
+    const cutoff = this.mailCutoff(now);
+    if (cutoff) {
+      const dropped = this.ledger.dropMailBefore(cutoff, now);
+      if (dropped) this.o.audit.append({ kind: 'knowledge', event: 'mail_too_old', dropped });
+    }
     let found = 0;
     const freshMail: ListedMail[] = [];
     const first = !this.setting.get('backfillStarted');
@@ -495,7 +516,7 @@ export class KnowledgeCrawler {
     }
     // K3: older mail, a month at a time, while little of it waits.
     if (this.olderOn() && this.windowListed() && !this.ledger.backfillOpen()) {
-      const stop = this.olderFrom();
+      const stop = this.olderFrom(now);
       for (let n = 0; n < MAX_CHUNKS_PER_RUN && this.num('cursor') > stop && !queueFull('older'); n++) {
         const cursor = this.num('cursor');
         const from = Math.max(cursor - CHUNK, stop);

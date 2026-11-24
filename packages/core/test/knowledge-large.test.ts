@@ -38,6 +38,7 @@ const CONFIG: KnowledgeConfig = {
   keepDays: 3,
   olderMail: 'local-overnight',
   olderMailMonths: 6,
+  mailYears: 2,
   overnight: { start: '01:00', end: '07:00' },
   skipCategories: ['promotions', 'social', 'updates', 'forums'],
   skipAutomated: true,
@@ -290,6 +291,74 @@ describe('listing a big mailbox', () => {
     for (let i = 0; i < 4; i++) await after.crawler.run();
     expect(after.asked.length).toBeGreaterThan(150);
     expect(after.asked.some((a) => read.has(a.id))).toBe(false);
+  });
+});
+
+describe('mailYears: how far back mail goes', () => {
+  // One email a week for five years.
+  const years = (n = 5): Mail[] => Array.from({ length: n * 52 }, (_, i) => ({ id: `INBOX:${i + 1}`, from: `p${i % 50}@x.example`, at: START - (i + 0.5) * 7 * DAY }));
+  const YEAR = 365.25 * DAY;
+  const drain = async (r: ReturnType<typeof rig>) => {
+    r.setNow('2026-11-11T02:00');
+    for (let i = 0; i < 30; i++) await r.crawler.runIfDue();
+  };
+
+  it('never lists or reads mail older than 2 years, even with older mail set to go 5 years further', async () => {
+    const r = rig(years(), { config: { perRun: 500, olderMail: 'cloud', olderMailMonths: 60 } });
+    await drain(r);
+    const cutoff = local('2026-11-11T02:00') - 2 * YEAR;
+    expect(r.box.lists.length).toBeGreaterThan(0);
+    expect(r.box.lists.every((l) => l.since >= START - 2 * YEAR - DAY)).toBe(true);
+    const read = r.asked.map((a) => r.box.mails.find((m) => m.id === a.id)!);
+    expect(read.length).toBeGreaterThan(95);
+    expect(read.every((m) => m.at >= START - 2 * YEAR)).toBe(true);
+    expect(r.box.reads.every((id) => r.box.mails.find((m) => m.id === id)!.at >= cutoff - DAY)).toBe(true);
+    // Everything in the last 2 years is read (about 104 weeks).
+    expect(r.crawler.progress().mail.done).toBeLessThanOrEqual(105);
+    expect(r.crawler.progress().older.done).toBe(r.crawler.progress().older.total);
+  });
+
+  it('moves forward with time: waiting mail that falls out of the window is dropped, read mail stays', async () => {
+    const r = rig(years(), { config: { perRun: 500, olderMail: 'local-overnight', olderMailMonths: 60 } });
+    // Daytime: the first pass is read, older mail is listed but waits for the night.
+    await r.crawler.run();
+    await r.crawler.run();
+    r.setNow('2026-11-10T12:00');
+    await r.crawler.runIfDue();
+    const waiting = r.crawler.progress().older.total;
+    expect(waiting).toBeGreaterThan(20);
+    const readBefore = r.crawler.progress().mail.done;
+    // Half a year later, at night: the oldest half year of what waits is never read.
+    r.setNow('2027-05-11T02:00');
+    for (let i = 0; i < 30; i++) await r.crawler.runIfDue();
+    const cutoff = local('2027-05-11T02:00') - 2 * YEAR;
+    const older = r.asked.map((a) => r.box.mails.find((m) => m.id === a.id)!);
+    expect(older.every((m) => m.at >= cutoff)).toBe(true);
+    expect(r.crawler.progress().mail.done).toBeGreaterThanOrEqual(readBefore);
+    expect(r.crawler.progress().mail.done).toBeLessThan(104);
+  });
+
+  it('a mailbox already listed further back keeps what it read and reads nothing older than 2 years', async () => {
+    const store = new Store(':memory:');
+    const before = rig(years(), { store, config: { perRun: 500, olderMail: 'cloud', olderMailMonths: 60, mailYears: 0 }, older: true });
+    // Listed and partly read with no limit: older mail waits beyond 2 years.
+    await before.crawler.run();
+    await before.crawler.run();
+    await before.crawler.run();
+    const readOld = before.asked.filter((a) => before.box.mails.find((m) => m.id === a.id)!.at < START - 2 * YEAR).length;
+    const after = rig(years(), { store, config: { perRun: 500, olderMail: 'cloud', olderMailMonths: 60 } });
+    await drain(after);
+    const cutoff = local('2026-11-11T02:00') - 2 * YEAR;
+    expect(after.asked.every((a) => after.box.mails.find((m) => m.id === a.id)!.at >= cutoff)).toBe(true);
+    expect(store.getSetting('knowledge.cursor')).toBeTruthy();
+    // What was read before stays read.
+    expect(after.crawler.progress().mail.done).toBeGreaterThanOrEqual(readOld);
+  });
+
+  it('0 means no limit', async () => {
+    const r = rig(years(), { config: { perRun: 500, olderMail: 'cloud', olderMailMonths: 60, mailYears: 0 } });
+    await drain(r);
+    expect(r.asked.some((a) => r.box.mails.find((m) => m.id === a.id)!.at < START - 3 * YEAR)).toBe(true);
   });
 });
 

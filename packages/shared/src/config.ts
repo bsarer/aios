@@ -442,6 +442,12 @@ export const KnowledgeConfig = z.strictObject({
   olderMail: z.enum(['off', 'local-overnight', 'cloud']).default('local-overnight'),
   /** K3: how far back older mail goes, in months before the first pass's window. */
   olderMailMonths: z.int().min(0).max(240).default(60),
+  /**
+   * No mail older than this many years is listed or read, by the first pass, older mail or the
+   * profiles' look at headers (about 2 years by default). It moves forward with time: mail that
+   * falls out of it and is still waiting is dropped, and what was already read stays. 0: no limit.
+   */
+  mailYears: z.int().min(0).max(20).default(2),
   /** K3: the hours older mail is read in when olderMail is "local-overnight". */
   overnight: z.strictObject({ start: HHMM, end: HHMM }).default({ start: '01:00', end: '07:00' }),
   /** K3: Gmail tabs never read (Gmail only; other servers have no tabs). */

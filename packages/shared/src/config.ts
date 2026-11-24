@@ -328,6 +328,8 @@ export const MusicConfig = z.strictObject({
     .max(8)
     .refine((a) => a.filter((p) => p === '%any').length <= 1, '%any at most once')
     .default(['spotify', '%any']),
+  /** MU2: a quiet line above the message box naming the song that is playing. */
+  nowPlaying: z.boolean().default(true),
 });
 export type MusicConfig = z.infer<typeof MusicConfig>;
 

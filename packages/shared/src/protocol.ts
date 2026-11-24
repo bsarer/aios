@@ -506,6 +506,22 @@ export type WallpaperDim = z.infer<typeof WallpaperDim>;
 export const Wallpaper = z.strictObject({ version: z.string().regex(/^[0-9a-f]{12}$/), dim: WallpaperDim }).nullable();
 export type Wallpaper = z.infer<typeof Wallpaper>;
 
+/**
+ * The song playing now (MU2), for the quiet line above the message box. The title and artist are
+ * the song publisher's words: core strips control and direction characters and caps them, and the
+ * page shows them as plain text only. They are never a chat item, so they never reach a model.
+ * `app` is written by code from the player's name. null: nothing is playing (or it is off).
+ */
+export const NowPlaying = z
+  .strictObject({
+    playing: z.boolean(),
+    title: z.string().max(120),
+    artist: z.string().max(120),
+    app: z.string().max(40),
+  })
+  .nullable();
+export type NowPlaying = z.infer<typeof NowPlaying>;
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 export const ClientMessage = z.discriminatedUnion('type', [
@@ -581,7 +597,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional(), wallpaper: Wallpaper.optional() }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional(), wallpaper: Wallpaper.optional(), nowPlaying: NowPlaying.optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
@@ -589,6 +605,7 @@ export const ServerEvent = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
   z.strictObject({ type: z.literal('widgets'), widgets: Widgets }),
   z.strictObject({ type: z.literal('wallpaper'), wallpaper: Wallpaper }),
+  z.strictObject({ type: z.literal('now_playing'), nowPlaying: NowPlaying }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
@@ -607,14 +624,16 @@ export interface ChatState {
   signals: SignalRow[];
   /** The picture behind the chat, or null. */
   wallpaper: Wallpaper;
+  /** MU2: the song playing now, or null. */
+  nowPlaying: NowPlaying;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [], wallpaper: null };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [], wallpaper: null, nowPlaying: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [], wallpaper: ev.wallpaper ?? null };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [], wallpaper: ev.wallpaper ?? null, nowPlaying: ev.nowPlaying ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':
@@ -632,5 +651,7 @@ export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
       return { ...state, widgets: ev.widgets };
     case 'wallpaper':
       return { ...state, wallpaper: ev.wallpaper };
+    case 'now_playing':
+      return { ...state, nowPlaying: ev.nowPlaying };
   }
 }

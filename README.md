@@ -235,7 +235,9 @@ Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `s
 
 "Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which the Astra package installs (from source: `sudo pacman -S playerctl`; `astra doctor` says when it is missing). `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
 
-Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
+While a song plays, a quiet line above the message box names it (title · artist, with "Paused" in front when it is paused) and disappears when the music stops. It is display only: the song's words go to the screen as plain text and never to the AI.
+
+Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open), `nowPlaying` (default true; false hides the line).
 
 ## Signal
 

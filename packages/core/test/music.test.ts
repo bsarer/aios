@@ -61,7 +61,7 @@ describe('playerctl arguments (MU1)', () => {
   });
 
   it('the config defaults to Spotify, then any player, and refuses anything that is not a player name', () => {
-    expect(MusicConfig.parse({})).toEqual({ enabled: true, players: ['spotify', '%any'] });
+    expect(MusicConfig.parse({})).toEqual({ enabled: true, players: ['spotify', '%any'], nowPlaying: true });
     expect(MusicConfig.safeParse({ players: ['--all-players'] }).success).toBe(false);
     expect(MusicConfig.safeParse({ players: ['%any', '%any'] }).success).toBe(false);
     expect(MusicConfig.safeParse({ players: [] }).success).toBe(false);

@@ -30,6 +30,7 @@ import { type FeedbackLog, feedbackListText } from './feedback.js';
 import { isWarm, type Personality, TONE_LINES, TONE_NAMES, toneByName } from './personality.js';
 import type { UpdateCheck } from './update.js';
 import type { MusicAction } from './music/player.js';
+import type { NowPlayingWatch } from './music/now-playing.js';
 import type { SignalActions } from './signal/actions.js';
 import { pickWeb } from './web/tools.js';
 import type { Wallpaper } from './wallpaper.js';
@@ -100,6 +101,8 @@ export interface ShellOptions {
   video?: { pick: (text: string) => Promise<{ args: { path: string } | { url: string } } | { error: string }> };
   /** MU1: /music says what is playing, in a line written by code; its changes go through the registry's music_control. */
   music?: { now: () => Promise<string> };
+  /** MU2: the quiet now-playing line above the message box (plain text on the screen only, never a chat item). */
+  nowPlaying?: Pick<NowPlayingWatch, 'current' | 'check'>;
   /** SG1: Signal message cards' Send and Discard, and /signal's status line. Without it, signal messages are ignored and /signal says Signal is off. */
   signal?: { actions: Pick<SignalActions, 'send' | 'discard' | 'edit'>; status: () => string; recent?: () => SignalRow[] };
   /** K1: /knowledge shows the knowledge base and /knowledge update updates it. Without it, /knowledge says it is off. */
@@ -185,6 +188,7 @@ export class Shell {
     this.listeners.add(l);
     l(this.hello());
     void this.o.widgets?.refresh();
+    void this.o.nowPlaying?.check();
     // T2: a chat window opening counts as AI OS being in use.
     this.briefIfDue();
     return () => this.listeners.delete(l);
@@ -202,7 +206,13 @@ export class Shell {
       ...(clearedAt === null ? {} : { clearedAt }),
       ...(this.o.signal?.recent ? { signals: this.o.signal.recent() } : {}),
       ...(this.o.wallpaper ? { wallpaper: this.o.wallpaper.current() } : {}),
+      ...(this.o.nowPlaying ? { nowPlaying: this.o.nowPlaying.current() } : {}),
     };
+  }
+
+  /** Whether a chat screen is open. */
+  get watched(): boolean {
+    return this.listeners.size > 0;
   }
 
   /**

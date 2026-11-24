@@ -54,6 +54,7 @@ import { createPageFetcher } from './web/read.js';
 import { webTools } from './web/tools.js';
 import { createMusicPlayer, describeNowPlaying } from './music/player.js';
 import { musicTools } from './music/tools.js';
+import { NowPlayingWatch } from './music/now-playing.js';
 import { SignalActions } from './signal/actions.js';
 import { SignalInbox } from './signal/inbox.js';
 import { SignalService } from './signal/service.js';
@@ -301,6 +302,11 @@ async function main(): Promise<void> {
   // MU1: Spotify (or any MPRIS player) through playerctl. music_control is device tier, so it shares open_app's confirm card.
   const musicPlayer = config.music.enabled ? createMusicPlayer(runCommand, config.music.players) : undefined;
   if (musicPlayer) apps.push(...musicTools({ player: musicPlayer }));
+  // MU2: the quiet now-playing line on the chat screen; asked only while a chat screen is open.
+  const nowPlaying =
+    musicPlayer && config.music.nowPlaying
+      ? new NowPlayingWatch({ player: musicPlayer, broadcast: (line) => shell?.broadcast({ type: 'now_playing', nowPlaying: line }), watched: () => shell?.watched ?? false })
+      : undefined;
   // SG1: Signal through signal-cli, once setup has linked the phone. Sending is a card and a Send click.
   let signal: { service: SignalService; actions: SignalActions } | undefined;
   let signalInbox: SignalInbox | undefined;
@@ -670,6 +676,7 @@ async function main(): Promise<void> {
       : {}),
     ...(config.video.enabled ? { video: { pick: (text: string) => pickVideo(fileRoots, text) } } : {}),
     ...(signal ? { signal: { actions: signal.actions, status: () => signal.service.status(), recent: () => signal.service.recent() } } : {}),
+    ...(nowPlaying ? { nowPlaying } : {}),
     ...(musicPlayer ? { music: { now: async () => describeNowPlaying(await musicPlayer.nowPlaying().catch(() => null)) } } : {}),
     ...(monitor ? { resources: () => monitor.snapshot() } : {}),
     doctor: async () => formatChecks(await runDoctor(realDoctorProbes(kioskPaths()))),
@@ -773,6 +780,7 @@ async function main(): Promise<void> {
   monitor?.start();
   todos?.start();
   widgets?.start();
+  nowPlaying?.start();
   windowTracker?.start();
   const reviewTick = () => void review?.runIfDue().catch((err: unknown) => audit.append({ kind: 'assistant', event: 'review_error', error: (err as Error).message }));
   setTimeout(reviewTick, 2 * 60_000).unref();
@@ -788,6 +796,7 @@ async function main(): Promise<void> {
     monitor?.stop();
     todos?.stop();
     widgets?.stop();
+    nowPlaying?.stop();
     windowTracker?.stop();
     signal?.service.stop();
     chatWindow.stop();

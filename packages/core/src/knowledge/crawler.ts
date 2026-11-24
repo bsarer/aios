@@ -61,6 +61,7 @@ import { type Item, type ItemKind, type ItemSource, KnowledgeLedger, PRIORITY, t
 import { skipReason } from './mailfilter.js';
 import type { KnowledgeProfiles } from './profile.js';
 import { type FiledFact, type KnowledgeWiki, type PageFact, checkText, pageId } from './wiki.js';
+import { ROUTINE_TURN_PREFIX } from '../routines/routines.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -611,7 +612,8 @@ export class KnowledgeCrawler {
       // K5: only what the user typed. The assistant's replies repeat the knowledge base's own notes.
       const turns = this.o.store
         .chatTurnsBetween(from, to)
-        .filter((t) => t.role === 'user')
+        // A routine's saved instructions are not something the user said that day.
+        .filter((t) => t.role === 'user' && !t.content.startsWith(ROUTINE_TURN_PREFIX))
         .slice(-60);
       if (!turns.length) return null;
       return {

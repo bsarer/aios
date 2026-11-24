@@ -21,6 +21,12 @@ export interface ToolContext {
   untrustedSources?: ReadonlySet<UntrustedSource>;
   /** The user's own message that started this turn. */
   userText: string;
+  /**
+   * Routines: true for a routine that started on its schedule, while the user may be away.
+   * Nothing changes this computer then: a device change becomes a confirm card where it has
+   * one and is refused otherwise; write tier only ever proposes a card anyway.
+   */
+  unattended?: boolean;
 }
 
 /** A handler may add fields to its audit entry, e.g. a device change's old and new value. */
@@ -92,6 +98,9 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal, why: () => strin
   });
 }
 
+const UNATTENDED_REFUSAL =
+  "Error: this routine started on its schedule while the user may be away, so it can't change this now. Suggest it in your reply instead; the user can ask for it when they're back.";
+
 const UNTRUSTED_REFUSAL =
   'Error: this cannot run while text from an email or another outside source is in the conversation. Ask the user to request it in a new message of their own.';
 
@@ -120,12 +129,14 @@ export class ToolRegistry {
    * While email text is in context, write-tier tools are left out, so an email cannot even
    * ask for one, and so are device-tier tools unless they can turn into a confirm card.
    */
-  specs(opts: { untrustedInContext?: boolean; untrustedSources?: ReadonlySet<UntrustedSource> } = {}): ToolSpec[] {
+  specs(opts: { untrustedInContext?: boolean; untrustedSources?: ReadonlySet<UntrustedSource>; unattended?: boolean } = {}): ToolSpec[] {
     const tools = [...this.tools.values()];
     const docsOnly = onlyDocuments({ untrustedInContext: !!opts.untrustedInContext, untrustedSources: opts.untrustedSources });
-    const offered = opts.untrustedInContext
+    let offered = opts.untrustedInContext
       ? tools.filter((t) => (t.def.tier === 'write' ? docsOnly && t.allowWithDocuments && !!t.propose : t.def.tier !== 'device' || t.confirmWhenUntrusted))
       : tools;
+    // A scheduled routine is offered only the device changes that can become a card.
+    if (opts.unattended) offered = offered.filter((t) => t.def.tier !== 'device' || t.confirmWhenUntrusted);
     return toolSpecs(offered.map((t) => t.def));
   }
 
@@ -169,8 +180,13 @@ export class ToolRegistry {
     const tier = tool.def.tier;
     // Changes to this computer never run from a context an email is in. A device change may
     // become a card the user confirms (below); anything else is refused.
-    const docRun = ctx.untrustedInContext && tier === 'device' && !!tool.runWithDocuments?.(parsed.data) && onlyDocuments(ctx);
-    const asCard = ctx.untrustedInContext && tier === 'device' && !docRun && !!tool.confirmWhenUntrusted;
+    const away = ctx.unattended === true;
+    const docRun = !away && ctx.untrustedInContext && tier === 'device' && !!tool.runWithDocuments?.(parsed.data) && onlyDocuments(ctx);
+    const asCard = (ctx.untrustedInContext || away) && tier === 'device' && !docRun && !!tool.confirmWhenUntrusted;
+    if (away && tier === 'device' && !asCard) {
+      log({ decision: 'denied', reason: 'scheduled routine', unattended: true, untrustedInContext: ctx.untrustedInContext, args });
+      return { ok: false, content: UNATTENDED_REFUSAL, label };
+    }
     // D2: an edit card may still be shown while only document text is in view.
     const docCard = tier === 'write' && !!tool.propose && !!tool.allowWithDocuments && onlyDocuments(ctx);
     if (ctx.untrustedInContext && !asCard && !docCard && !docRun && (tier === 'device' || (tier === 'write' && tool.propose))) {
@@ -210,6 +226,7 @@ export class ToolRegistry {
       log({
         decision: proposing ? 'proposed' : 'allowed',
         untrustedInContext: ctx.untrustedInContext,
+        ...(away ? { unattended: true } : {}),
         args,
         ok: true,
         resultBytes: Buffer.byteLength(content),

@@ -114,9 +114,11 @@ export function systemTools(o: { controls: SystemControls; actions: SystemAction
   });
   for (const t of tools) {
     if (t.def.tier !== 'device') continue;
-    t.confirmWhenUntrusted = async (args) => {
+    t.confirmWhenUntrusted = async (args, ctx) => {
       o.actions.propose({ action: 'device', tool: t.def.name, args, summary: describeChange(t.def.name, args as Record<string, unknown>) });
-      return 'Because an email or other outside text is in view, this was not done: a card now asks the user to confirm it. Tell them in one line; do not say it is done.';
+      return ctx.unattended && !ctx.untrustedInContext
+        ? 'Because this routine started on its schedule, this was not done: a card now asks the user to confirm it. Tell them in one line; do not say it is done.'
+        : 'Because an email or other outside text is in view, this was not done: a card now asks the user to confirm it. Tell them in one line; do not say it is done.';
     };
   }
   return tools;

@@ -263,6 +263,8 @@ export const TodosConfig = z.strictObject({
   enabled: z.boolean().default(true),
   /** How much later a reminder's Snooze button reminds again. */
   snoozeMinutes: z.int().min(5).max(24 * 60).default(60),
+  /** A short chime when a reminder fires (never in quiet hours or while paused). */
+  sound: z.boolean().default(true),
 });
 export type TodosConfig = z.infer<typeof TodosConfig>;
 

@@ -201,7 +201,7 @@ Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`
   - **Safety:** only your own messages can add, move or tick off items. While an email, invite or document is being read, the chat can't touch the list at all.
 - **Morning brief (T2):** the first time you use AI OS each day after 06:00 (outside quiet hours), one card lists urgent mail since the last brief, today's events and free time, and what is due today or overdue. `/brief` shows it any time. With the local model (below) it writes two friendly lines on top, without a cloud call; without it, the lines are written by code. It only shows things; nothing on it changes anything.
 
-Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
+Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60), `sound` (default true: a short chime when a reminder fires, never in quiet hours or while paused; `false` turns it off). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
 
 Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"friendly"` default, `"playful"`, `"neutral"`, `"concise"`). Type `/tone` in the chat to see it and `/tone playful` to change it; the change applies to the next reply and is kept.
 

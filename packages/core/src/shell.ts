@@ -32,6 +32,7 @@ import type { UpdateCheck } from './update.js';
 import type { MusicAction } from './music/player.js';
 import type { SignalActions } from './signal/actions.js';
 import { pickWeb } from './web/tools.js';
+import type { FocusSounds } from './focus.js';
 import type { Wallpaper } from './wallpaper.js';
 
 /** MU1: /music's words, mapped by code to music_control's actions. */
@@ -132,6 +133,8 @@ export interface ShellOptions {
   personality?: Pick<Personality, 'voice' | 'tone' | 'setTone'>;
   /** The picture behind the chat and /wallpaper. Without it, /wallpaper says it is off. */
   wallpaper?: Pick<Wallpaper, 'current' | 'setFromPath' | 'setDim' | 'remove' | 'samples' | 'sampleByName' | 'useSample'>;
+  /** Focus sounds: /focus and the Focus tile. Without it, /focus says they are off. */
+  focus?: Pick<FocusSounds, 'current' | 'set' | 'command'>;
   /** The home folder /wallpaper's paths start from. Default: the user's. */
   home?: string;
   /** The Settings gear and /settings: opens the setup window. Without it, they say to run `astra settings`. */
@@ -202,6 +205,7 @@ export class Shell {
       ...(clearedAt === null ? {} : { clearedAt }),
       ...(this.o.signal?.recent ? { signals: this.o.signal.recent() } : {}),
       ...(this.o.wallpaper ? { wallpaper: this.o.wallpaper.current() } : {}),
+      ...(this.o.focus ? { focus: this.o.focus.current() } : {}),
     };
   }
 
@@ -318,7 +322,13 @@ export class Shell {
     }
     if (msg.type === 'widget_open') {
       this.o.audit.append({ kind: 'widgets', event: 'open', widget: msg.widget });
-      return this.command({ name: msg.widget });
+      return this.command(msg.widget === 'focus' ? { name: 'focus', text: '' } : { name: msg.widget });
+    }
+    // Focus sounds: the user's own click on the Focus tile. No model; works while paused, like /focus. There is no tool for it.
+    if (msg.type === 'focus_set') {
+      if (!this.o.focus) return;
+      this.o.focus.set({ ...(msg.sound === undefined ? {} : { sound: msg.sound }), ...(msg.volume === undefined ? {} : { volume: msg.volume }) }, 'click');
+      return;
     }
     // The user's own click on a build they started, so it works while paused.
     if (msg.type === 'app_open') return this.o.openBuiltApp?.(msg.actionId);
@@ -811,6 +821,8 @@ export class Shell {
       }
       case 'wallpaper':
         return this.wallpaperCommand(cmd.text, say);
+      case 'focus':
+        return say(this.o.focus ? this.o.focus.command(cmd.text) : 'Focus sounds are off here.');
       case 'settings':
         return this.openSettings('command');
       case 'clear':

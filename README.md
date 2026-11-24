@@ -237,6 +237,10 @@ Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `s
 
 Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
 
+## Focus sounds
+
+A calm sound in the background while you work: rain, waves or brown noise. The Focus tile at the bottom of the chat opens a small panel with the three sounds, Stop and a volume slider; `/focus rain`, `/focus waves`, `/focus brown`, `/focus 30` (volume) and `/focus stop` do the same from the chat. The chat page makes the sounds itself with Web Audio, so there are no audio files and nothing is downloaded. Only your own typing or clicks change them (there is no tool for it, and the assistant points you to /focus). The volume is kept; the sound itself stops when Astra restarts. Three sounds for now, as a first test of the idea.
+
 ## Signal
 
 "Any Signal messages?", "what did Sam say on Signal?" and "tell Sam I'm running late on Signal" work once Astra is linked to your phone, the way Signal Desktop is: your phone stays the main device, and you can unlink Astra from it at any time (Signal → Settings → Linked devices). Link it in the **Signal** step of `astra setup` (or `astra settings`): press **Link your phone** and scan the QR code with Signal on your phone.

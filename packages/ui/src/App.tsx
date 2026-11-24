@@ -8,6 +8,7 @@ import { StatusStrip } from './components/StatusStrip';
 import { Icon, type IconName } from './components/ui';
 import { WidgetBar } from './components/WidgetBar';
 import { fadeLevels } from './fade';
+import { FocusPlayer } from './focus';
 import { applyTheme } from './theme';
 import { useFadeClock } from './useFade';
 import { useChat } from './useChat';
@@ -67,6 +68,20 @@ export function App() {
     onUpdate: (id) => send({ type: 'update_start', id }),
     onKnowledgeSave: state.status?.knowledge ? (id) => send({ type: 'knowledge_save', id }) : undefined,
   };
+
+  // Focus sounds: the page plays what core says (focus.ts); only /focus and the Focus tile change it.
+  const player = useRef<FocusPlayer | null>(null);
+  useEffect(() => {
+    player.current ??= new FocusPlayer();
+    player.current.apply(state.focus);
+  }, [state.focus]);
+  useEffect(
+    () => () => {
+      player.current?.close();
+      player.current = null;
+    },
+    [],
+  );
 
   // Braced bodies: an effect may only return a cleanup function, and newer Chromium
   // returns a Promise from scrollIntoView(), which React would then try to call.
@@ -146,6 +161,8 @@ export function App() {
       <FeedbackButton disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} />
       <WidgetBar
         widgets={state.widgets}
+        focus={state.focus}
+        onFocus={(change) => send({ type: 'focus_set', ...change })}
         disabled={conn !== 'open'}
         onOpen={(widget) => send({ type: 'widget_open', widget })}
         onPin={(widget, pinned) => send({ type: 'widget_pin', widget, pinned })}

@@ -1,6 +1,6 @@
 /**
  * W1: system features pinned as tiles along the bottom of the chat screen (checkup, the brief,
- * to-dos). Each tile is a glance written by code from the feature's own numbers: no model, no
+ * to-dos, focus sounds). Each tile is a glance written by code from the feature's own numbers: no model, no
  * mail, invite or document text (the brief tile shows counts and times only; the to-do tile shows
  * the user's own items). A click on a tile opens the full card, like the matching command.
  *
@@ -24,6 +24,7 @@ export interface WidgetSources {
   checkup?: () => Promise<Glance>;
   brief?: () => Promise<Glance>;
   todos?: () => Glance | Promise<Glance>;
+  focus?: () => Glance;
 }
 
 export interface WidgetBoardOptions {
@@ -39,13 +40,14 @@ export interface WidgetBoardOptions {
 const SETTING = 'widgets.pinned';
 const Pinned = z.array(WidgetKind).max(WIDGET_KINDS.length);
 
-export const WIDGET_TITLES: Record<WidgetKind, string> = { checkup: 'Checkup', brief: 'Today', todos: 'To-dos' };
+export const WIDGET_TITLES: Record<WidgetKind, string> = { checkup: 'Checkup', brief: 'Today', todos: 'To-dos', focus: 'Focus' };
 
 /** How to turn a feature on, for its tile when it is off. */
 const OFF_LINES: Record<WidgetKind, string> = {
   checkup: 'Off: [assistant] in your config',
   brief: 'Off: [brief] in your config',
   todos: 'Off: [todos] in your config',
+  focus: 'Off here',
 };
 
 /** The words /pin and /unpin take for each widget. */
@@ -65,6 +67,9 @@ const NAMES: Record<string, WidgetKind> = {
   'to-do list': 'todos',
   'todo list': 'todos',
   list: 'todos',
+  focus: 'focus',
+  'focus sounds': 'focus',
+  sounds: 'focus',
 };
 
 /** The widget a /pin or /unpin argument names, or null. */

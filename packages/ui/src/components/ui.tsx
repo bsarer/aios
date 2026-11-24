@@ -99,6 +99,14 @@ const PATHS = {
     </>
   ),
   download: <path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" />,
+  /** Headphones: the Focus tile (focus sounds). */
+  headphones: (
+    <>
+      <path d="M4 15v-3a8 8 0 0 1 16 0v3" />
+      <rect x="3.5" y="14" width="4.5" height="6.5" rx="1.8" />
+      <rect x="16" y="14" width="4.5" height="6.5" rx="1.8" />
+    </>
+  ),
   mic: (
     <>
       <rect x="9" y="3" width="6" height="11" rx="3" />

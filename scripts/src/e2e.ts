@@ -1050,10 +1050,10 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('/brief shows it again', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) >= 2, 10_000));
     await shot(page, '16-todos-brief');
-    // W1: pinned tiles along the bottom: checkup, the brief and to-dos by default; a click opens the full card.
+    // W1: pinned tiles along the bottom: checkup, the brief, to-dos and focus sounds by default; a click opens the full card.
     const tiles = page.getByTestId('widget');
-    check('three widgets are pinned at the bottom', (await tiles.count()) === 3 && (await tiles.evaluateAll((els) => els.map((e) => e.getAttribute('data-widget')).join(','))) === 'checkup,brief,todos');
-    check('tiles show only their names until opened', (await tiles.evaluateAll((els) => els.map((e) => (e as unknown as { innerText: string }).innerText.replace(/[^A-Za-z-]+/g, ' ').trim()).join(','))) === 'Checkup,Today,To-dos');
+    check('four widgets are pinned at the bottom', (await tiles.count()) === 4 && (await tiles.evaluateAll((els) => els.map((e) => e.getAttribute('data-widget')).join(','))) === 'checkup,brief,todos,focus');
+    check('tiles show only their names until opened', (await tiles.evaluateAll((els) => els.map((e) => (e as unknown as { innerText: string }).innerText.replace(/[^A-Za-z-]+/g, ' ').trim()).join(','))) === 'Checkup,Today,To-dos,Focus');
     const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
     const row = await box('[data-testid="widgets"]');
     const composer = await box('[data-testid="composer"]');
@@ -1067,12 +1067,12 @@ async function main(): Promise<void> {
     await todoTile.hover();
     await shot(page, 'w1-widgets-hover');
     await todoTile.getByTestId('widget-unpin').click();
-    check('× unpins a tile', await waitFor(async () => (await tiles.count()) === 2));
+    check('× unpins a tile', await waitFor(async () => (await tiles.count()) === 3));
     await page.reload();
-    check('unpinning lasts across a reload', await waitFor(async () => (await page.getByTestId('widget').count()) === 2));
+    check('unpinning lasts across a reload', await waitFor(async () => (await page.getByTestId('widget').count()) === 3));
     await page.getByTestId('widget-add').click();
     await page.locator('[data-testid="widget-pin"][data-widget="todos"]').click();
-    check('+ pins it again', await waitFor(async () => (await page.getByTestId('widget').count()) === 3));
+    check('+ pins it again', await waitFor(async () => (await page.getByTestId('widget').count()) === 4));
     // An overdue item (written by hand, as the user may) turns the to-do and Today buttons amber after the next refresh.
     writeFileSync(todosFile, `${readFileSync(todosFile, 'utf8')}- [ ] Renew passport · due ${calDay(-2)}\n`);
     await page.reload();
@@ -1084,6 +1084,25 @@ async function main(): Promise<void> {
     await input.fill('/pin checkup');
     await input.press('Enter');
     check('/pin puts it back at the end', await waitFor(async () => (await page.getByTestId('widget').last().getAttribute('data-widget')) === 'checkup'));
+    // Focus sounds: the Focus tile opens a small panel; a sound plays from its click or /focus, and Stop ends it.
+    const focusTile = page.locator('[data-testid="widget"][data-widget="focus"]');
+    await focusTile.getByTestId('widget-open').click();
+    check('the Focus tile opens its panel with three sounds', await waitFor(async () => (await page.getByTestId('focus-sound').count()) === 3));
+    await page.locator('[data-testid="focus-sound"][data-sound="rain"]').click();
+    check('a click plays rain and the tile says so', await waitFor(async () => (await page.locator('[data-testid="focus-sound"][data-sound="rain"]').getAttribute('aria-pressed')) === 'true' && (await focusTile.getByTestId('focus-now').innerText()) === 'Rain'));
+    await shot(page, 'focus-panel');
+    await page.getByTestId('focus-volume').fill('70');
+    await page.waitForTimeout(600);
+    await page.keyboard.press('Escape');
+    check('Esc closes the panel', await waitFor(async () => (await page.getByTestId('focus-panel').count()) === 0));
+    await input.fill('/focus waves');
+    await input.press('Enter');
+    check('/focus waves switches the sound', await waitFor(async () => (await focusTile.getByTestId('focus-now').innerText()) === 'Waves'));
+    await focusTile.getByTestId('widget-open').click();
+    check('the slider set the volume in core', await waitFor(async () => (await page.getByTestId('focus-volume').inputValue()) === '70'));
+    await page.getByTestId('focus-stop').click();
+    check('Stop ends it', await waitFor(async () => (await focusTile.getByTestId('focus-now').count()) === 0));
+    await page.keyboard.press('Escape');
     // K1: /knowledge update writes the knowledge base (code only here: no local model) and shows it.
     await input.fill('/knowledge update');
     await input.press('Enter');

@@ -26,6 +26,7 @@ export type Command =
   | { name: 'knowledge'; update: boolean; check: boolean; why?: string; wrong?: number | null }
   | { name: 'tone'; text: string }
   | { name: 'wallpaper'; text: string }
+  | { name: 'focus'; text: string }
   | { name: 'feedback'; list: true }
   | { name: 'feedback'; list: false; text: string }
   /** /feedback remove 3: the number /feedback list shows. Only a bare number, so an idea that starts with "remove" is still saved. */
@@ -103,6 +104,9 @@ export function parseCommand(text: string): Command | null {
     case 'background':
       // Keep the path as typed: file names can have runs of spaces.
       return { name: 'wallpaper', text: t.slice(1 + head.length).trim() };
+    case 'focus':
+    case 'sounds':
+      return { name: 'focus', text: rest.join(' ') };
     case 'feedback': {
       // Keep the idea as typed, line breaks included.
       const text = t.slice(1 + head.length).trim();
@@ -135,7 +139,8 @@ export const HELP_TEXT = [
   '/update  look for a new version of Astra; Update installs it in a terminal',
   '/brief   show the morning brief now: urgent mail, today\'s events and what is due',
   '/todos   show your open to-dos',
-  '/pin <checkup | brief | todos>  pin it as a tile at the bottom of the screen; /unpin takes it off',
+  '/focus [rain | waves | brown | stop | 0-100]  play a calm background sound while you work, stop it, or set its volume',
+  '/pin <checkup | brief | todos | focus>  pin it as a tile at the bottom of the screen; /unpin takes it off',
   '/knowledge  show the knowledge base Astra keeps about you from your mail, calendar, files and chat',
   '/knowledge update  update it now (it updates by itself every hour)',
   '/knowledge check  look for old commitments, duplicate pages and pages with no links',

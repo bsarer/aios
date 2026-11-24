@@ -250,3 +250,25 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .now-playing { animation: none; transition: none; }
 }
+
+/*
+ * Focus sounds: the line above the message box while a sound plays, quiet like now playing, with
+ * three small bars that rise and fall so it reads as "on" at a glance. The Focus tile glows a
+ * little while one plays.
+ */
+.focus-line { color: var(--muted); opacity: 0.85; animation: now-playing-in 0.8s ease-out; }
+.focus-line:hover { opacity: 1; }
+.focus-line-btn { border-radius: 6px; padding: 0 6px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--muted) 40%, transparent); text-underline-offset: 3px; }
+.focus-line-btn:hover:not(:disabled) { color: var(--fg, inherit); background: var(--panel); text-decoration: none; }
+.focus-line-btn:disabled { opacity: 0.4; }
+.wallpaper ~ .focus-line { text-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 60%, transparent); }
+.focus-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
+.focus-bars i { display: block; width: 2px; height: 100%; border-radius: 1px; background: var(--accent); transform-origin: bottom; animation: focus-bar 1.6s ease-in-out infinite; }
+.focus-bars i:nth-child(2) { animation-delay: -0.5s; }
+.focus-bars i:nth-child(3) { animation-delay: -1.1s; }
+@keyframes focus-bar { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+[data-widget="focus"][data-playing="true"] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 14px color-mix(in srgb, var(--accent) 25%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .focus-line { animation: none; }
+  .focus-bars i { animation: none; transform: scaleY(0.7); }
+}

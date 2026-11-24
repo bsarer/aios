@@ -1121,6 +1121,18 @@ async function main(): Promise<void> {
     await input.fill('/focus waves');
     await input.press('Enter');
     check('/focus waves switches the sound', await waitFor(async () => (await focusTile.getByTestId('focus-now').innerText()) === 'Waves'));
+    // While a sound plays, a quiet line above the message box says so, with switch and Stop, and the tile glows.
+    const focusLine = page.getByTestId('focus-line');
+    check('a line above the message box shows the playing sound', await waitFor(async () => (await focusLine.getAttribute('data-sound')) === 'waves' && (await focusLine.innerText()).includes('Waves · 70%')));
+    check('the Focus tile looks active while it plays', (await focusTile.getAttribute('data-playing')) === 'true');
+    await shot(page, 'focus-line');
+    await focusLine.locator('[data-testid="focus-line-switch"][data-sound="brown"]').click();
+    check('the line switches to another sound', await waitFor(async () => (await focusLine.getAttribute('data-sound')) === 'brown' && (await focusTile.getByTestId('focus-now').innerText()) === 'Brown noise'));
+    await focusLine.getByTestId('focus-line-stop').click();
+    check('the line\'s Stop ends it and the line goes', await waitFor(async () => (await focusLine.count()) === 0 && (await focusTile.getAttribute('data-playing')) === null));
+    await input.fill('/focus waves');
+    await input.press('Enter');
+    check('/focus waves plays again', await waitFor(async () => (await focusLine.count()) === 1));
     await focusTile.getByTestId('widget-open').click();
     check('the slider set the volume in core', await waitFor(async () => (await page.getByTestId('focus-volume').inputValue()) === '70'));
     await page.getByTestId('focus-stop').click();

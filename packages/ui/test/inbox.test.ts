@@ -55,10 +55,29 @@ describe('inbox rows', () => {
       ['INBOX:3', 'b'],
       ['INBOX:2', 'a'],
     ]);
-    const g = groups(rows);
+    // Nothing from the last two hours: grouped by urgency only.
+    const g = groups(rows, NOW + 3 * HOUR);
+    expect(g.recent).toEqual([]);
     expect(g.needs.map((r) => r.id)).toEqual(['INBOX:2']);
     expect(g.others.map((r) => r.id)).toEqual(['INBOX:4']);
     expect(g.low.map((r) => r.id)).toEqual(['INBOX:3']);
+  });
+
+  it('puts mail from the last two hours at the top, newest first, whatever its urgency', () => {
+    const rows = inboxRows(
+      [
+        note('a', NOW - 5 * HOUR, [mail('INBOX:1', 'high'), mail('INBOX:2', 'normal')]),
+        note('b', NOW - HOUR, [mail('INBOX:3', 'normal'), mail('INBOX:4', 'low'), mail('INBOX:5', 'normal', { ignored: true })]),
+        note('c', NOW - 10 * 60 * 1000, [mail('INBOX:6', 'high')]),
+      ],
+      NOW,
+    );
+    const g = groups(rows, NOW);
+    expect(g.recent.map((r) => r.id)).toEqual(['INBOX:6', 'INBOX:3']);
+    expect(g.needs.map((r) => r.id)).toEqual(['INBOX:1']);
+    expect(g.others.map((r) => r.id)).toEqual(['INBOX:5', 'INBOX:2']);
+    // Low priority and ignored mail stay where they were.
+    expect(g.low.map((r) => r.id)).toEqual(['INBOX:4']);
   });
 
   it('counts new mail after the inbox was last opened, leaving ignored mail out', () => {

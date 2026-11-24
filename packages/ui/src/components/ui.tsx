@@ -82,6 +82,13 @@ const PATHS = {
     </>
   ),
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  /** A rounded box with a tick: the To-dos tile (drawn, so no emoji font picks it up). */
+  checkbox: (
+    <>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4.5" />
+      <path d="m8.2 12.3 2.6 2.6 5-5.6" />
+    </>
+  ),
   cross: <path d="M6 6l12 12M18 6 6 18" />,
   arrowUp: <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />,
   chat: <path d="M4 5h16v11H9l-5 4z" />,

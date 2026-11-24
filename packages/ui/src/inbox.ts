@@ -66,12 +66,21 @@ export function counts(rows: InboxRow[], seenAt: number): { fresh: number; urgen
   return { fresh: fresh.length, urgent: fresh.filter((r) => r.urgency === 'high').length };
 }
 
-/** The panel's groups, in the order they are shown. Ignored rows stay, greyed, in their group. */
-export function groups(rows: InboxRow[]): { needs: InboxRow[]; others: InboxRow[]; low: InboxRow[] } {
+/** Mail sent this recently goes in "Just in", at the top, whatever its urgency (low priority stays folded). */
+export const RECENT_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * The panel's groups, in the order they are shown, each newest first. Recent mail comes first;
+ * the rest by urgency. Ignored rows stay, greyed, in their urgency group.
+ */
+export function groups(rows: InboxRow[], now: number): { recent: InboxRow[]; needs: InboxRow[]; others: InboxRow[]; low: InboxRow[] } {
+  const isRecent = (r: InboxRow) => !r.ignored && r.urgency !== 'low' && sentAt(r) >= now - RECENT_MS;
+  const rest = rows.filter((r) => !isRecent(r));
   return {
-    needs: rows.filter((r) => r.urgency === 'high'),
-    others: rows.filter((r) => r.urgency === 'normal'),
-    low: rows.filter((r) => r.urgency === 'low'),
+    recent: rows.filter(isRecent),
+    needs: rest.filter((r) => r.urgency === 'high'),
+    others: rest.filter((r) => r.urgency === 'normal'),
+    low: rest.filter((r) => r.urgency === 'low'),
   };
 }
 

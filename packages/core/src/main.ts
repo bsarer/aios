@@ -680,6 +680,7 @@ async function main(): Promise<void> {
         return checkForUpdate(info, realGit(info?.source ?? '/nonexistent'));
       },
       open: () => openUpdateTerminal(),
+      installed: () => readBuildInfo(join(here, '..', '..', '..'))?.commit ?? null,
     },
     settings: { open: () => openSettingsWindow() },
     openBuiltApp: builtAppOpener({ actions: systemActions, launch, window: chatWindow, audit, notice: (text) => shell?.agent.notice('warning', text) }),
@@ -748,6 +749,8 @@ async function main(): Promise<void> {
   // F2: the first scan runs in the background; search works on what it has found so far.
   void fileIndexer?.start().catch((err: unknown) => audit.append({ kind: 'files', event: 'index_error', error: (err as Error).message }));
   shell.greet();
+  // U1: after `astra update` restarts the service, say which version is running now.
+  void shell.noteInstalledVersion().catch((err: unknown) => audit.append({ kind: 'update', event: 'installed_error', error: (err as Error).message }));
   // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
   await keyring.require(config.models.chat.apiKeyRef).catch((err: unknown) => {
     audit.append({ kind: 'model', event: 'key_missing', error: (err as Error).message });

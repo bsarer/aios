@@ -239,7 +239,7 @@ export function MailRail({ inbox, disabled, onSend, onIgnoreMail, signals }: Rai
 function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
   const { rows, newSince, setOpen, quietUntil, toggleQuiet } = inbox;
   const [showLow, setShowLow] = useState(false);
-  const g = groups(rows);
+  const g = groups(rows, Date.now());
   const fresh = rows.filter((r) => isNew(r, newSince)).length;
   const go = (text: string) => {
     onSend(text);
@@ -313,6 +313,7 @@ function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
             No mail in the last day.
           </p>
         )}
+        {section('Just in', g.recent, 'mail-recent')}
         {section('Needs you', g.needs, 'mail-needs')}
         {section('Others', g.others, 'mail-others')}
         {g.low.length > 0 && (

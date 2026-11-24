@@ -1,14 +1,17 @@
 /**
- * Fading older messages: once the user has stepped away from the chat for a while, older
- * exchanges dim a little more each minute so the screen looks calm when they come back.
+ * Fading older messages: as time passes, older exchanges dim a little more each minute so the
+ * chat doesn't look cluttered.
  *
- * - Only idle time counts (no mouse movement, keys, clicks, touch or wheel here for a minute),
- *   never the clock alone, so nothing dims while someone is reading.
- * - The latest exchange (the user's last message and everything after it) never fades.
+ * - An exchange starts to fade a minute after it stops being the latest (the user's next
+ *   message), and dims a step a minute after that; older ones are fainter because they were
+ *   replaced longer ago.
+ * - The latest exchange (the user's last message up to Astra's last answer) never fades, nor
+ *   the newest item on screen.
  * - Cards that wait for the user (a Save, Send or confirm click, a running build they can stop)
  *   never fade, wherever they are.
  * - Nothing goes below FADE_FLOOR: faded, never gone.
- * - Any activity brings everything back at once.
+ * - Only scrolling up the chat brings everything back (useFade.ts); then it fades again from
+ *   that moment. Typing, clicking and moving the mouse don't.
  *
  * This is display only, worked out here from the items the screen already has; it sends
  * nothing to core. `[ui] fade = false` in the config (or the setup window's Wallpaper step)
@@ -16,9 +19,9 @@
  */
 import type { ChatItem } from '@aios/shared/protocol';
 
-/** How long the chat must be idle before anything fades. */
+/** How long after an exchange is replaced (or brought back) before it fades. */
 export const FADE_AFTER_MS = 60_000;
-/** Each further idle minute fades one step more. */
+/** Each further minute fades one step more. */
 export const FADE_STEP_MS = 60_000;
 /** The first step: clear enough to see at a glance. */
 export const FADE_FIRST = 0.7;
@@ -52,32 +55,25 @@ export function needsYou(item: ChatItem): boolean {
   }
 }
 
-/** How many fade steps an idle stretch this long has reached (0: nothing fades yet). */
+/** How many fade steps this long has reached (0: nothing fades yet). */
 export function idleSteps(idleMs: number): number {
   if (!(idleMs >= FADE_AFTER_MS)) return 0;
   return 1 + Math.floor((idleMs - FADE_AFTER_MS) / FADE_STEP_MS);
 }
 
 /**
- * The opacity of each item that fades, by id; items not in the map stay solid. An exchange is
- * a user message and what follows it; each exchange further back is one step fainter. The
- * latest exchange stays solid up to Astra's last answer in it; things that came after that
- * answer (notices from slash commands, say) count as one exchange back, except the newest item
- * on screen, which always stays.
+ * The opacity of each item that fades at `now`, by id; items not in the map stay solid. Each item
+ * fades from when it was replaced: the time of the user's next message, or for things after
+ * the latest answer, the next item's time; never from before `restoredAt` (the last scroll up).
  */
-export function fadeLevels(items: readonly ChatItem[], steps: number): Map<string, number> {
+export function fadeLevels(items: readonly ChatItem[], now: number, restoredAt = 0): Map<string, number> {
   const out = new Map<string, number>();
-  if (steps <= 0) return out;
-  let exchanges = 0;
   let lastUser = -1;
   items.forEach((i, at) => {
-    if (i.kind === 'user') {
-      exchanges++;
-      lastUser = at;
-    }
+    if (i.kind === 'user') lastUser = at;
   });
   // A chat without a message from the user (the greeting, a brief) has nothing older to fade.
-  if (exchanges === 0) return out;
+  if (lastUser === -1) return out;
   let answer = -1;
   for (let at = items.length - 1; at > lastUser; at--) {
     if (items[at]!.kind === 'assistant') {
@@ -86,12 +82,15 @@ export function fadeLevels(items: readonly ChatItem[], steps: number): Map<strin
     }
   }
   const solidTo = answer === -1 ? items.length - 1 : answer;
-  let n = 0;
-  items.forEach((item, at) => {
-    if (item.kind === 'user') n++;
-    const back = at > solidTo ? 1 : exchanges - n;
-    if (back <= 0 || at === items.length - 1 || needsYou(item)) return;
-    out.set(item.id, Math.max(FADE_FLOOR, Number((FADE_FIRST - FADE_STEP * (steps + back - 2)).toFixed(2))));
-  });
+  // Walk back, remembering when the next user message came.
+  let nextAsk = 0;
+  for (let at = items.length - 1; at >= 0; at--) {
+    const item = items[at]!;
+    const replaced = at > solidTo ? items[at + 1]?.at : at < lastUser ? nextAsk : undefined;
+    if (item.kind === 'user') nextAsk = item.at;
+    if (replaced === undefined || at === items.length - 1 || needsYou(item)) continue;
+    const steps = idleSteps(now - Math.max(replaced, restoredAt));
+    if (steps > 0) out.set(item.id, Math.max(FADE_FLOOR, Number((FADE_FIRST - FADE_STEP * (steps - 1)).toFixed(2))));
+  }
   return out;
 }

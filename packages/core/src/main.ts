@@ -3,6 +3,7 @@
  *   AIOS_UI_DEV_ORIGIN=http://localhost:5173  also accept the Vite dev server
  */
 import { readFile, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appIds, configDir, parseConfig } from '@aios/shared';
@@ -96,6 +97,8 @@ import { ToolRegistry } from './tools/registry.js';
 import { MorningBrief } from './brief/brief.js';
 import { TodoList } from './todos/list.js';
 import { Todos } from './todos/reminders.js';
+import { RoutineFolder, rootsReaching } from './routines/routines.js';
+import { RoutineScheduler } from './routines/scheduler.js';
 import { playChime } from './todos/chime.js';
 import { todoTools } from './todos/tools.js';
 import { WidgetBoard } from './widgets/widgets.js';
@@ -626,11 +629,21 @@ async function main(): Promise<void> {
   const dictation = config.models.speech ? new Dictation({ model, audit, maxSeconds: config.models.speech.maxSeconds }) : undefined;
   const themePath = omarchyThemePath();
   const wallpaper = new Wallpaper(configDir(), () => wallpaperSamples());
+  // Routines: the user's own files; the starters are copied in once, the first time.
+  // They stay off if a file tool could reach their folder (a [files] or [docs] folder above it), so only the user writes them.
+  const routinesDir = join(configDir(), 'routines');
+  const expandHome = (p: string) => (p === '~' ? homedir() : p.startsWith('~/') ? join(homedir(), p.slice(2)) : p);
+  const routinesExposed = rootsReaching(routinesDir, [...(config.files.enabled ? config.files.roots : []), ...(config.docs.enabled ? config.docs.roots : [])].map(expandHome));
+  if (config.routines.enabled && routinesExposed.length) audit.append({ kind: 'routine', event: 'off', reason: 'folder inside a files folder' });
+  const routineFolder = config.routines.enabled && !routinesExposed.length ? new RoutineFolder(routinesDir) : undefined;
+  if (routineFolder?.installStarters()) audit.append({ kind: 'routine', event: 'starters' });
   const frames = config.frames.enabled ? new PhotoFrames({ config: config.frames }) : undefined;
   shell = new Shell({
     store,
     personality,
     feedback: new FeedbackLog(join(configDir(), 'feedback.jsonl')),
+    ...(routineFolder ? { routines: routineFolder } : {}),
+    notify: desktopNotify,
     wallpaper,
     focus,
     ...(frames ? { frames } : {}),
@@ -767,6 +780,9 @@ async function main(): Promise<void> {
   // F2: the first scan runs in the background; search works on what it has found so far.
   void fileIndexer?.start().catch((err: unknown) => audit.append({ kind: 'files', event: 'index_error', error: (err as Error).message }));
   shell.greet();
+  if (config.routines.enabled && routinesExposed.length) {
+    shell.agent.notice('warning', `Routines are off: ${routinesExposed.join(', ')} is one of your files folders and holds the routines folder, so a file tool could change a routine. Pick a folder further in for [files] roots (or [docs] roots) in Settings to turn them back on.`);
+  }
   // U1: after `astra update` restarts the service, say which version is running now.
   void shell.noteInstalledVersion().catch((err: unknown) => audit.append({ kind: 'update', event: 'installed_error', error: (err as Error).message }));
   // The chat still opens without a key, and says what is wrong, instead of the service crash-looping.
@@ -790,6 +806,19 @@ async function main(): Promise<void> {
   // L1: the monitor samples every half minute; the review checks every few minutes whether today's is due.
   monitor?.start();
   todos?.start();
+  const routineScheduler = routineFolder
+    ? new RoutineScheduler({
+        folder: routineFolder,
+        store,
+        audit,
+        timeZone: config.user.timezone,
+        quietHours: config.notifications.quietHours,
+        isPaused: () => shell.paused,
+        isBusy: () => shell.busy,
+        run: (r) => shell.runRoutine(r, 'schedule'),
+      })
+    : undefined;
+  routineScheduler?.start();
   widgets?.start();
   nowPlaying?.start();
   windowTracker?.start();
@@ -806,6 +835,7 @@ async function main(): Promise<void> {
     pipeline.stop();
     monitor?.stop();
     todos?.stop();
+    routineScheduler?.stop();
     widgets?.stop();
     nowPlaying?.stop();
     windowTracker?.stop();

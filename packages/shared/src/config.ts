@@ -268,6 +268,12 @@ export const TodosConfig = z.strictObject({
 });
 export type TodosConfig = z.infer<typeof TodosConfig>;
 
+/** Routines: the user's own Markdown files in the config folder's `routines/`, run by a phrase, /run or a schedule. */
+export const RoutinesConfig = z.strictObject({
+  enabled: z.boolean().default(true),
+});
+export type RoutinesConfig = z.infer<typeof RoutinesConfig>;
+
 /** T2: one card each morning with urgent mail, today's events and what is due. */
 export const BriefConfig = z.strictObject({
   enabled: z.boolean().default(true),
@@ -585,6 +591,8 @@ export const AiosConfig = z.strictObject({
   todos: TodosConfig.prefault({}),
   /** T2: the morning brief. */
   brief: BriefConfig.prefault({}),
+  /** Routines run by a phrase, /run or a schedule. */
+  routines: RoutinesConfig.prefault({}),
   /** V1: watching videos in mpv. */
   video: VideoConfig.prefault({}),
   /** T8: links and web searches in Chromium. */

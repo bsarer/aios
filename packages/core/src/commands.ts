@@ -21,6 +21,8 @@ export type Command =
   | { name: 'signal' }
   | { name: 'web'; text: string }
   | { name: 'todos' }
+  | { name: 'routines' }
+  | { name: 'run'; text: string }
   | { name: 'pin'; text: string }
   | { name: 'unpin'; text: string }
   | { name: 'knowledge'; update: boolean; check: boolean; why?: string; wrong?: number | null }
@@ -82,6 +84,11 @@ export function parseCommand(text: string): Command | null {
     case 'todos':
     case 'todo':
       return { name: 'todos' };
+    case 'routines':
+    case 'routine':
+      return { name: 'routines' };
+    case 'run':
+      return { name: 'run', text: rest.join(' ') };
     case 'pin':
       return { name: 'pin', text: rest.join(' ') };
     case 'unpin':
@@ -139,6 +146,8 @@ export const HELP_TEXT = [
   '/update  look for a new version of Astra; Update installs it in a terminal',
   '/brief   show the morning brief now: urgent mail, today\'s events and what is due',
   '/todos   show your open to-dos',
+  '/routines  list your routines (Markdown files you edit), their phrases and when they run next',
+  '/run <routine>  run a routine now; typing one of its phrases does the same',
   '/focus [rain | waves | brown | stop | 0-100]  play a calm background sound while you work, stop it, or set its volume',
   '/pin <checkup | brief | todos | focus>  pin it as a tile at the bottom of the screen; /unpin takes it off',
   '/knowledge  show the knowledge base Astra keeps about you from your mail, calendar, files and chat',

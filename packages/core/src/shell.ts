@@ -36,6 +36,7 @@ import { pickWeb } from './web/tools.js';
 import type { FocusSounds } from './focus.js';
 import type { PhotoFrames } from './frames.js';
 import type { Wallpaper } from './wallpaper.js';
+import { nextSlot, ROUTINE_TURN_PREFIX, type Routine, type RoutineFolder, scheduleText } from './routines/routines.js';
 
 /** MU1: /music's words, mapped by code to music_control's actions. */
 const MUSIC_WORDS: Record<string, MusicAction> = {
@@ -147,12 +148,21 @@ export interface ShellOptions {
   settings?: { open: () => Promise<void> };
   /** /feedback: the user's improvement ideas. Without it, /feedback says it is off. */
   feedback?: Pick<FeedbackLog, 'add' | 'list' | 'remove' | 'path'>;
+  /**
+   * Routines: the user's own Markdown files. A message that is exactly one of a routine's phrases,
+   * or /run, runs it; /routines lists them. Without it, /routines says they are off.
+   */
+  routines?: Pick<RoutineFolder, 'load' | 'match' | 'byName' | 'dir'>;
+  /** A desktop notification, for a routine that starts on its schedule. */
+  notify?: (title: string, body: string) => void;
   /** Where /export writes. Default: the memory folder. */
   exportDir?: string;
   clock?: () => Date;
 }
 
 type Listener = (ev: ServerEvent) => void;
+
+const normalizeSpaces = (t: string) => t.replace(/\s+/g, ' ').trim().slice(0, 200);
 
 export class Shell {
   readonly agent: Agent;
@@ -365,6 +375,9 @@ export class Shell {
       return;
     }
     this.briefIfDue();
+    // Routines: the user's whole message is one of a routine's phrases. Matched by code, never the model.
+    const routine = this.o.routines?.match(msg.text);
+    if (routine) return this.runRoutine(routine, 'phrase', msg.text);
     const ac = new AbortController();
     this.running = ac;
     this.pushStatus();
@@ -374,6 +387,57 @@ export class Shell {
       this.running = null;
       this.pushStatus();
     }
+  }
+
+  /**
+   * Runs one of the user's routines: its instructions go to the agent as the user's own turn, so
+   * every gate applies as if they had typed them. Reached only from the user's phrase or /run
+   * (Shell.handle) and the schedule (routines/scheduler.ts); there is no tool for it. A scheduled
+   * run is unattended: nothing changes this computer without a click (ToolRegistry.execute).
+   */
+  async runRoutine(routine: Routine, trigger: 'phrase' | 'run' | 'schedule', typed?: string): Promise<void> {
+    if (this.paused) return void this.agent.notice('info', 'I am paused. Type /resume to continue.');
+    if (this.running) return void this.agent.notice('info', 'Still working on the last request. Press Esc to stop it.');
+    const unattended = trigger === 'schedule';
+    const when = routine.schedule ? scheduleText(routine.schedule) : '';
+    this.o.audit.append({ kind: 'routine', event: 'run', routine: routine.slug, trigger, chars: routine.body.length });
+    if (unattended) {
+      this.agent.notice('info', `Your routine “${routine.name}” is running, as scheduled (${when}). Anything it wants to change waits for your click.`);
+      this.o.notify?.('Astra', `Your routine “${routine.name}” is running.`);
+    }
+    const started = trigger === 'schedule' ? `its schedule (${when})` : trigger === 'run' ? 'the user typing /run' : `the user saying “${normalizeSpaces(typed ?? '')}”`;
+    const text = `${ROUTINE_TURN_PREFIX}“${routine.name}”, the user's own routine from their routines folder, started by ${started}. Do what it says:\n\n${routine.body}`;
+    const ac = new AbortController();
+    this.running = ac;
+    this.pushStatus();
+    try {
+      await this.agent.run(text, ac.signal, { shown: unattended ? null : (typed ?? `/run ${routine.name}`), unattended });
+    } finally {
+      this.running = null;
+      this.pushStatus();
+    }
+  }
+
+  /** /routines: written by code from the files; names and phrases are the user's own. */
+  private routinesText(): string {
+    const f = this.o.routines;
+    if (!f) return 'Routines are off. Turn them on with enabled = true under [routines] in your config.';
+    const { routines, problems } = f.load();
+    const now = this.clock().getTime();
+    const day = new Intl.DateTimeFormat('en-GB', { timeZone: this.o.timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const lines = [routines.length ? `Your routines (files in ${f.dir}):` : `You have no routines yet. Add a Markdown file to ${f.dir}, for example weekly-review.md:\n---\nname: Weekly review\nsay: weekly review\nschedule: fri 16:00\n---\nWhat it should do, in your own words.`];
+    for (const r of routines) {
+      const say = r.say.length ? `say ${r.say.map((p) => `“${p}”`).join(' or ')}` : `/run ${r.slug}`;
+      const next = r.schedule ? nextSlot(r.schedule, now, this.o.timeZone) : null;
+      const sched = r.schedule ? `; runs ${scheduleText(r.schedule)}${next === null ? '' : `, next ${day.format(next).replace(',', '')}`}` : '';
+      lines.push(`- ${r.name}: ${say}${sched}`);
+    }
+    if (problems.length) {
+      lines.push('', 'These files have a problem and won’t run until it is fixed:');
+      for (const p of problems) lines.push(`- ${p.file}: ${p.error}`);
+    }
+    if (routines.length) lines.push('', 'Say a routine’s phrase or type /run and its name to start one. Edit the files to change them. A routine that runs on its schedule never changes this computer without your click.');
+    return lines.join('\n');
   }
 
   /**
@@ -790,6 +854,16 @@ export class Shell {
         if (!this.o.todos?.listCard) return say('To-dos are off. Turn them on with enabled = true under [todos] in your config.');
         this.o.todos.listCard();
         return;
+      }
+      case 'routines':
+        return say(this.routinesText());
+      case 'run': {
+        const f = this.o.routines;
+        if (!f) return say(this.routinesText());
+        if (!cmd.text.trim()) return say(`Type /run and a routine’s name. ${this.routinesText()}`);
+        const r = f.byName(cmd.text);
+        if (!r) return say(`I have no routine called “${normalizeSpaces(cmd.text).slice(0, 60)}”. /routines lists them.`);
+        return this.runRoutine(r, 'run', `/run ${normalizeSpaces(cmd.text)}`);
       }
       case 'pin':
       case 'unpin': {

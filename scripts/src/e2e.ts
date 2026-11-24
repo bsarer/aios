@@ -1253,10 +1253,17 @@ async function main(): Promise<void> {
     const fadedCount = () => away.locator('.fade-msg[data-fade]').count();
     check('nothing fades while you are here', (await fadedCount()) === 0);
     await shot(away, 'fade-here');
-    await away.clock.runFor(90_000);
-    check('nothing fades a minute and a half in', (await fadedCount()) === 0);
-    await away.clock.runFor(2 * 60_000);
-    check('older messages start to fade after a few idle minutes', await waitFor(async () => (await fadedCount()) > 0));
+    await away.clock.runFor(45_000);
+    check('nothing fades in the first minute', (await fadedCount()) === 0);
+    await away.clock.runFor(30_000);
+    check('older messages start to fade after an idle minute', await waitFor(async () => (await fadedCount()) > 0));
+    // Coming back to the chat's window focuses the message box again, and the pointer may twitch:
+    // neither is the user doing something, so the calm screen stays until they really move.
+    await away.getByTestId('input').focus();
+    await away.mouse.move(643, 302);
+    await away.clock.runFor(6_000);
+    check('focus and a twitch of the pointer keep the fade', (await fadedCount()) > 0);
+    await away.clock.runFor(60_000);
     const lastAsk = away.locator('.fade-msg', { has: away.locator('[data-kind="user"]') }).last();
     check('the latest question stays solid', (await lastAsk.getAttribute('data-fade')) === null);
     const draftWaits = away.locator('.fade-msg', { has: away.getByTestId('draft-send') });

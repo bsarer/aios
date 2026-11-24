@@ -2,8 +2,8 @@
  * Fading older messages: once the user has stepped away from the chat for a while, older
  * exchanges dim a little more each minute so the screen looks calm when they come back.
  *
- * - Only idle time counts (no mouse, keys, touch or scrolling here), never the clock alone, so
- *   nothing dims while someone is reading.
+ * - Only idle time counts (no mouse movement, keys, clicks, touch or wheel here for a minute),
+ *   never the clock alone, so nothing dims while someone is reading.
  * - The latest exchange (the user's last message and everything after it) never fades.
  * - Cards that wait for the user (a Save, Send or confirm click, a running build they can stop)
  *   never fade, wherever they are.
@@ -17,11 +17,13 @@
 import type { ChatItem } from '@aios/shared/protocol';
 
 /** How long the chat must be idle before anything fades. */
-export const FADE_AFTER_MS = 2 * 60_000;
+export const FADE_AFTER_MS = 60_000;
 /** Each further idle minute fades one step more. */
 export const FADE_STEP_MS = 60_000;
-/** How much each step takes away. */
-export const FADE_STEP = 0.16;
+/** The first step: clear enough to see at a glance. */
+export const FADE_FIRST = 0.7;
+/** How much each further step takes away. */
+export const FADE_STEP = 0.15;
 /** The faintest a message gets. */
 export const FADE_FLOOR = 0.2;
 
@@ -89,7 +91,7 @@ export function fadeLevels(items: readonly ChatItem[], steps: number): Map<strin
     if (item.kind === 'user') n++;
     const back = at > solidTo ? 1 : exchanges - n;
     if (back <= 0 || at === items.length - 1 || needsYou(item)) return;
-    out.set(item.id, Math.max(FADE_FLOOR, Number((1 - FADE_STEP * (steps + back - 1)).toFixed(2))));
+    out.set(item.id, Math.max(FADE_FLOOR, Number((FADE_FIRST - FADE_STEP * (steps + back - 2)).toFixed(2))));
   });
   return out;
 }

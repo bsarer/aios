@@ -46,6 +46,7 @@ export function WidgetBar({
             data-testid="widget"
             data-widget={k}
             data-tone={tone}
+            data-playing={k === 'focus' && focus?.sound ? 'true' : undefined}
             className="group glass relative flex-1 rounded-xl"
             style={{
               opacity: tone === 'off' ? 0.55 : 1,
@@ -65,7 +66,12 @@ export function WidgetBar({
               </span>
               {t?.title ?? TITLES[k]}
               {k === 'focus' && focus?.sound && (
-                <span data-testid="focus-now" className="text-[13px] font-normal" style={{ color: 'var(--muted)' }}>
+                <span data-testid="focus-now" className="inline-flex items-center gap-1.5 text-[13px] font-normal" style={{ color: 'var(--muted)' }}>
+                  <span className="focus-bars" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
                   {FOCUS_LABELS[focus.sound]}
                 </span>
               )}

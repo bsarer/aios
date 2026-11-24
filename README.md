@@ -243,7 +243,7 @@ Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%
 
 ## Focus sounds
 
-A calm sound in the background while you work: rain, waves or brown noise. The Focus tile at the bottom of the chat opens a small panel with the three sounds, Stop and a volume slider; `/focus rain`, `/focus waves`, `/focus brown`, `/focus 30` (volume) and `/focus stop` do the same from the chat. The chat page makes the sounds itself with Web Audio, so there are no audio files and nothing is downloaded. Only your own typing or clicks change them (there is no tool for it, and the assistant points you to /focus). The volume is kept; the sound itself stops when Astra restarts. Three sounds for now, as a first test of the idea.
+A calm sound in the background while you work: rain, waves or brown noise. The Focus tile at the bottom of the chat opens a small panel with the three sounds, Stop and a volume slider; `/focus rain`, `/focus waves`, `/focus brown`, `/focus 30` (volume) and `/focus stop` do the same from the chat. While a sound plays, a quiet line above the message box names it, with buttons to switch to another sound or stop it, and the Focus tile glows. The chat page makes the sounds itself with Web Audio, so there are no audio files and nothing is downloaded. Only your own typing or clicks change them (there is no tool for it, and the assistant points you to /focus). The volume is kept; the sound itself stops when Astra restarts. Three sounds for now, as a first test of the idea.
 
 ## Signal
 

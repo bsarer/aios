@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { FeedbackButton } from './components/FeedbackButton';
 import { MailRail, useInbox } from './components/MailRail';
+import { FocusLine } from './components/FocusLine';
 import { NowPlayingLine } from './components/NowPlayingLine';
 import { PhotoFrames } from './components/PhotoFrames';
 import { useSignals } from './components/SignalPanel';
@@ -159,6 +160,7 @@ export function App() {
         </div>
       </main>
       {/* MU2: the song playing now, quietly above the message box. */}
+      <FocusLine focus={state.focus} disabled={conn !== 'open'} onFocus={(change) => send({ type: 'focus_set', ...change })} />
       <NowPlayingLine nowPlaying={state.nowPlaying} />
       <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
       {/* W1: pinned system features along the bottom of the screen. */}

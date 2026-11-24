@@ -5,7 +5,7 @@
 import { z } from 'zod';
 
 /** W1: the system features that can be pinned as tiles along the bottom of the chat screen. */
-export const WIDGET_KINDS = ['checkup', 'brief', 'todos'] as const;
+export const WIDGET_KINDS = ['checkup', 'brief', 'todos', 'focus'] as const;
 export const WidgetKind = z.enum(WIDGET_KINDS);
 export type WidgetKind = z.infer<typeof WidgetKind>;
 
@@ -492,6 +492,20 @@ export const Widgets = z.strictObject({
 });
 export type Widgets = z.infer<typeof Widgets>;
 
+// ── Focus sounds ─────────────────────────────────────────────────────────────
+
+/**
+ * Calm background sounds the chat page makes itself with Web Audio (packages/ui/src/focus.ts):
+ * no audio files, nothing downloaded. Only the user's own /focus or clicks on the Focus tile
+ * change them (Shell.handle); there is no tool for it. `sound` null: nothing playing.
+ */
+export const FOCUS_SOUNDS = ['rain', 'waves', 'brown'] as const;
+export const FocusSound = z.enum(FOCUS_SOUNDS);
+export type FocusSound = z.infer<typeof FocusSound>;
+export const FOCUS_LABELS: Record<FocusSound, string> = { rain: 'Rain', waves: 'Waves', brown: 'Brown noise' };
+export const Focus = z.strictObject({ sound: FocusSound.nullable(), volume: z.int().min(0).max(100) });
+export type Focus = z.infer<typeof Focus>;
+
 export const Theme = z.record(z.string(), z.string());
 export type Theme = z.infer<typeof Theme>;
 
@@ -589,6 +603,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('widget_open'), widget: WidgetKind }),
   /** W1: the user's own click pinning or unpinning a tile. */
   z.strictObject({ type: z.literal('widget_pin'), widget: WidgetKind, pinned: z.boolean() }),
+  /** Focus sounds: the user's own click on the Focus tile; a sound (or null to stop) and/or a volume. */
+  z.strictObject({ type: z.literal('focus_set'), sound: FocusSound.nullable().optional(), volume: z.int().min(0).max(100).optional() }),
   /** S4: Stop on a running build card. */
   z.strictObject({ type: z.literal('action_stop'), id: z.string().max(100) }),
   /** S4: Open on a finished build; names the Build card, never an app or command. */
@@ -614,7 +630,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional(), wallpaper: Wallpaper.optional(), frames: Frames.optional(), nowPlaying: NowPlaying.optional() }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional(), wallpaper: Wallpaper.optional(), focus: Focus.optional(), frames: Frames.optional(), nowPlaying: NowPlaying.optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
@@ -622,6 +638,7 @@ export const ServerEvent = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('theme'), theme: Theme }),
   z.strictObject({ type: z.literal('widgets'), widgets: Widgets }),
   z.strictObject({ type: z.literal('wallpaper'), wallpaper: Wallpaper }),
+  z.strictObject({ type: z.literal('focus'), focus: Focus }),
   z.strictObject({ type: z.literal('now_playing'), nowPlaying: NowPlaying }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
@@ -641,18 +658,20 @@ export interface ChatState {
   signals: SignalRow[];
   /** The picture behind the chat, or null. */
   wallpaper: Wallpaper;
+  /** Focus sounds: what the page should be playing; null until the server says. */
+  focus: Focus | null;
   /** Photo frames beside the chat, or null. */
   frames: Frames;
   /** MU2: the song playing now, or null. */
   nowPlaying: NowPlaying;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [], wallpaper: null, nowPlaying: null, frames: null };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [], wallpaper: null, focus: null, frames: null, nowPlaying: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [], wallpaper: ev.wallpaper ?? null, frames: ev.frames ?? null, nowPlaying: ev.nowPlaying ?? null };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [], wallpaper: ev.wallpaper ?? null, focus: ev.focus ?? null, frames: ev.frames ?? null, nowPlaying: ev.nowPlaying ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':
@@ -670,6 +689,8 @@ export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
       return { ...state, widgets: ev.widgets };
     case 'wallpaper':
       return { ...state, wallpaper: ev.wallpaper };
+    case 'focus':
+      return { ...state, focus: ev.focus };
     case 'now_playing':
       return { ...state, nowPlaying: ev.nowPlaying };
   }

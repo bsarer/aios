@@ -362,7 +362,7 @@ export const WidgetsConfig = z.strictObject({
     .array(WidgetKind)
     .max(WIDGET_KINDS.length)
     .refine((a) => new Set(a).size === a.length, 'each widget at most once')
-    .default(['checkup', 'brief', 'todos']),
+    .default(['checkup', 'brief', 'todos', 'focus']),
 });
 export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
 

@@ -107,10 +107,14 @@ describe('widgets (W1)', () => {
     await r.shell.handle({ type: 'send', text: '/pin weather' });
     expect(r.notices().at(-1)).toContain('I can pin checkup, brief, todos');
     await r.shell.handle({ type: 'send', text: '/pin' });
+    expect(r.notices().at(-1)).toContain('You can pin: focus');
+    await r.shell.handle({ type: 'send', text: '/pin focus sounds' });
+    await r.shell.handle({ type: 'send', text: '/pin' });
     expect(r.notices().at(-1)).toContain('Everything is pinned');
     expect(r.log().filter((e) => e.kind === 'widgets').map((e) => [e.event, e.widget, e.via])).toEqual([
       ['unpinned', 'todos', 'command'],
       ['pinned', 'todos', 'click'],
+      ['pinned', 'focus', 'command'],
     ]);
   });
 
@@ -178,7 +182,7 @@ describe('only the user pins (W1)', () => {
   });
 
   it('is configured with known widgets only, each once', () => {
-    expect(WidgetsConfig.parse({})).toEqual({ enabled: true, pinned: ['checkup', 'brief', 'todos'] });
+    expect(WidgetsConfig.parse({})).toEqual({ enabled: true, pinned: ['checkup', 'brief', 'todos', 'focus'] });
     expect(WidgetsConfig.parse({ pinned: [] }).pinned).toEqual([]);
     expect(WidgetsConfig.safeParse({ pinned: ['todos', 'todos'] }).success).toBe(false);
     expect(WidgetsConfig.safeParse({ pinned: ['weather'] }).success).toBe(false);

@@ -99,6 +99,7 @@ import { Todos } from './todos/reminders.js';
 import { playChime } from './todos/chime.js';
 import { todoTools } from './todos/tools.js';
 import { WidgetBoard } from './widgets/widgets.js';
+import { FocusSounds } from './focus.js';
 import { KnowledgeCrawler, knowledgeView, progressText } from './knowledge/crawler.js';
 import { KnowledgeFile } from './knowledge/file.js';
 import { KnowledgePeople } from './knowledge/people.js';
@@ -551,6 +552,8 @@ async function main(): Promise<void> {
         post: (item) => shell?.agent.post(item),
       })
     : undefined;
+  // Focus sounds: the chat page makes them; core keeps which one and how loud. Only /focus and the tile change it.
+  const focus = new FocusSounds({ store, audit, broadcast: (f) => shell?.broadcast({ type: 'focus', focus: f }), onChange: () => widgets?.soon() });
   if (config.widgets.enabled) {
     widgets = new WidgetBoard({
       defaults: config.widgets.pinned,
@@ -560,6 +563,7 @@ async function main(): Promise<void> {
         ...(monitor ? { checkup: () => monitor.glance() } : {}),
         ...(brief ? { brief: () => brief.glance() } : {}),
         ...(todos ? { todos: () => todos.glance() } : {}),
+        focus: () => focus.glance(),
       },
       broadcast: (w) => shell?.broadcast({ type: 'widgets', widgets: w }),
     });
@@ -628,6 +632,7 @@ async function main(): Promise<void> {
     personality,
     feedback: new FeedbackLog(join(configDir(), 'feedback.jsonl')),
     wallpaper,
+    focus,
     ...(frames ? { frames } : {}),
     model,
     tools,

@@ -124,6 +124,21 @@ describe('R2 answers: only what needs the person is asked', () => {
     expect(AiosConfig.parse({ ...on, ui: { port: 7780, kiosk: true } }).ui.fade).toBe(true);
   });
 
+  it('turns photo frames on from the Wallpaper step, and keeps them as they were when the step sends nothing', () => {
+    const none = buildConfig(answers(), null, presets, all, GMAIL).config;
+    expect(none.frames).toEqual({ enabled: false, folder: '~/Pictures', count: 2, minutes: 15 });
+    const on = buildConfig(answers({ frames: { enabled: true, folder: '~/Photos/Family', count: 3 } }), null, presets, all, GMAIL).config;
+    expect(on.frames).toEqual({ enabled: true, folder: '~/Photos/Family', count: 3, minutes: 15 });
+    expect(summarize(on, presets)).toMatchObject({ frames: { enabled: true, folder: '~/Photos/Family', count: 3 } });
+    const slower = AiosConfig.parse({ ...on, frames: { ...on.frames, minutes: 60 } });
+    expect(buildConfig(answers({ mail: { address: 'baris@gmail.com', password: '' } }), slower, presets, all, GMAIL).config.frames).toEqual(slower.frames);
+    expect(buildConfig(answers({ mail: { address: 'baris@gmail.com', password: '' }, frames: { enabled: false, folder: '~/Photos/Family', count: 3 } }), slower, presets, all, GMAIL).config.frames).toMatchObject({ enabled: false, minutes: 60 });
+    // Only a folder: ~, ~/… or a full path, without control characters.
+    for (const folder of ['', 'Pictures', '../etc', '~/a\nb', 'C:\\Photos']) expect(SetupAnswers.safeParse({ ...answers(), frames: { enabled: true, folder, count: 2 } }).success).toBe(false);
+    for (const folder of ['~', '~/Pictures', '/mnt/photos']) expect(SetupAnswers.safeParse({ ...answers(), frames: { enabled: true, folder, count: 2 } }).success).toBe(true);
+    expect(SetupAnswers.safeParse({ ...answers(), frames: { enabled: true, folder: '~/Pictures', count: 4 } }).success).toBe(false);
+  });
+
   it('tells the window about the config without any secret', () => {
     const { config } = buildConfig(answers(), null, presets, all, GMAIL);
     const s = JSON.stringify(summarize(config, presets));
@@ -359,6 +374,22 @@ describe('Wallpaper step: only Finish puts the picture behind the chat', () => {
       const off = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), wallpaper: { change: 'remove', dim: 'light' } } });
       expect(JSON.parse(off.body).did).toContain('Took the wallpaper off the chat.');
       expect(wallpaper.current()).toBeNull();
+    } finally {
+      await t.s.close();
+    }
+  });
+
+  it('asks again on Finish when the photo frames folder isn’t there, before writing anything', async () => {
+    const t = await serve({ isFolder: (f) => f === '~/Pictures' });
+    try {
+      const bad = await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), frames: { enabled: true, folder: '~/Nope', count: 2 } } });
+      expect(JSON.parse(bad.body)).toMatchObject({ ok: false, step: 'wallpaper' });
+      expect(JSON.parse(bad.body).message).toContain('~/Nope');
+      expect(t.written).toEqual([]);
+      // Off needs no folder; on with one that is there saves.
+      expect(JSON.parse((await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), frames: { enabled: false, folder: '~/Nope', count: 2 } } })).body)).toMatchObject({ ok: true });
+      expect(JSON.parse((await t.send('/s/tok/api/finish', { method: 'POST', body: { ...answers(), frames: { enabled: true, folder: '~/Pictures', count: 1 } } })).body)).toMatchObject({ ok: true });
+      expect(t.written.at(-1)!.frames).toMatchObject({ enabled: true, folder: '~/Pictures', count: 1 });
     } finally {
       await t.s.close();
     }

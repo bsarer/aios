@@ -13,6 +13,7 @@ import type { AppLink } from './apps/link.js';
 import type { AttachmentFiles } from './mail/attachments.js';
 import type { Shell } from './shell.js';
 import { type Dictation, speechBodyLimit } from './speech/dictation.js';
+import type { PhotoFrames } from './frames.js';
 import type { Wallpaper } from './wallpaper.js';
 
 export interface ServerOptions {
@@ -31,6 +32,8 @@ export interface ServerOptions {
   speech?: Pick<Dictation, 'transcribe' | 'maxSeconds'>;
   /** The picture behind the chat. Without it, /wallpaper answers 404. */
   wallpaper?: Pick<Wallpaper, 'file'>;
+  /** Photo frames beside the chat. Without it, /frame answers 404. */
+  frames?: Pick<PhotoFrames, 'file'>;
 }
 
 /**
@@ -139,6 +142,19 @@ export async function createServer(shell: Shell, o: ServerOptions): Promise<Fast
     const site = req.headers['sec-fetch-site'];
     if (site !== undefined && site !== 'same-origin') return reply.code(403).type('text/plain').send('forbidden');
     const f = o.wallpaper?.file();
+    if (!f) return reply.code(404).type('text/plain').send('not found');
+    return reply.code(200).type(f.type).send(f.bytes);
+  });
+
+  // Photo frames: the page names only a frame's number and the time; code picks the photo inside
+  // the folder from Settings and checks it by its bytes. Same headers as the wallpaper.
+  app.get<{ Params: { slot: string }; Querystring: { t?: string } }>('/frame/:slot', async (req, reply) => {
+    reply.headers(ATTACHMENT_HEADERS);
+    const site = req.headers['sec-fetch-site'];
+    if (site !== undefined && site !== 'same-origin') return reply.code(403).type('text/plain').send('forbidden');
+    const slot = /^[0-2]$/.test(req.params.slot) ? Number(req.params.slot) : -1;
+    const t = typeof req.query.t === 'string' && /^[0-9]{1,12}$/.test(req.query.t) ? Number(req.query.t) : -1;
+    const f = slot >= 0 && t >= 0 ? o.frames?.file(slot, t) : null;
     if (!f) return reply.code(404).type('text/plain').send('not found');
     return reply.code(200).type(f.type).send(f.bytes);
   });

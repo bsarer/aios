@@ -6,7 +6,10 @@
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
+import { statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { AiosConfig, SecretRef, Wallpaper as WallpaperState } from '@aios/shared';
 import { type Wallpaper, WALLPAPER_MAX_BYTES, checkWallpaperBytes } from '@aios/core';
@@ -54,6 +57,8 @@ export interface SetupDeps {
   signal?: { start(): Promise<LinkState>; readonly status: LinkState; cancel(): void };
   /** The picture behind the chat, in the config folder. Without it, the Wallpaper step says it isn't available. */
   wallpaper?: Pick<Wallpaper, 'current' | 'file' | 'set' | 'setDim' | 'remove' | 'samples' | 'useSample' | 'currentSample'>;
+  /** Whether a folder the person typed for the photo frames is there. Default: looks on disk, `~` being the home folder. */
+  isFolder?: (folder: string) => boolean;
   /** Opens the chat and closes the setup window. */
   done: () => void;
   /** Closes the setup window without saving anything or opening the chat (the Exit button). */
@@ -139,6 +144,7 @@ export async function startSetupServer(deps: SetupDeps, opts: { token?: string; 
       const answers = SetupAnswers.parse(body);
       // Checked before anything is written, so a missing picture never leaves a half-saved setup.
       if (answers.wallpaper.change === 'new' && deps.wallpaper && !pickedWallpaper) throw new SetupError('wallpaper', 'Pick the picture again.');
+      if (answers.frames?.enabled && !(deps.isFolder ?? isFolderOnDisk)(answers.frames.folder)) throw new SetupError('wallpaper', `I can’t find the folder ${answers.frames.folder}. Type the folder your photos are in, for example ~/Pictures.`);
       if (answers.wallpaper.change === 'sample' && deps.wallpaper && !deps.wallpaper.samples().some((x) => x.id === answers.wallpaper.sample)) throw new SetupError('wallpaper', 'Pick a sample again.');
       const existing = await deps.readConfig();
       const look = await deps.look();
@@ -301,5 +307,15 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
     throw new SetupError('welcome', 'The window sent something Astra could not read.');
+  }
+}
+
+/** A folder for the photo frames: `~`, `~/…` or a full path that is a folder on this computer. */
+function isFolderOnDisk(folder: string): boolean {
+  const path = folder === '~' ? homedir() : folder.startsWith('~/') ? join(homedir(), folder.slice(2)) : folder;
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
   }
 }

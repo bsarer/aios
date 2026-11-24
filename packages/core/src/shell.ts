@@ -34,6 +34,7 @@ import type { NowPlayingWatch } from './music/now-playing.js';
 import type { SignalActions } from './signal/actions.js';
 import { pickWeb } from './web/tools.js';
 import type { FocusSounds } from './focus.js';
+import type { PhotoFrames } from './frames.js';
 import type { Wallpaper } from './wallpaper.js';
 
 /** MU1: /music's words, mapped by code to music_control's actions. */
@@ -138,6 +139,8 @@ export interface ShellOptions {
   wallpaper?: Pick<Wallpaper, 'current' | 'setFromPath' | 'setDim' | 'remove' | 'samples' | 'sampleByName' | 'useSample'>;
   /** Focus sounds: /focus and the Focus tile. Without it, /focus says they are off. */
   focus?: Pick<FocusSounds, 'current' | 'set' | 'command'>;
+  /** Photo frames beside the chat (Settings only; there is no command or tool for them). */
+  frames?: Pick<PhotoFrames, 'current'>;
   /** The home folder /wallpaper's paths start from. Default: the user's. */
   home?: string;
   /** The Settings gear and /settings: opens the setup window. Without it, they say to run `astra settings`. */
@@ -210,6 +213,7 @@ export class Shell {
       ...(this.o.signal?.recent ? { signals: this.o.signal.recent() } : {}),
       ...(this.o.wallpaper ? { wallpaper: this.o.wallpaper.current() } : {}),
       ...(this.o.focus ? { focus: this.o.focus.current() } : {}),
+      ...(this.o.frames ? { frames: this.o.frames.current() } : {}),
       ...(this.o.nowPlaying ? { nowPlaying: this.o.nowPlaying.current() } : {}),
     };
   }

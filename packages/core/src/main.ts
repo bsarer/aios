@@ -94,6 +94,7 @@ import { ToolRegistry } from './tools/registry.js';
 import { MorningBrief } from './brief/brief.js';
 import { TodoList } from './todos/list.js';
 import { Todos } from './todos/reminders.js';
+import { playChime } from './todos/chime.js';
 import { todoTools } from './todos/tools.js';
 import { WidgetBoard } from './widgets/widgets.js';
 import { KnowledgeCrawler, knowledgeView, progressText } from './knowledge/crawler.js';
@@ -521,6 +522,7 @@ async function main(): Promise<void> {
           widgets?.soon();
         },
         notify: (title, body) => desktopNotify(title, body),
+        ...(config.todos.sound ? { sound: () => playChime(join(dataDir(), 'sounds', 'reminder-1.wav')) } : {}),
       })
     : undefined;
   if (todos) for (const t of todoTools({ todos, timeZone: config.user.timezone })) tools.register(t);

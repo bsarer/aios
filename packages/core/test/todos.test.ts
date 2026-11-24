@@ -25,6 +25,7 @@ const local = (s: string) => zonedToUtc(s, TZ).getTime();
 type TodoItem = Extract<ChatItem, { kind: 'todo' }>;
 
 function rig(o: { quiet?: { start: string; end: string }; paused?: boolean } = {}) {
+  let chimes = 0;
   const dir = tmp('todos');
   const path = join(dir, 'todos.md');
   const store = new Store(':memory:');
@@ -47,6 +48,7 @@ function rig(o: { quiet?: { start: string; end: string }; paused?: boolean } = {
     post: (item) => (save(item), posted.push(item)),
     patch: save,
     notify: (title, body) => notified.push([title, body]),
+    sound: () => chimes++,
     now: () => now,
     newId: () => `card${posted.length + 1}`,
   });
@@ -64,6 +66,7 @@ function rig(o: { quiet?: { start: string; end: string }; paused?: boolean } = {
     tools,
     posted,
     notified,
+    chimes: () => chimes,
     call,
     file: () => (existsSync(path) ? readFileSync(path, 'utf8') : ''),
     card: (id: string) => store.getItem(id) as TodoItem,
@@ -276,6 +279,8 @@ describe('reminders', () => {
     const card = r.posted.at(-1) as TodoItem;
     expect(card).toMatchObject({ event: 'reminder', title: '2 reminders', rows: [{ text: 'Call Ana' }, { text: 'Stretch' }] });
     expect(r.notified).toEqual([['2 reminders', 'Call Ana\nStretch']]);
+    // One chime for the card, not one per reminder, and none on the empty tick after.
+    expect(r.chimes()).toBe(1);
     expect(r.log().find((e) => e.event === 'reminder')).toEqual(expect.objectContaining({ count: 2, lateMinutes: 0 }));
 
     // Snooze moves it on by an hour; it fires again then.
@@ -301,8 +306,11 @@ describe('reminders', () => {
     r.setNow('2026-11-08T07:00');
     r.setPaused(true);
     expect(r.todos.tick()).toBe(0);
+    // No chime in quiet hours or while paused.
+    expect(r.chimes()).toBe(0);
     r.setPaused(false);
     expect(r.todos.tick()).toBe(1);
+    expect(r.chimes()).toBe(1);
     expect(r.posted.at(-1)).toMatchObject({ title: 'Reminder (from Sat 7 Nov, 23:00, while you were away)' });
   });
 });
@@ -332,7 +340,7 @@ passwordRef = "keyring:mail"
 imap = { host = "127.0.0.1", port = 3143, tls = false }
 smtp = { host = "127.0.0.1", port = 3025, tls = false }
 `);
-    expect(c.todos).toEqual({ enabled: true, snoozeMinutes: 60 });
+    expect(c.todos).toEqual({ enabled: true, snoozeMinutes: 60, sound: true });
     expect(c.brief).toEqual({ enabled: true, after: '06:00', maxMails: 5, maxEvents: 10 });
   });
 });

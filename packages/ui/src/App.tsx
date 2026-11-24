@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { FeedbackButton } from './components/FeedbackButton';
 import { MailRail, useInbox } from './components/MailRail';
+import { NowPlayingLine } from './components/NowPlayingLine';
 import { useSignals } from './components/SignalPanel';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
@@ -154,6 +155,8 @@ export function App() {
           <div ref={bottom} />
         </div>
       </main>
+      {/* MU2: the song playing now, quietly above the message box. */}
+      <NowPlayingLine nowPlaying={state.nowPlaying} />
       <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
       {/* W1: pinned system features along the bottom of the screen. */}
       <MailRail inbox={inbox} disabled={conn !== 'open'} onSend={actions.onSend} onIgnoreMail={actions.onIgnoreMail} signals={signals} />

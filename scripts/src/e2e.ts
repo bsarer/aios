@@ -1241,44 +1241,48 @@ async function main(): Promise<void> {
     await waitFor(async () => (await wallpaper.getAttribute('data-dim')) === 'medium');
     await shot(page, 'wallpaper-sample-aurora');
 
-    // Fading older messages (ui/src/fade.ts): a second window on a pretend clock, left idle.
+    // Fading older messages (ui/src/fade.ts): a second window on a pretend clock.
     const away = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await away.clock.install();
     await away.goto(`http://127.0.0.1:${port}/`);
     await away.getByTestId('chat').locator('[data-kind="user"]').last().waitFor();
-    await away.mouse.move(640, 300);
-    // A little way up, so the picture shows a few exchanges.
-    await away.mouse.wheel(0, -420);
-    await sleep(300);
+    await sleep(500);
     const fadedCount = () => away.locator('.fade-msg[data-fade]').count();
-    check('nothing fades while you are here', (await fadedCount()) === 0);
+    // Scrolling up brings everything back; it fades again from then. A little way up, so the picture shows a few exchanges.
+    await away.mouse.move(640, 300);
+    await away.mouse.wheel(0, -420);
+    check('scrolling up brings everything back', await waitFor(async () => (await fadedCount()) === 0));
     await shot(away, 'fade-here');
     await away.clock.runFor(45_000);
     check('nothing fades in the first minute', (await fadedCount()) === 0);
     await away.clock.runFor(30_000);
-    check('older messages start to fade after an idle minute', await waitFor(async () => (await fadedCount()) > 0));
-    // Coming back to the chat's window focuses the message box again, and the pointer may twitch:
-    // neither is the user doing something, so the calm screen stays until they really move.
-    await away.getByTestId('input').focus();
-    await away.mouse.move(643, 302);
+    check('older messages fade after a minute', await waitFor(async () => (await fadedCount()) > 0));
+    // Only scrolling up brings them back: not typing, clicking, moving the mouse or scrolling down.
+    await away.getByTestId('input').click();
+    await away.keyboard.type('still here');
+    await away.mouse.move(900, 500);
+    await away.mouse.wheel(0, 200);
     await away.clock.runFor(6_000);
-    check('focus and a twitch of the pointer keep the fade', (await fadedCount()) > 0);
-    await away.clock.runFor(60_000);
+    check('typing, clicking, moving the mouse and scrolling down keep the fade', (await fadedCount()) > 0);
+    await away.getByTestId('input').fill('');
     const lastAsk = away.locator('.fade-msg', { has: away.locator('[data-kind="user"]') }).last();
     check('the latest question stays solid', (await lastAsk.getAttribute('data-fade')) === null);
     const draftWaits = away.locator('.fade-msg', { has: away.getByTestId('draft-send') });
     check('a draft waiting for Send stays solid', (await draftWaits.count()) === 0 || (await draftWaits.first().getAttribute('data-fade')) === null);
     const fadeLevelsNow = async () => Promise.all((await away.locator('.fade-msg[data-fade]').all()).map(async (l) => Number(await l.getAttribute('data-fade'))));
-    const early = await fadeLevelsNow();
+    await away.mouse.wheel(0, -1);
+    await away.mouse.wheel(0, 1);
+    await away.clock.runFor(75_000);
     await sleep(8500);
+    const early = await fadeLevelsNow();
     await shot(away, 'fade-away');
     await away.clock.runFor(5 * 60_000);
     await sleep(8500);
     const late = await fadeLevelsNow();
-    check('they get fainter the longer you are away, but are never gone', late.length >= early.length && Math.min(...late) < Math.min(...early) && late.every((v) => v >= 0.2 && v < 1), `${early.join(',')} then ${late.join(',')}`);
+    check('they get fainter as time passes, but are never gone', late.length >= early.length && early.length > 0 && Math.min(...late) < Math.min(...early) && late.every((v) => v >= 0.2 && v < 1), `${early.join(',')} then ${late.join(',')}`);
     await shot(away, 'fade-long');
-    await away.mouse.move(700, 320);
-    check('moving the mouse brings them back', await waitFor(async () => (await fadedCount()) === 0));
+    await away.mouse.wheel(0, -300);
+    check('scrolling up brings them back again', await waitFor(async () => (await fadedCount()) === 0));
     await away.close();
 
     await input.fill('/wallpaper off');

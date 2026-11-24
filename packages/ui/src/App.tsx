@@ -9,7 +9,7 @@ import { Icon, type IconName } from './components/ui';
 import { WidgetBar } from './components/WidgetBar';
 import { fadeLevels } from './fade';
 import { applyTheme } from './theme';
-import { useFadeSteps } from './useFade';
+import { useFadeClock } from './useFade';
 import { useChat } from './useChat';
 
 export function App() {
@@ -84,9 +84,11 @@ export function App() {
   }, [state.items, state.clearedAt]);
   // Before the first message of the session, the greeting sits mid-screen with a few starters.
   const fresh = !shown.some((i) => i.kind === 'user');
-  // Older exchanges fade while the user is away from the chat (fade.ts); `[ui] fade = false` turns it off.
-  const fadeSteps = useFadeSteps(state.status?.fade !== false);
-  const faded = useMemo(() => fadeLevels(shown, fadeSteps), [shown, fadeSteps]);
+  // Older exchanges fade as time passes; scrolling up brings them back (fade.ts). `[ui] fade = false` turns it off.
+  const scroller = useRef<HTMLElement>(null);
+  const fadeOn = state.status?.fade !== false;
+  const { now, restoredAt } = useFadeClock(fadeOn, scroller);
+  const faded = useMemo(() => (fadeOn ? fadeLevels(shown, now, restoredAt) : new Map<string, number>()), [fadeOn, shown, now, restoredAt]);
 
   return (
     // While the inbox is open on a wide screen, the chat moves aside for it (styles.css).
@@ -117,7 +119,7 @@ export function App() {
           </span>
         </div>
       )}
-      <main className="flex-1 overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_28px)]" data-testid="chat">
+      <main ref={scroller} className="flex-1 overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_28px)]" data-testid="chat">
         <div className={`mx-auto flex w-[min(760px,calc(100%-24px))] flex-col gap-6 py-10 ${fresh ? 'min-h-full justify-center' : ''}`}>
           {shown.map((item) => {
             const opacity = faded.get(item.id);

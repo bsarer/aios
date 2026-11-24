@@ -372,7 +372,7 @@
         A.wallpaper.change === 'remove' ? el('p', { class: 'hint', text: 'The wallpaper comes off when you press Save.' }) : null,
         el('div', { class: 'toggle' },
           el('input', { type: 'checkbox', id: 'chat-fade', checked: A.chat.fade, onchange: (e) => { A.chat.fade = e.target.checked; } }),
-          el('div', {}, el('label', { for: 'chat-fade', class: 'flat' }, 'Fade older messages'), el('span', { text: 'When you step away, older messages slowly dim so the chat looks calm when you come back. Your latest exchange and anything waiting for you stay clear, and moving the mouse brings everything back.' }))),
+          el('div', {}, el('label', { for: 'chat-fade', class: 'flat' }, 'Fade older messages'), el('span', { text: 'As time passes, older messages slowly dim so the chat doesn’t look cluttered. Your latest exchange and anything waiting for you stay clear, and scrolling up brings everything back.' }))),
       ];
     },
     desktop: () => {

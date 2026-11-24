@@ -271,6 +271,8 @@ export type TodosConfig = z.infer<typeof TodosConfig>;
 /** Routines: the user's own Markdown files in the config folder's `routines/`, run by a phrase, /run or a schedule. */
 export const RoutinesConfig = z.strictObject({
   enabled: z.boolean().default(true),
+  /** Open in editor: a program that opens a window, given the file (e.g. "gnome-text-editor"). Empty: a terminal running $EDITOR, else nvim. */
+  editor: z.union([z.literal(''), z.string().regex(/^[A-Za-z0-9/_.+-]{1,200}$/, 'must be one program name, like gnome-text-editor')]).default(''),
 });
 export type RoutinesConfig = z.infer<typeof RoutinesConfig>;
 

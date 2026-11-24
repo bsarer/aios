@@ -75,7 +75,7 @@ const WORD = /^[A-Za-z0-9/_.,=-]{1,200}$/;
 const hold = (words: readonly string[]) => `${words.join(' ')}; echo; read -rp "Press Enter to close this window. " _`;
 
 /** Terminals to try, each with how it takes a command. Omarchy's own is xdg-terminal-exec. */
-const TERMINALS: [string, string[]][] = [
+export const TERMINALS: [string, string[]][] = [
   ['xdg-terminal-exec', []],
   ['alacritty', ['-e']],
   ['ghostty', ['-e']],

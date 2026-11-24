@@ -37,6 +37,7 @@ import type { FocusSounds } from './focus.js';
 import type { PhotoFrames } from './frames.js';
 import type { Wallpaper } from './wallpaper.js';
 import { nextSlot, ROUTINE_TURN_PREFIX, type Routine, type RoutineFolder, scheduleText } from './routines/routines.js';
+import type { RoutineActions } from './routines/actions.js';
 
 /** MU1: /music's words, mapped by code to music_control's actions. */
 const MUSIC_WORDS: Record<string, MusicAction> = {
@@ -152,7 +153,9 @@ export interface ShellOptions {
    * Routines: the user's own Markdown files. A message that is exactly one of a routine's phrases,
    * or /run, runs it; /routines lists them. Without it, /routines says they are off.
    */
-  routines?: Pick<RoutineFolder, 'load' | 'match' | 'byName' | 'dir'>;
+  routines?: Pick<RoutineFolder, 'load' | 'match' | 'byName' | 'dir' | 'display' | 'read'>;
+  /** Routines: Open in editor, and Save or Discard on a routine change card (the user's clicks). */
+  routineActions?: Pick<RoutineActions, 'confirm' | 'discard' | 'open'>;
   /** A desktop notification, for a routine that starts on its schedule. */
   notify?: (title: string, body: string) => void;
   /** Where /export writes. Default: the memory folder. */
@@ -362,6 +365,10 @@ export class Shell {
     if (msg.type === 'settings_open') return this.openSettings('click');
     // The user's own click on Clear. Works while paused; there is no tool for it.
     if (msg.type === 'chat_clear') return this.clearChat('click');
+    // Routines: the user's own clicks. Open names a routine by its slug, checked again; Save checks the card's hash and the file. Work while paused.
+    if (msg.type === 'routine_open') return this.o.routineActions?.open(msg.slug);
+    if (msg.type === 'routine_change_confirm') return void this.o.routineActions?.confirm(msg.id, msg.hash);
+    if (msg.type === 'routine_change_discard') return this.o.routineActions?.discard(msg.id);
     // K4: the user's own click on Save to knowledge base. Works while paused; there is no tool for it.
     if (msg.type === 'knowledge_save') return this.saveToKnowledge(msg.id);
     const cmd = parseCommand(msg.text);
@@ -418,26 +425,35 @@ export class Shell {
     }
   }
 
-  /** /routines: written by code from the files; names and phrases are the user's own. */
-  private routinesText(): string {
+  private static readonly ROUTINES_OFF = 'Routines are off. Turn them on with enabled = true under [routines] in your config.';
+
+  /** /routines: a card written by code from the files; names and phrases are the user's own, shown as plain text. */
+  private routinesCard(): void {
     const f = this.o.routines;
-    if (!f) return 'Routines are off. Turn them on with enabled = true under [routines] in your config.';
+    if (!f) return void this.agent.notice('info', Shell.ROUTINES_OFF);
     const { routines, problems } = f.load();
     const now = this.clock().getTime();
     const day = new Intl.DateTimeFormat('en-GB', { timeZone: this.o.timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-    const lines = [routines.length ? `Your routines (files in ${f.dir}):` : `You have no routines yet. Add a Markdown file to ${f.dir}, for example weekly-review.md:\n---\nname: Weekly review\nsay: weekly review\nschedule: fri 16:00\n---\nWhat it should do, in your own words.`];
-    for (const r of routines) {
-      const say = r.say.length ? `say ${r.say.map((p) => `“${p}”`).join(' or ')}` : `/run ${r.slug}`;
-      const next = r.schedule ? nextSlot(r.schedule, now, this.o.timeZone) : null;
-      const sched = r.schedule ? `; runs ${scheduleText(r.schedule)}${next === null ? '' : `, next ${day.format(next).replace(',', '')}`}` : '';
-      lines.push(`- ${r.name}: ${say}${sched}`);
-    }
-    if (problems.length) {
-      lines.push('', 'These files have a problem and won’t run until it is fixed:');
-      for (const p of problems) lines.push(`- ${p.file}: ${p.error}`);
-    }
-    if (routines.length) lines.push('', 'Say a routine’s phrase or type /run and its name to start one. Edit the files to change them. A routine that runs on its schedule never changes this computer without your click.');
-    return lines.join('\n');
+    this.agent.post({
+      kind: 'routines',
+      id: randomUUID(),
+      folder: f.display,
+      rows: routines.map((r) => {
+        const next = r.schedule ? nextSlot(r.schedule, now, this.o.timeZone) : null;
+        return { slug: r.slug, name: r.name, say: r.say, ...(r.schedule ? { schedule: scheduleText(r.schedule) } : {}), ...(next === null ? {} : { next: day.format(next).replace(',', '') }) };
+      }),
+      problems,
+      at: now,
+    });
+  }
+
+  /** /routines <name>: one routine's file on a card. */
+  private routineCard(name: string): void {
+    const f = this.o.routines;
+    if (!f) return void this.agent.notice('info', Shell.ROUTINES_OFF);
+    const r = f.byName(name);
+    if (!r) return void this.agent.notice('info', `I have no routine called “${normalizeSpaces(name).slice(0, 60)}”. /routines lists them.`);
+    this.agent.post({ kind: 'routine', id: randomUUID(), slug: r.slug, name: r.name, file: `${f.display}/${r.slug}.md`, text: f.read(r.slug) ?? '', at: this.clock().getTime() });
   }
 
   /**
@@ -856,11 +872,14 @@ export class Shell {
         return;
       }
       case 'routines':
-        return say(this.routinesText());
+        return cmd.text ? this.routineCard(cmd.text) : this.routinesCard();
       case 'run': {
         const f = this.o.routines;
-        if (!f) return say(this.routinesText());
-        if (!cmd.text.trim()) return say(`Type /run and a routine’s name. ${this.routinesText()}`);
+        if (!f) return say(Shell.ROUTINES_OFF);
+        if (!cmd.text.trim()) {
+          say('Type /run and a routine’s name, for example /run weekly review.');
+          return this.routinesCard();
+        }
         const r = f.byName(cmd.text);
         if (!r) return say(`I have no routine called “${normalizeSpaces(cmd.text).slice(0, 60)}”. /routines lists them.`);
         return this.runRoutine(r, 'run', `/run ${normalizeSpaces(cmd.text)}`);

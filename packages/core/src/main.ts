@@ -99,6 +99,9 @@ import { TodoList } from './todos/list.js';
 import { Todos } from './todos/reminders.js';
 import { RoutineFolder, rootsReaching } from './routines/routines.js';
 import { RoutineScheduler } from './routines/scheduler.js';
+import { RoutineActions } from './routines/actions.js';
+import { createRoutineEditor } from './routines/editor.js';
+import { routineTools } from './routines/tools.js';
 import { playChime } from './todos/chime.js';
 import { todoTools } from './todos/tools.js';
 import { WidgetBoard } from './widgets/widgets.js';
@@ -635,14 +638,27 @@ async function main(): Promise<void> {
   const expandHome = (p: string) => (p === '~' ? homedir() : p.startsWith('~/') ? join(homedir(), p.slice(2)) : p);
   const routinesExposed = rootsReaching(routinesDir, [...(config.files.enabled ? config.files.roots : []), ...(config.docs.enabled ? config.docs.roots : [])].map(expandHome));
   if (config.routines.enabled && routinesExposed.length) audit.append({ kind: 'routine', event: 'off', reason: 'folder inside a files folder' });
-  const routineFolder = config.routines.enabled && !routinesExposed.length ? new RoutineFolder(routinesDir) : undefined;
+  const routineFolder = config.routines.enabled && !routinesExposed.length ? new RoutineFolder(routinesDir, homedir()) : undefined;
   if (routineFolder?.installStarters()) audit.append({ kind: 'routine', event: 'starters' });
+  // Showing them, and changing them only from a Save click on a card that shows the change.
+  const routineActions = routineFolder
+    ? new RoutineActions({
+        folder: routineFolder,
+        store,
+        audit,
+        show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
+        notice: (level, text) => shell?.agent.notice(level, text),
+        openEditor: createRoutineEditor({ ...(config.routines.editor ? { editor: config.routines.editor } : {}) }),
+      })
+    : undefined;
+  if (routineFolder && routineActions) for (const t of routineTools({ folder: routineFolder, actions: routineActions, post: (item) => shell?.agent.post(item) })) tools.register(t);
   const frames = config.frames.enabled ? new PhotoFrames({ config: config.frames }) : undefined;
   shell = new Shell({
     store,
     personality,
     feedback: new FeedbackLog(join(configDir(), 'feedback.jsonl')),
     ...(routineFolder ? { routines: routineFolder } : {}),
+    ...(routineActions ? { routineActions } : {}),
     notify: desktopNotify,
     wallpaper,
     focus,

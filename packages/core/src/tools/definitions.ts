@@ -693,6 +693,23 @@ export const ALPHA_TOOLS = [
     input: z.strictObject({ ids: z.array(z.string().max(20)).min(1).max(20) }),
   }),
   def({
+    name: 'routine_show',
+    tier: 'read',
+    description:
+      "Show the user's routines (their own saved instructions, one Markdown file each in their routines folder; not in Documents or their other folders). Without a name: the list, with each routine's phrases and schedule. With a name: that routine's whole file, also shown to the user on a card with Open in editor and Run. Use it whenever the user asks to see, view, open or check a routine.",
+    input: z.strictObject({ name: z.string().min(1).max(80).optional().describe('The routine\'s name, file name or one of its phrases, e.g. "Focus time"') }),
+  }),
+  def({
+    name: 'routine_change',
+    tier: 'write',
+    description:
+      "Change one of the user's routines, or add a new one, when the user asks in their own message. Give the whole new file: a header between --- lines (name, say: phrases separated by commas, optional schedule like \"fri 16:00\", \"weekdays 08:30\" or \"daily 18:00\"), then the instructions. Call routine_show first when changing one. Only shows the user a card with the changes; nothing is saved until they click Save.",
+    input: z.strictObject({
+      file: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/).describe('The file name without .md, letters, digits and dashes, e.g. "focus-time"; a new name adds a routine'),
+      text: z.string().min(1).max(16_000).describe('The whole new file'),
+    }),
+  }),
+  def({
     name: 'now',
     tier: 'read',
     description: 'Current date, time and timezone.',

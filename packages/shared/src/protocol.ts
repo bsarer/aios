@@ -431,6 +431,53 @@ export const ChatItem = z.discriminatedUnion('kind', [
     at: z.number(),
   }),
   z.strictObject({
+    kind: z.literal('routines'),
+    /** /routines: the user's routines, written by code from their files (names and phrases are the user's own). */
+    id: z.string(),
+    /** Where the files are, e.g. "~/.config/astra/routines". */
+    folder: z.string(),
+    rows: z.array(
+      z.strictObject({
+        slug: z.string(),
+        name: z.string(),
+        say: z.array(z.string()),
+        /** e.g. "fri 16:00". */
+        schedule: z.string().optional(),
+        /** e.g. "Fri 27 Nov 16:00". */
+        next: z.string().optional(),
+      }),
+    ),
+    /** Files that won't run, and why (written by code). */
+    problems: z.array(z.strictObject({ file: z.string(), error: z.string() })),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('routine'),
+    /** One routine's file, shown as plain text, with Open in editor and Run. */
+    id: z.string(),
+    slug: z.string(),
+    name: z.string(),
+    /** e.g. "~/.config/astra/routines/focus-time.md". */
+    file: z.string(),
+    text: z.string(),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('routine_change'),
+    /** A new or changed routine file the model wrote, waiting for the user's Save click. Plain text only. */
+    id: z.string(),
+    slug: z.string(),
+    name: z.string(),
+    file: z.string(),
+    isNew: z.boolean(),
+    /** Line by line: ' ' kept, '+' added, '-' taken out. Written by code. */
+    diff: z.array(z.strictObject({ op: z.enum([' ', '+', '-']), text: z.string() })),
+    hash: z.string(),
+    state: z.enum(['pending', 'done', 'discarded', 'failed']),
+    result: z.string().optional(),
+    at: z.number(),
+  }),
+  z.strictObject({
     kind: z.literal('update'),
     /** U1: /update. Written by code; changes are commit subjects from the repository: plain text only. */
     id: z.string(),
@@ -615,6 +662,11 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('settings_open') }),
   /** The chat's Clear button: the screen and the model's context start again. Same as typing /clear. */
   z.strictObject({ type: z.literal('chat_clear') }),
+  /** Routines: Open in editor on a routines or routine card; names the routine's file by its slug only. */
+  z.strictObject({ type: z.literal('routine_open'), slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/) }),
+  /** Routines: Save or Discard on a routine change card, Save echoing the card's hash. */
+  z.strictObject({ type: z.literal('routine_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('routine_change_discard'), id: z.string().max(100) }),
   /** K4: Save to knowledge base on an assistant reply; names the reply, never its text. */
   z.strictObject({ type: z.literal('knowledge_save'), id: z.string().max(100) }),
   z.strictObject({

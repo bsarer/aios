@@ -83,6 +83,11 @@ export interface MessageActions {
   onUpdate: (id: string) => void;
   /** K4: Save to knowledge base on a reply; names the reply. Left out when the knowledge base is off. */
   onKnowledgeSave?: ((id: string) => void) | undefined;
+  /** Routines: Open in editor names a routine by its file's slug. */
+  onRoutineOpen: (slug: string) => void;
+  /** Routines: a changed routine is saved only on this click, which echoes the card's hash. */
+  onRoutineChangeConfirm: (id: string, hash: string) => void;
+  onRoutineChangeDiscard: (id: string) => void;
 }
 
 type ActionItem = Extract<ChatItem, { kind: 'action' }>;
@@ -821,6 +826,121 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
   );
 }
 
+/** /routines: the user's routines with Show, Open in editor and Run. Names and phrases are the user's own: plain text. */
+function RoutinesCard({ item, actions }: { item: Extract<ChatItem, { kind: 'routines' }>; actions: MessageActions }) {
+  return (
+    <Card data-kind="routines" icon="calendar" title="Your routines">
+      {item.rows.length === 0 ? (
+        <div className="text-[15px]">You have no routines yet. Ask me to add one, or put a Markdown file in {item.folder}.</div>
+      ) : (
+        <ul className="space-y-3">
+          {item.rows.map((r) => (
+            <li key={r.slug} data-testid="routine-row" data-slug={r.slug}>
+              <div className="font-medium">{r.name}</div>
+              <div className="text-sm" style={{ color: 'var(--muted)' }}>
+                {r.say.length ? `Say ${r.say.map((p) => `“${p}”`).join(' or ')}` : `Type /run ${r.slug}`}
+                {r.schedule ? ` · runs ${r.schedule}${r.next ? `, next ${r.next}` : ''}` : ''}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <button type="button" data-testid="routine-show" className="btn btn-secondary btn-sm" onClick={() => actions.onSend(`/routines ${r.slug}`)}>
+                  Show
+                </button>
+                <button type="button" data-testid="routine-open" className="btn btn-secondary btn-sm" onClick={() => actions.onRoutineOpen(r.slug)}>
+                  Open in editor
+                </button>
+                <button type="button" data-testid="routine-run" className="btn btn-quiet btn-sm" onClick={() => actions.onSend(`/run ${r.slug}`)}>
+                  Run now
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {item.problems.length > 0 && (
+        <div className="mt-3 text-sm" style={{ color: 'var(--warning)' }}>
+          <div>These files won’t run until they are fixed:</div>
+          {item.problems.map((p) => (
+            <div key={p.file} data-testid="routine-problem">
+              {p.file}: {p.error}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 text-sm" style={{ color: 'var(--muted)' }}>
+        Files in {item.folder}. Ask me to change or add one and I’ll show you the change first. A routine that runs on its schedule never changes this computer without your click.
+      </div>
+    </Card>
+  );
+}
+
+/** One routine's file, as plain text. */
+function RoutineCard({ item, actions }: { item: Extract<ChatItem, { kind: 'routine' }>; actions: MessageActions }) {
+  return (
+    <Card data-kind="routine" icon="calendar" title={item.name}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {item.file}
+      </div>
+      <div data-testid="routine-text" className="inset mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words px-2.5 py-1.5 font-mono text-[13px]">
+        {item.text || '(empty)'}
+      </div>
+      <CardActions>
+        <button type="button" data-testid="routine-open" className="btn btn-primary" onClick={() => actions.onRoutineOpen(item.slug)}>
+          Open in editor
+        </button>
+        <button type="button" data-testid="routine-run" className="btn btn-quiet" onClick={() => actions.onSend(`/run ${item.slug}`)}>
+          Run now
+        </button>
+      </CardActions>
+    </Card>
+  );
+}
+
+const ROUTINE_CHANGE_STATE: Record<Extract<ChatItem, { kind: 'routine_change' }>['state'], string> = { pending: '', done: '✓ Saved', discarded: 'Discarded. Nothing changed.', failed: '' };
+
+/** A new or changed routine waiting for Save, line by line. The text is the model's: plain text only. */
+function RoutineChangeCard({ item, actions }: { item: Extract<ChatItem, { kind: 'routine_change' }>; actions: MessageActions }) {
+  const open = item.state === 'pending' || item.state === 'failed';
+  return (
+    <Card data-kind="routine_change" data-state={item.state} icon="calendar" title={item.isNew ? `New routine: ${item.name}` : `Change ${item.name}?`} badge={open ? { text: NEEDS_OK, tone: 'warning' } : false}>
+      <div className="text-sm" style={{ color: 'var(--muted)' }}>
+        {item.file}
+      </div>
+      <div data-testid="routine-diff" className="inset mt-2 max-h-80 overflow-auto px-0 py-1 font-mono text-[13px]">
+        {item.diff.map((d, i) => (
+          <div
+            key={i}
+            data-op={d.op === '+' ? 'add' : d.op === '-' ? 'remove' : 'keep'}
+            className="whitespace-pre-wrap break-words px-2.5"
+            style={d.op === '+' ? { background: 'color-mix(in srgb, var(--accent) 16%, transparent)' } : d.op === '-' ? { background: 'color-mix(in srgb, var(--danger) 16%, transparent)', textDecoration: 'line-through' } : { color: 'var(--muted)' }}
+          >
+            {d.op === ' ' ? '  ' : `${d.op} `}
+            {d.text || ' '}
+          </div>
+        ))}
+      </div>
+      {item.state === 'failed' && item.result && (
+        <div data-testid="routine-change-state" className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.result}
+        </div>
+      )}
+      {open ? (
+        <CardActions>
+          <button type="button" data-testid="routine-change-save" className="btn btn-primary" onClick={() => actions.onRoutineChangeConfirm(item.id, item.hash)}>
+            {item.state === 'failed' ? 'Try again: Save' : 'Save'}
+          </button>
+          <button type="button" data-testid="routine-change-discard" className="btn btn-quiet" onClick={() => actions.onRoutineChangeDiscard(item.id)}>
+            Discard
+          </button>
+        </CardActions>
+      ) : (
+        <div data-testid="routine-change-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.result ?? ROUTINE_CHANGE_STATE[item.state]}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /** U1: /update's card. All text is written by code, except the changes: commit subjects, shown as plain text. */
 function UpdateCard({ item, actions }: { item: Extract<ChatItem, { kind: 'update' }>; actions: MessageActions }) {
   const tone = item.state === 'failed' ? 'danger' : item.state === 'available' || item.state === 'started' ? 'accent' : 'muted';
@@ -1221,6 +1341,12 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <ResourceAlert item={item} />;
     case 'update':
       return <UpdateCard item={item} actions={actions} />;
+    case 'routines':
+      return <RoutinesCard item={item} actions={actions} />;
+    case 'routine':
+      return <RoutineCard item={item} actions={actions} />;
+    case 'routine_change':
+      return <RoutineChangeCard item={item} actions={actions} />;
     case 'cleanup':
       return <CleanupCard item={item} actions={actions} />;
     case 'todo':

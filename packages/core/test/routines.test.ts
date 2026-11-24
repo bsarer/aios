@@ -115,10 +115,14 @@ describe('routine files', () => {
     expect(rootsReaching(dir, ['/home/j/.config/astra', '/home/j/.config/astra/routines', 'relative'])).toEqual(['/home/j/.config/astra', '/home/j/.config/astra/routines']);
   });
 
-  it('has no tool that runs, writes or lists a routine', () => {
-    expect(ALPHA_TOOLS.map((t) => t.name).filter((n) => /routine/i.test(n))).toEqual([]);
+  it('has no tool that runs a routine; showing is read tier and changing is write tier (a card)', () => {
+    expect(ALPHA_TOOLS.filter((t) => /routine/i.test(t.name)).map((t) => [t.name, t.tier])).toEqual([
+      ['routine_show', 'read'],
+      ['routine_change', 'write'],
+    ]);
     expect(parseCommand('/run weekly review')).toEqual({ name: 'run', text: 'weekly review' });
-    expect(parseCommand('/routines')).toEqual({ name: 'routines' });
+    expect(parseCommand('/routines')).toEqual({ name: 'routines', text: '' });
+    expect(parseCommand('/routines focus time')).toEqual({ name: 'routines', text: 'focus time' });
   });
 });
 
@@ -228,9 +232,7 @@ describe('running a routine', () => {
   it('runs from /run, and lists routines with /routines', async () => {
     const { shell, store, model } = setup([{ text: 'Your week.' }]);
     await shell.handle({ type: 'send', text: '/routines' });
-    const list = store.recentItems().at(-1);
-    expect(list).toMatchObject({ kind: 'notice' });
-    expect((list as { text: string }).text).toContain('- Weekly review: say “weekly review” or “review my week”; runs fri 16:00, next Fri 4 Dec 16:00');
+    expect(store.recentItems().at(-1)).toMatchObject({ kind: 'routines', rows: [{ name: 'Weekly review', next: 'Fri 4 Dec 16:00' }] });
     await shell.handle({ type: 'send', text: '/run weekly review' });
     expect(model.requests).toHaveLength(1);
     await shell.handle({ type: 'send', text: '/run nothing-like-it' });
@@ -326,5 +328,174 @@ describe('the schedule', () => {
     state.now = Date.parse('2026-12-05T09:00:00Z'); // Saturday morning; the computer was off on Friday
     expect(await s.tick()).toBeNull();
     expect(ran).toEqual([]);
+  });
+});
+
+// ── Seeing and changing routines from the chat ──
+
+import { lineDiff, RoutineActions } from '../src/routines/actions.js';
+import { createRoutineEditor } from '../src/routines/editor.js';
+import { routineTools } from '../src/routines/tools.js';
+import type { ChatItem } from '@aios/shared';
+
+function changeSetup() {
+  const dir = tmp();
+  const routinesDir = join(dir, 'routines');
+  mkdirSync(routinesDir);
+  writeFileSync(join(routinesDir, 'weekly-review.md'), WEEKLY);
+  const store = new Store(':memory:');
+  const audit = new AuditLog(join(dir, 'audit.jsonl'));
+  const folder = new RoutineFolder(routinesDir, dir);
+  const posted: ChatItem[] = [];
+  const notices: string[] = [];
+  const opened: string[] = [];
+  const actions = new RoutineActions({
+    folder,
+    store,
+    audit,
+    show: (item) => {
+      store.saveItem(item);
+      posted.push(item);
+    },
+    notice: (_l, t) => notices.push(t),
+    openEditor: async (p) => {
+      opened.push(p);
+      return 'nvim';
+    },
+  });
+  const tools = new ToolRegistry(audit);
+  for (const t of routineTools({ folder, actions, post: (i) => posted.push(i) })) tools.register(t);
+  const last = () => store.getItem(posted.at(-1)!.id) as Extract<ChatItem, { kind: 'routine_change' }>;
+  return { routinesDir, folder, actions, tools, posted, notices, opened, last, store };
+}
+
+const ctx = { signal: AbortSignal.timeout(5000), untrustedInContext: false, userText: 'change my weekly review' };
+const NEW_WEEKLY = WEEKLY.replace('Look at my week.', 'Look at my week.\nThen list three wins.');
+
+describe('changing a routine', () => {
+  it('diffs line by line', () => {
+    expect(lineDiff('a\nb\nc\n', 'a\nB\nc\nd\n')).toEqual([
+      { op: ' ', text: 'a' },
+      { op: '-', text: 'b' },
+      { op: '+', text: 'B' },
+      { op: ' ', text: 'c' },
+      { op: '+', text: 'd' },
+    ]);
+    expect(lineDiff('', 'x\n')).toEqual([{ op: '+', text: 'x' }]);
+  });
+
+  it('only shows a card; Save writes it, keeping the old file as a hidden backup', async () => {
+    const { tools, routinesDir, last, actions, folder } = changeSetup();
+    const r = await tools.execute({ id: 'c', name: 'routine_change', arguments: JSON.stringify({ file: 'weekly-review', text: NEW_WEEKLY }) }, ctx);
+    expect(r.content).toMatch(/Nothing is saved until they click Save/);
+    expect(readFileSync(join(routinesDir, 'weekly-review.md'), 'utf8')).toBe(WEEKLY);
+    const card = last();
+    expect(card).toMatchObject({ kind: 'routine_change', isNew: false, state: 'pending' });
+    expect(card.diff.filter((d) => d.op !== ' ')).toEqual([{ op: '+', text: 'Then list three wins.' }]);
+    expect(actions.confirm(card.id, 'f'.repeat(64))).toBe('refused');
+    expect(actions.confirm(card.id, card.hash)).toBe('done');
+    expect(readFileSync(join(routinesDir, 'weekly-review.md'), 'utf8')).toBe(NEW_WEEKLY);
+    expect(readFileSync(join(routinesDir, '.weekly-review.md.bak'), 'utf8')).toBe(WEEKLY);
+    // The backup is hidden, so it is never read as a routine.
+    expect(folder.load().routines.map((x) => x.slug)).toEqual(['weekly-review']);
+    expect(actions.confirm(card.id, card.hash)).toBe('refused');
+  });
+
+  it('adds a new routine, and refuses one that would not load or takes another’s phrase', async () => {
+    const { tools, routinesDir, last, actions } = changeSetup();
+    const bad = await tools.execute({ id: 'c', name: 'routine_change', arguments: JSON.stringify({ file: 'x', text: 'no header' }) }, ctx);
+    expect(bad.content).toMatch(/^Error: that file wouldn't load/);
+    const clash = await tools.execute({ id: 'c', name: 'routine_change', arguments: JSON.stringify({ file: 'other', text: '---\nname: Other\nsay: review my week\n---\nHi.' }) }, ctx);
+    expect(clash.content).toMatch(/already Weekly review's phrase/);
+    await tools.execute({ id: 'c', name: 'routine_change', arguments: JSON.stringify({ file: 'evening', text: '---\nname: Evening\nsay: good evening\n---\nDim the lights.' }) }, ctx);
+    const card = last();
+    expect(card).toMatchObject({ isNew: true, name: 'Evening' });
+    expect(actions.confirm(card.id, card.hash)).toBe('done');
+    expect(readFileSync(join(routinesDir, 'evening.md'), 'utf8')).toBe('---\nname: Evening\nsay: good evening\n---\nDim the lights.\n');
+  });
+
+  it('refuses to save over a file that changed after the card was made', async () => {
+    const { tools, routinesDir, last, actions } = changeSetup();
+    await tools.execute({ id: 'c', name: 'routine_change', arguments: JSON.stringify({ file: 'weekly-review', text: NEW_WEEKLY }) }, ctx);
+    writeFileSync(join(routinesDir, 'weekly-review.md'), `${WEEKLY}Edited by hand.\n`);
+    const card = last();
+    expect(actions.confirm(card.id, card.hash)).toBe('failed');
+    expect(readFileSync(join(routinesDir, 'weekly-review.md'), 'utf8')).toContain('Edited by hand.');
+    expect(last()).toMatchObject({ state: 'failed' });
+  });
+
+  it('is never offered while outside text is in view, and a scheduled routine can’t use it', async () => {
+    const { tools } = changeSetup();
+    expect(tools.specs({ untrustedInContext: true, untrustedSources: new Set(['email']) }).map((t) => t.name)).not.toContain('routine_change');
+    expect(tools.specs({ untrustedInContext: true, untrustedSources: new Set(['document']) }).map((t) => t.name)).not.toContain('routine_change');
+    const r = await tools.execute({ id: 'c', name: 'routine_change', arguments: JSON.stringify({ file: 'weekly-review', text: NEW_WEEKLY }) }, { ...ctx, untrustedInContext: true });
+    expect(r.content).toMatch(/cannot run while text from an email/);
+    const away = await tools.execute({ id: 'c', name: 'routine_change', arguments: JSON.stringify({ file: 'weekly-review', text: NEW_WEEKLY }) }, { ...ctx, unattended: true });
+    expect(away.content).toMatch(/can't change routines/);
+  });
+
+  it('shows a routine on a card when asked, and lists them without a name', async () => {
+    const { tools, posted } = changeSetup();
+    const list = await tools.execute({ id: 's', name: 'routine_show', arguments: '{}' }, ctx);
+    expect(list.content).toContain('Weekly review (file weekly-review.md): say "weekly review" or "review my week"; runs fri 16:00');
+    expect(list.content).toContain('~/routines');
+    const one = await tools.execute({ id: 's', name: 'routine_show', arguments: '{"name":"Weekly Review"}' }, ctx);
+    expect(one.content).toContain('Look at my week.');
+    expect(posted.at(-1)).toMatchObject({ kind: 'routine', slug: 'weekly-review', file: '~/routines/weekly-review.md', text: WEEKLY });
+  });
+
+  it('opens a routine in the editor only by its slug, checked again', async () => {
+    const { actions, opened, notices, routinesDir } = changeSetup();
+    await actions.open('weekly-review');
+    expect(opened).toEqual([join(routinesDir, 'weekly-review.md')]);
+    await actions.open('gone');
+    expect(opened).toHaveLength(1);
+    expect(notices.at(-1)).toMatch(/no gone.md/);
+  });
+
+  it('starts the editor without a shell: [routines] editor, else $EDITOR in a terminal, else nvim', async () => {
+    const runs: string[][] = [];
+    const start = async (cmd: string, args: string[]) => void runs.push([cmd, ...args]);
+    const has = async (c: string) => ['uwsm-app', 'xdg-terminal-exec', 'nvim', 'helix', 'gnome-text-editor'].includes(c);
+    await createRoutineEditor({ env: { EDITOR: 'helix --x' }, start, has })('/h/r/a.md');
+    await createRoutineEditor({ env: {}, start, has })('/h/r/a.md');
+    await createRoutineEditor({ editor: 'gnome-text-editor', env: {}, start, has })('/h/r/a.md');
+    await expect(createRoutineEditor({ env: { EDITOR: 'rm;x' }, start, has: async (c) => c !== 'nvim' })('/h/r/a.md')).rejects.toThrow(/nvim is not installed/);
+    expect(runs).toEqual([
+      ['uwsm-app', '--', 'xdg-terminal-exec', 'helix', '/h/r/a.md'],
+      ['uwsm-app', '--', 'xdg-terminal-exec', 'nvim', '/h/r/a.md'],
+      ['uwsm-app', '--', 'gnome-text-editor', '--', '/h/r/a.md'],
+    ]);
+  });
+});
+
+describe('the routines card', () => {
+  it('/routines posts a card with each routine, /routines <name> shows one, and Open in editor goes to the actions', async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, 'weekly-review.md'), WEEKLY);
+    const store = new Store(':memory:');
+    const audit = new AuditLog(join(dir, 'audit.jsonl'));
+    const opened: string[] = [];
+    const shell = new Shell({
+      store,
+      model: fakeModel([]),
+      tools: new ToolRegistry(audit),
+      audit,
+      userName: 'John',
+      timeZone: TZ,
+      modelName: 'fake',
+      costCapUsd: 2,
+      readBattery: async () => null,
+      readWifi: async () => null,
+      routines: new RoutineFolder(dir),
+      routineActions: { open: async (slug) => void opened.push(slug), confirm: () => 'refused', discard: () => undefined },
+      clock: () => new Date(FRI_1605),
+    });
+    await shell.handle({ type: 'send', text: '/routines' });
+    expect(store.recentItems().at(-1)).toMatchObject({ kind: 'routines', rows: [{ slug: 'weekly-review', name: 'Weekly review', say: ['weekly review', 'review my week'], schedule: 'fri 16:00', next: 'Fri 4 Dec 16:00' }], problems: [] });
+    await shell.handle({ type: 'send', text: '/routines weekly review' });
+    expect(store.recentItems().at(-1)).toMatchObject({ kind: 'routine', slug: 'weekly-review', text: WEEKLY });
+    await shell.handle({ type: 'routine_open', slug: 'weekly-review' });
+    expect(opened).toEqual(['weekly-review']);
   });
 });

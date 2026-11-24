@@ -204,8 +204,42 @@ export function rootsReaching(dir: string, roots: string[]): string[] {
   });
 }
 
+/** Line ends as \n and exactly one at the end: how routine text is compared, hashed and written. */
+export function normalizeText(text: string): string {
+  return `${text.replace(/\r\n?/g, '\n').replace(/\s+$/, '')}\n`;
+}
+
 export class RoutineFolder {
-  constructor(readonly dir: string) {}
+  /** `home`: shown as ~ in the folder's display path. */
+  constructor(
+    readonly dir: string,
+    private readonly home = '',
+  ) {}
+
+  /** The folder as the user would write it, e.g. ~/.config/astra/routines. */
+  get display(): string {
+    return this.home && (this.dir === this.home || this.dir.startsWith(`${this.home}/`)) ? `~${this.dir.slice(this.home.length)}` : this.dir;
+  }
+
+  /** The file for a slug, checked: letters, digits and dashes only, directly in the folder. */
+  pathOf(slug: string): string {
+    if (!SLUG.test(slug)) throw new Error('a routine file name is letters, digits and dashes, like focus-time');
+    return join(this.dir, `${slug}.md`);
+  }
+
+  /** A routine file's text, or null when there is none. Throws for a link, something that isn't a file, or a file too big. */
+  read(slug: string): string | null {
+    const path = this.pathOf(slug);
+    let st;
+    try {
+      st = lstatSync(path);
+    } catch {
+      return null;
+    }
+    if (!st.isFile()) throw new Error(`${slug}.md is not a regular file (links are not read)`);
+    if (st.size > MAX_FILE_BYTES) throw new Error(`${slug}.md is bigger than ${MAX_FILE_BYTES / 1024} KB`);
+    return readFileSync(path, 'utf8');
+  }
 
   /**
    * Every routine file, read again on each call so an edit applies at once. Only regular `.md`

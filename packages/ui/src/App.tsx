@@ -69,6 +69,9 @@ export function App() {
     onTodo: (id, todoId, action, hash) => send({ type: 'todo_action', id, todoId, action, hash }),
     onDraftEdit: (id, edit) => send({ type: 'draft_edit', id, ...edit }),
     onUpdate: (id) => send({ type: 'update_start', id }),
+    onRoutineOpen: (slug) => send({ type: 'routine_open', slug }),
+    onRoutineChangeConfirm: (id, hash) => send({ type: 'routine_change_confirm', id, hash }),
+    onRoutineChangeDiscard: (id) => send({ type: 'routine_change_discard', id }),
     onKnowledgeSave: state.status?.knowledge ? (id) => send({ type: 'knowledge_save', id }) : undefined,
   };
 

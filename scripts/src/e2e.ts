@@ -93,6 +93,15 @@ async function mockModel(req: IncomingMessage, res: ServerResponse): Promise<voi
     chunk(res, { choices: [{ delta: { content: 'The card is ready; nothing changes until you click it.' } }] });
     return finish(0.0004);
   }
+  // Routines: "view focus time file" shows it on a card; "make focus time play rain" proposes a change.
+  if (last.role === 'user' && /^view focus time file$/i.test(lastUser)) return toolCall('routine_show', { name: 'Focus time' });
+  if (last.role === 'user' && /^make focus time also say rain$/i.test(lastUser)) {
+    return toolCall('routine_change', { file: 'focus-time', text: '---\nname: Focus time\nsay: focus time, start focus time\n---\nTurn on Do Not Disturb and pause the music.\nThen tell me in one line that /focus rain plays rain while I work.\n' });
+  }
+  if (last.role === 'tool' && /^A card now shows the user/.test(last.content ?? '')) {
+    chunk(res, { choices: [{ delta: { content: 'It is on the card.' } }] });
+    return finish(0.0004);
+  }
   // Notifications: "why was that low-priority email low?" goes through mail_recent.
   if (last.role === 'user' && /low.priority email/i.test(lastUser)) {
     chunk(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_n', function: { name: 'mail_recent', arguments: '{}' } }] } }] });
@@ -1073,6 +1082,29 @@ async function main(): Promise<void> {
     await input.press('Enter');
     check('/brief shows it again', await waitFor(async () => (await page.locator('[data-kind="brief"]').count()) >= 2, 10_000));
     await shot(page, '16-todos-brief');
+    // Routines: /routines is a card with the starters; Show puts one file on a card with Open in editor.
+    await input.fill('/routines');
+    await input.press('Enter');
+    const routinesCard = page.locator('[data-kind="routines"]').last();
+    check('/routines lists the four starter routines', await waitFor(async () => (await routinesCard.getByTestId('routine-row').count()) === 4, 10_000));
+    await routinesCard.locator('[data-testid="routine-row"][data-slug="focus-time"]').getByTestId('routine-show').click();
+    const routineCard = page.locator('[data-kind="routine"]').last();
+    check('Show puts the routine file on a card', await waitFor(async () => (await routineCard.count()) === 1 && (await routineCard.getByTestId('routine-text').innerText()).includes('Do Not Disturb'), 10_000));
+    check('the routine card has Open in editor', (await routineCard.getByTestId('routine-open').count()) === 1);
+    await shot(page, '16b-routines');
+    // Asking to view one shows it (it used to search Documents); asking to change one shows the change, saved only on Save.
+    await input.fill('view focus time file');
+    await input.press('Enter');
+    check('asking to view a routine shows its file', await waitFor(async () => (await page.locator('[data-kind="routine"]').count()) === 2, 10_000));
+    await input.fill('make focus time also say rain');
+    await input.press('Enter');
+    const routineChange = page.locator('[data-kind="routine_change"]').last();
+    check('a change shows line by line', await waitFor(async () => (await routineChange.locator('[data-op="add"]').count()) === 1 && (await routineChange.locator('[data-op="remove"]').count()) === 1, 10_000));
+    const focusFile = join(tmp, 'config', 'aios', 'routines', 'focus-time.md');
+    check('nothing is saved before Save', !readFileSync(focusFile, 'utf8').includes('plays rain'));
+    await shot(page, '16c-routine-change');
+    await routineChange.getByTestId('routine-change-save').click();
+    check('Save writes the routine', await waitFor(async () => readFileSync(focusFile, 'utf8').includes('/focus rain plays rain') && (await routineChange.getAttribute('data-state')) === 'done', 10_000));
     // W1: pinned tiles along the bottom: checkup, the brief, to-dos and focus sounds by default; a click opens the full card.
     const tiles = page.getByTestId('widget');
     check('four widgets are pinned at the bottom', (await tiles.count()) === 4 && (await tiles.evaluateAll((els) => els.map((e) => e.getAttribute('data-widget')).join(','))) === 'checkup,brief,todos,focus');

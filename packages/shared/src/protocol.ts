@@ -99,6 +99,13 @@ export const TodoRow = z.strictObject({
 });
 export type TodoRow = z.infer<typeof TodoRow>;
 
+/**
+ * T1: a to-do card row's buttons. The three snoozes are only on reminder cards: `snooze` is
+ * `[todos] snoozeMinutes` (an hour by default), `snooze10` ten minutes, `tomorrow` 9:00 tomorrow.
+ */
+export const TodoAction = z.enum(['done', 'reopen', 'remove', 'snooze', 'snooze10', 'tomorrow']);
+export type TodoAction = z.infer<typeof TodoAction>;
+
 /** T2: one event on the morning brief. Titles come from whoever sent the invite: plain text only. */
 export const BriefEvent = z.strictObject({
   /** Written by code, e.g. "09:30–10:00" or "all day". */
@@ -542,7 +549,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
     type: z.literal('todo_action'),
     id: z.string().max(100),
     todoId: z.string().max(20),
-    action: z.enum(['done', 'reopen', 'remove', 'snooze']),
+    action: TodoAction,
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
   /** W1: a click on a pinned tile; opens its full card in the chat, like the matching command. */

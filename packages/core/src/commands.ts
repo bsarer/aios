@@ -28,6 +28,8 @@ export type Command =
   | { name: 'wallpaper'; text: string }
   | { name: 'feedback'; list: true }
   | { name: 'feedback'; list: false; text: string }
+  /** /feedback remove 3: the number /feedback list shows. Only a bare number, so an idea that starts with "remove" is still saved. */
+  | { name: 'feedback_remove'; n: number }
   | { name: 'unknown'; raw: string };
 
 /** null when the text is a normal message. */
@@ -104,7 +106,10 @@ export function parseCommand(text: string): Command | null {
     case 'feedback': {
       // Keep the idea as typed, line breaks included.
       const text = t.slice(1 + head.length).trim();
-      return /^list$/i.test(text) ? { name: 'feedback', list: true } : { name: 'feedback', list: false, text };
+      if (/^list$/i.test(text)) return { name: 'feedback', list: true };
+      const remove = /^(?:remove|delete)\s+#?(\d{1,6})$/i.exec(text);
+      if (remove) return { name: 'feedback_remove', n: Number(remove[1]) };
+      return { name: 'feedback', list: false, text };
     }
     default:
       return { name: 'unknown', raw: t };
@@ -139,7 +144,7 @@ export const HELP_TEXT = [
   '/tone [friendly | playful | neutral | concise]  show or change how I talk',
   '/wallpaper <sample or picture | off | light | medium | strong>  put a picture behind the chat, take it away, or change how much it is dimmed; /wallpaper samples lists the built-in ones',
   '/settings  open the settings window (the gear at the top does the same); /tone, /pin and /wallpaper change tone, tiles and wallpaper here',
-  '/feedback <idea>  save an improvement idea for later; /feedback list shows them all',
+  '/feedback <idea>  save an improvement idea for later; /feedback list shows them all, /feedback remove <n> deletes one',
   '/clear   clear the chat and start a new conversation (the Clear button at the top does the same; /new too)',
   '/help    this list',
   'Keys: Enter sends, Shift+Enter adds a new line, Up and Down bring back what you sent, Esc stops a reply.',

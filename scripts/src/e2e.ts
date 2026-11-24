@@ -855,7 +855,7 @@ async function main(): Promise<void> {
       await shot(page, '8-mail-peek');
       await page.getByTestId('peek-open').click();
       await inbox.waitFor({ state: 'visible' });
-      check('the inbox lists the urgent email under Needs you, low priority folded', (await inbox.getByTestId('mail-row').count()) === 1 && (await inbox.getByTestId('mail-needs').innerText()).includes(`E2E urgent ${stamp}`));
+      check('the inbox lists the urgent email at the top under Just in, low priority folded', (await inbox.getByTestId('mail-row').count()) === 1 && (await inbox.getByTestId('mail-recent').innerText()).includes(`E2E urgent ${stamp}`));
       check('opening the inbox clears the rail count', await waitFor(async () => (await page.getByTestId('rail-mail').getAttribute('data-fresh')) === '0'));
       await inbox.getByTestId('mail-low-show').click();
       check('low-priority mail keeps its buttons', (await inbox.getByTestId('mail-digest').getByTestId('mail-read').count()) === 1);

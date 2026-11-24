@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type ChatItem, type ClientMessage, type ServerEvent, type SignalRow, type Status, type Theme, WallpaperDim } from '@aios/shared';
+import { type ChatItem, type ClientMessage, type ServerEvent, type SignalRow, type Status, type TodoAction, type Theme, WallpaperDim } from '@aios/shared';
 import { Agent } from './agent.js';
 import type { AuditLog } from './audit.js';
 import { HELP_TEXT, parseCommand } from './commands.js';
@@ -91,7 +91,7 @@ export interface ShellOptions {
   /** L1: the morning review's buttons and /checkup. Without it, cleanup clicks are ignored and /checkup says the assistant is off. */
   cleanup?: { act: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => Promise<void>; run: () => Promise<'nothing' | 'posted'> };
   /** T1: to-do cards' buttons. Without it, todo_action messages are ignored. */
-  todos?: { act: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void; listCard?: () => unknown };
+  todos?: { act: (id: string, todoId: string, action: TodoAction, hash: string) => void; listCard?: () => unknown };
   /** W1: tiles along the bottom of the chat screen. Without it, there are none and /pin says they are off. */
   widgets?: Pick<WidgetBoard, 'current' | 'refresh' | 'setPinned' | 'pinned'>;
   /** T2: the morning brief, checked whenever AI OS is in use, and /brief. Without it, /brief says it is off. */
@@ -120,7 +120,12 @@ export interface ShellOptions {
   /** P1: the install checks for /doctor, written by code. Without it, /doctor says to run `pnpm doctor`. */
   doctor?: () => Promise<string[]>;
   /** U1: /update and its Update button. Without it, /update says to run `astra update` in a terminal. */
-  updates?: { check: () => Promise<UpdateCheck>; open: () => Promise<string> };
+  updates?: {
+    check: () => Promise<UpdateCheck>;
+    open: () => Promise<string>;
+    /** The commit this copy was built from (`BUILD_INFO.json`), or null for a copy run from a checkout. */
+    installed?: () => string | null;
+  };
   /** Long-term memory (A3). Without it, /memory and friends say memory is off. */
   memory?: Memory;
   /** P1: the assistant's name and tone, and /tone. Without it, the chat is Astra, friendly, and /tone says so. */
@@ -132,7 +137,7 @@ export interface ShellOptions {
   /** The Settings gear and /settings: opens the setup window. Without it, they say to run `astra settings`. */
   settings?: { open: () => Promise<void> };
   /** /feedback: the user's improvement ideas. Without it, /feedback says it is off. */
-  feedback?: Pick<FeedbackLog, 'add' | 'list' | 'path'>;
+  feedback?: Pick<FeedbackLog, 'add' | 'list' | 'remove' | 'path'>;
   /** Where /export writes. Default: the memory folder. */
   exportDir?: string;
   clock?: () => Date;
@@ -560,6 +565,39 @@ export class Shell {
     }
   }
 
+  /**
+   * U1: called once at start. When the installed commit differs from the one the last start saw,
+   * an update has just finished: the earlier Update cards are closed (their buttons can't work
+   * after a restart anyway) and one line written by code says which version is running now.
+   */
+  async noteInstalledVersion(): Promise<void> {
+    const up = this.o.updates;
+    const commit = up?.installed?.() ?? null;
+    if (!up || !commit || !/^[0-9a-f]{40}$/.test(commit)) return;
+    const before = this.o.store.getSetting('installed_commit');
+    if (before === commit) return;
+    this.o.store.setSetting('installed_commit', commit);
+    // The first start with this record (a new install, or the update that added it) has nothing to compare.
+    if (!before) return;
+    const short = commit.slice(0, 7);
+    for (const item of this.o.store.recentItems()) {
+      if (item.kind !== 'update' || (item.state !== 'available' && item.state !== 'started')) continue;
+      const done: Extract<ChatItem, { kind: 'update' }> = { ...item, state: 'current', headline: `Updated: Astra is now running ${short}.`, detail: undefined };
+      this.o.store.saveItem(done);
+      this.broadcast({ type: 'patch', id: done.id, item: done });
+    }
+    const r = await up.check().catch((): UpdateCheck => ({ state: 'unavailable', reason: '' }));
+    this.o.audit.append({ kind: 'update', event: 'installed', state: r.state });
+    this.agent.notice(
+      'info',
+      r.state === 'current'
+        ? `Astra is updated and running the latest version (${short} on ${r.branch}). Your settings, keys and data are unchanged.`
+        : r.state === 'available'
+          ? `Astra is updated and running ${short}. ${r.behind === 1 ? 'One newer change has' : `${r.behind || 'Newer'} changes have`} landed since; /update shows ${r.behind === 1 ? 'it' : 'them'}.`
+          : `Astra is updated and running ${short}. Your settings, keys and data are unchanged.`,
+    );
+  }
+
   private async startUpdate(id: string): Promise<void> {
     const card = this.updateCard;
     if (!card || card.id !== id || !this.o.updates) return;
@@ -789,6 +827,16 @@ export class Shell {
         if ('error' in r) return say(r.error);
         this.o.audit.append({ kind: 'feedback', event: 'add', chars: r.text.length });
         return say(this.warm(`Thanks, saved idea #${f.list().length}. /feedback list shows them all.`, `Saved as idea #${f.list().length}. /feedback list shows them all.`));
+      }
+      case 'feedback_remove': {
+        const f = this.o.feedback;
+        if (!f) return say('Feedback is off here.');
+        const r = f.remove(cmd.n);
+        if ('error' in r) return say(r.error);
+        this.o.audit.append({ kind: 'feedback', event: 'remove', chars: r.text.length });
+        // The idea is the user's own words, shown back as plain text.
+        const short = r.text.length > 80 ? `${r.text.slice(0, 80)}…` : r.text;
+        return say(`Removed idea #${cmd.n}: ${short.replace(/\s+/g, ' ')}. The ones after it moved up by one.`);
       }
       case 'unknown':
         return say(`I don't know ${cmd.raw.split(/\s/)[0]}. Type /help for the list.`);

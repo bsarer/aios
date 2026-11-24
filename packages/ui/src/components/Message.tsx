@@ -1,4 +1,4 @@
-import type { ChatItem } from '@aios/shared/protocol';
+import type { ChatItem, TodoAction } from '@aios/shared/protocol';
 import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import { AttachmentViewer } from './AttachmentViewer';
@@ -78,7 +78,7 @@ export interface MessageActions {
   /** L1: a button on one row of the morning review, echoing that row's hash. */
   onCleanup: (id: string, list: 'file' | 'app', n: number, action: 'trash' | 'close' | 'keep', hash: string) => void;
   /** T1: a button on one row of a to-do card, echoing that row's hash. */
-  onTodo: (id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string) => void;
+  onTodo: (id: string, todoId: string, action: TodoAction, hash: string) => void;
   /** U1: Update on an /update card; opens a terminal running astra update. */
   onUpdate: (id: string) => void;
   /** K4: Save to knowledge base on a reply; names the reply. Left out when the knowledge base is off. */
@@ -986,13 +986,18 @@ type TodoItem = Extract<ChatItem, { kind: 'todo' }>;
 
 /** A drawn check box (display only: the buttons beside it do the work). */
 function Box({ done = false }: { done?: boolean }) {
+  // A soft rounded square; done fills it with a tinted accent and a thin drawn tick, not a heavy block.
   return (
     <span
       aria-hidden
-      className="mr-2.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] align-[-3px]"
-      style={done ? { background: 'var(--accent)', color: 'var(--bg)' } : { border: '1.5px solid var(--line-strong)' }}
+      className="mr-2.5 inline-flex h-[17px] w-[17px] items-center justify-center rounded-[5px] align-[-3px] transition-colors"
+      style={
+        done
+          ? { background: 'color-mix(in srgb, var(--accent) 22%, transparent)', border: '1.5px solid color-mix(in srgb, var(--accent) 70%, transparent)', color: 'var(--accent)' }
+          : { border: '1.5px solid color-mix(in srgb, var(--line-strong) 85%, transparent)' }
+      }
     >
-      {done && <Icon name="check" size={12} strokeWidth={3} />}
+      {done && <Icon name="check" size={11} strokeWidth={2.6} />}
     </span>
   );
 }
@@ -1022,7 +1027,13 @@ function TodoCard({ item, actions }: { item: TodoItem; actions: MessageActions }
             {r.state !== 'removed' && (
               <div className="ml-6 mt-1.5 flex flex-wrap gap-2">
                 {r.state === 'open' && btn('todo-done', 'Done', () => actions.onTodo(item.id, r.todoId, 'done', r.hash), item.event === 'reminder')}
-                {r.state === 'open' && item.event === 'reminder' && btn('todo-snooze', 'Later', () => actions.onTodo(item.id, r.todoId, 'snooze', r.hash))}
+                {r.state === 'open' && item.event === 'reminder' && (
+                  <>
+                    {btn('todo-snooze10', '10 min', () => actions.onTodo(item.id, r.todoId, 'snooze10', r.hash))}
+                    {btn('todo-snooze', 'Later', () => actions.onTodo(item.id, r.todoId, 'snooze', r.hash))}
+                    {btn('todo-tomorrow', 'Tomorrow', () => actions.onTodo(item.id, r.todoId, 'tomorrow', r.hash))}
+                  </>
+                )}
                 {r.state === 'done' && btn('todo-reopen', 'Not done', () => actions.onTodo(item.id, r.todoId, 'reopen', r.hash))}
                 {(item.event === 'added' || item.event === 'updated') && btn('todo-remove', 'Remove', () => actions.onTodo(item.id, r.todoId, 'remove', r.hash))}
               </div>

@@ -1,8 +1,10 @@
 import { WIDGET_KINDS, type WidgetKind, type Widgets } from '@aios/shared/protocol';
 import { useState } from 'react';
+import { Icon, type IconName } from './ui';
 
 const TITLES: Record<WidgetKind, string> = { checkup: 'Checkup', brief: 'Today', todos: 'To-dos' };
-const ICONS: Record<WidgetKind, string> = { checkup: '◉', brief: '☀', todos: '☑' };
+// Drawn icons, not text characters: ☑ and ☀ came from the emoji font on some systems and looked out of place.
+const ICONS: Record<WidgetKind, IconName> = { checkup: 'gauge', brief: 'sun', todos: 'checkbox' };
 const hue = (tone: 'normal' | 'attention' | 'off') => (tone === 'attention' ? 'var(--warning)' : 'var(--accent)');
 
 /**
@@ -51,8 +53,8 @@ export function WidgetBar({
             }}
           >
             <button type="button" data-testid="widget-open" disabled={disabled || tone === 'off'} onClick={() => onOpen(k)} className="flex w-full items-center justify-center gap-2 px-3 py-2 text-[15px] font-medium disabled:cursor-default" title={tone === 'off' ? (t?.lines[0] ?? '') : `Open ${TITLES[k]}`}>
-              <span aria-hidden style={{ color: tone === 'off' ? undefined : hue(tone) }}>
-                {ICONS[k]}
+              <span aria-hidden className="inline-flex" style={{ color: tone === 'off' ? undefined : hue(tone) }}>
+                <Icon name={ICONS[k]} size={17} />
               </span>
               {t?.title ?? TITLES[k]}
               {tone === 'attention' && <span data-testid="widget-dot" aria-label="needs a look" className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--warning)', boxShadow: '0 0 6px var(--warning)' }} />}
@@ -103,7 +105,10 @@ export function WidgetBar({
                     onPin(k, true);
                   }}
                 >
-                  {ICONS[k]} Pin {TITLES[k]}
+                  <span aria-hidden className="mr-1.5 inline-flex align-[-3px]" style={{ color: 'var(--accent)' }}>
+                    <Icon name={ICONS[k]} size={16} />
+                  </span>
+                  Pin {TITLES[k]}
                 </button>
               ))}
             </div>

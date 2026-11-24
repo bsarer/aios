@@ -242,6 +242,27 @@ describe('slash commands', () => {
     expect(t.items().at(-1)).toMatchObject({ state: 'current', headline: expect.stringContaining('up to date (ccccccc') });
   });
 
+  it('after an update restarts Astra, says which version is running and closes the old Update cards (U1)', async () => {
+    let installed = 'a'.repeat(40);
+    const check = async (): Promise<import('../src/update.js').UpdateCheck> => ({ state: 'current', commit: installed, branch: 'origin/main' });
+    const t = setup([], { updates: { check, open: async () => 'xdg-terminal-exec', installed: () => installed } });
+    // The first start only records the version.
+    await t.shell.noteInstalledVersion();
+    expect(t.items()).toHaveLength(0);
+    const card: ChatItem = { kind: 'update', id: 'update-1', state: 'started', headline: 'A new version of Astra is ready: 2 changes on origin/main.', changes: ['x'], more: 0, detail: 'A terminal opened.', at: 1 };
+    t.store.saveItem(card);
+    // Same version again: nothing.
+    await t.shell.noteInstalledVersion();
+    expect(t.items()).toHaveLength(1);
+    installed = 'b'.repeat(40);
+    await t.shell.noteInstalledVersion();
+    expect(t.store.getItem('update-1')).toMatchObject({ state: 'current', headline: 'Updated: Astra is now running bbbbbbb.' });
+    expect(t.items().at(-1)).toMatchObject({ kind: 'notice', text: expect.stringContaining('running the latest version (bbbbbbb on origin/main)') });
+    await t.shell.noteInstalledVersion();
+    expect(t.items().filter((i) => i.kind === 'notice')).toHaveLength(1);
+    expect(t.audits().filter((a) => a.kind === 'update').map((a) => a.event)).toEqual(['installed']);
+  });
+
   it('the model has no tool that updates Astra (U1)', () => {
     const names = ALPHA_TOOLS.map((t) => t.name);
     expect(names.filter((n) => /^(update|self_update)$|upgrade|install|astra/i.test(n))).toEqual([]);

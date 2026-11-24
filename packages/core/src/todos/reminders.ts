@@ -12,9 +12,9 @@
  * once for its time; moving the time (or Snooze) makes it fire again. No model is involved.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import type { ChatItem, TodoRow } from '@aios/shared';
+import type { ChatItem, TodoAction, TodoRow } from '@aios/shared';
 import type { AuditLog } from '../audit.js';
-import { LOCAL_DATE, LOCAL_DATE_TIME, daysBetween, utcToLocal, zonedToUtc } from '../calendar/time.js';
+import { LOCAL_DATE, LOCAL_DATE_TIME, daysBetween, nextDay, utcToLocal, zonedToUtc } from '../calendar/time.js';
 import { inQuietHours } from '../mail/pipeline.js';
 import type { Store } from '../store.js';
 import type { Todo, TodoList } from './list.js';
@@ -163,12 +163,13 @@ export class Todos {
    * A click on one row. Only reached from the UI: checks the row's hash, and that the item in
    * the file is still the one the card shows, before anything changes.
    */
-  act(id: string, todoId: string, action: 'done' | 'reopen' | 'remove' | 'snooze', hash: string): void {
+  act(id: string, todoId: string, action: TodoAction, hash: string): void {
     const item = this.o.store.getItem(id);
     if (item?.kind !== 'todo') return;
     const row = item.rows.find((r) => r.todoId === todoId);
     if (!row || row.hash !== hash || row.state === 'removed') return;
-    if (action === 'snooze' && item.event !== 'reminder') return;
+    const snooze = action === 'snooze' || action === 'snooze10' || action === 'tomorrow';
+    if (snooze && item.event !== 'reminder') return;
     const log = (outcome: string) => this.o.audit.append({ kind: 'todos', event: 'click', itemId: id, todoId, action, outcome });
     const current = this.list.get(todoId);
     if (!current || todoHash(current) !== hash) {
@@ -194,10 +195,11 @@ export class Todos {
       return this.setRow(item, todoId, { state: 'removed', result: 'Taken off your list.' });
     }
     if (current.done) return;
-    // Snooze: the next whole minute after now + snoozeMinutes.
-    const at = utcToLocal(Math.ceil((this.now() + this.o.snoozeMinutes * MINUTE) / MINUTE) * MINUTE, this.o.timeZone);
+    // Snooze: the next whole minute after now + the chosen minutes, or 9:00 tomorrow.
+    const minutes = action === 'snooze10' ? 10 : this.o.snoozeMinutes;
+    const at = action === 'tomorrow' ? `${nextDay(today)}T09:00` : utcToLocal(Math.ceil((this.now() + minutes * MINUTE) / MINUTE) * MINUTE, this.o.timeZone);
     const saved = this.list.update(todoId, (t) => ({ ...t, remindAt: at }));
-    log('snoozed');
+    log(action === 'tomorrow' ? 'snoozed_tomorrow' : 'snoozed');
     if (saved) this.setRow(item, todoId, { ...this.row(saved), result: `I'll remind you again ${whenText(at, this.clock()).replace(/^Today, [^,]+, /, 'at ')}.` });
   }
 

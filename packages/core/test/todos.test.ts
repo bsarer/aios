@@ -248,6 +248,23 @@ describe('to-do card clicks', () => {
 });
 
 describe('reminders', () => {
+  it('snooze for ten minutes or until 9:00 tomorrow, only from a reminder card', async () => {
+    const r = rig();
+    await r.call('todo_add', { items: [{ text: 'Call Ana', remindAt: '2026-11-07T16:00' }, { text: 'Stretch', remindAt: '2026-11-07T16:00' }] });
+    const added = r.posted[0] as TodoItem;
+    r.todos.act(added.id, 'id0001', 'tomorrow', added.rows[0]!.hash);
+    expect(r.todos.list.get('id0001')?.remindAt).toBe('2026-11-07T16:00');
+    r.setNow('2026-11-07T16:00');
+    r.todos.tick();
+    const card = r.posted.at(-1) as TodoItem;
+    r.todos.act(card.id, 'id0001', 'snooze10', card.rows[0]!.hash);
+    expect(r.todos.list.get('id0001')?.remindAt).toBe('2026-11-07T16:10');
+    expect(r.card(card.id).rows[0]!.result).toBe("I'll remind you again at 16:10.");
+    r.todos.act(card.id, 'id0002', 'tomorrow', card.rows[1]!.hash);
+    expect(r.todos.list.get('id0002')?.remindAt).toBe('2026-11-08T09:00');
+    expect(r.log().filter((e) => e.event === 'click').map((e) => e.outcome)).toEqual(['snoozed', 'snoozed_tomorrow']);
+  });
+
   it('fire once at their time, as one card and a desktop notification', async () => {
     const r = rig();
     await r.call('todo_add', { items: [{ text: 'Call Ana', remindAt: '2026-11-07T16:00' }, { text: 'Stretch', remindAt: '2026-11-07T16:00' }, { text: 'Later', remindAt: '2026-11-08T09:00' }] });

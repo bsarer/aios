@@ -62,6 +62,7 @@ const CONFIG: KnowledgeConfig = {
   keepDays: 14,
   olderMail: 'off',
   olderMailMonths: 60,
+  mailYears: 2,
   overnight: { start: '01:00', end: '07:00' },
   skipCategories: ['promotions', 'social', 'updates', 'forums'],
   skipAutomated: true,

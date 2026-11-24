@@ -152,6 +152,11 @@ export class KnowledgeLedger {
     return this.db.prepare("UPDATE knowledge_items SET state = 'empty', notes = NULL, updated_at = ? WHERE kind IN ('sent', 'mail') AND state = 'pending'").run(now).changes;
   }
 
+  /** `mailYears`: waiting mail dated before `cutoff` is not read. Returns how many were dropped. */
+  dropMailBefore(cutoff: number, now: number): number {
+    return this.db.prepare("UPDATE knowledge_items SET state = 'empty', notes = NULL, updated_at = ? WHERE kind IN ('sent', 'mail') AND state = 'pending' AND at < ?").run(now, cutoff).changes;
+  }
+
   pendingCount(phase: Phase): number {
     return (this.db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE phase = ? AND state = 'pending'").get(phase) as { n: number }).n;
   }

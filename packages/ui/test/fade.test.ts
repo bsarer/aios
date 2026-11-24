@@ -35,6 +35,10 @@ describe('fade levels', () => {
     expect(f.get('q1')!).toBeLessThan(f.get('q2')!);
   });
 
+  it('makes the first step clear enough to notice at a glance', () => {
+    expect(fadeLevels(chat, 1).get('q2')!).toBeLessThanOrEqual(0.7);
+  });
+
   it('gets fainter each idle minute but never below the floor', () => {
     const a = fadeLevels(chat, 1).get('q2')!;
     const b = fadeLevels(chat, 2).get('q2')!;

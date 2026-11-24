@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer } from './components/Composer';
 import { FeedbackButton } from './components/FeedbackButton';
 import { MailRail, useInbox } from './components/MailRail';
+import { PhotoFrames } from './components/PhotoFrames';
 import { useSignals } from './components/SignalPanel';
 import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
@@ -95,6 +96,8 @@ export function App() {
     <div className={`flex h-full flex-col ${inbox.open || signals.open ? 'inbox-open' : ''}`}>
       {/* The user's wallpaper, behind everything, with the theme's background over it so text stays readable. The version is checked by the protocol (hex only). */}
       {state.wallpaper && <div aria-hidden="true" data-testid="wallpaper" data-dim={state.wallpaper.dim} className="wallpaper" style={{ backgroundImage: `url("/wallpaper?v=${state.wallpaper.version}")` }} />}
+      {/* Photo frames from the folder picked in Settings, in the space left of the chat. */}
+      <PhotoFrames frames={state.frames} hidden={inbox.open || signals.open} />
       <StatusStrip status={state.status} conn={conn} onSettings={() => send({ type: 'settings_open' })} onClear={fresh ? undefined : () => send({ type: 'chat_clear' })} working={working} mail={{ fresh: inbox.fresh, urgent: inbox.urgent }} onMail={() => openInbox(!inbox.open)} />
       {/* S7: the chat keeps its own screen; this says where apps are and how to come back. */}
       {state.status?.appsAt && (

@@ -80,6 +80,7 @@ import { Keyring } from './secrets/keyring.js';
 import { createServer } from './server.js';
 import { Dictation } from './speech/dictation.js';
 import { Personality } from './personality.js';
+import { PhotoFrames } from './frames.js';
 import { Wallpaper, wallpaperSamples } from './wallpaper.js';
 import { FeedbackLog } from './feedback.js';
 import { Shell } from './shell.js';
@@ -613,11 +614,13 @@ async function main(): Promise<void> {
   const dictation = config.models.speech ? new Dictation({ model, audit, maxSeconds: config.models.speech.maxSeconds }) : undefined;
   const themePath = omarchyThemePath();
   const wallpaper = new Wallpaper(configDir(), () => wallpaperSamples());
+  const frames = config.frames.enabled ? new PhotoFrames({ config: config.frames }) : undefined;
   shell = new Shell({
     store,
     personality,
     feedback: new FeedbackLog(join(configDir(), 'feedback.jsonl')),
     wallpaper,
+    ...(frames ? { frames } : {}),
     model,
     tools,
     audit,
@@ -732,6 +735,7 @@ async function main(): Promise<void> {
     ...(appLink ? { appLink } : {}),
     ...(dictation ? { speech: dictation } : {}),
     wallpaper,
+    ...(frames ? { frames } : {}),
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();

@@ -363,6 +363,22 @@ export const WidgetsConfig = z.strictObject({
 export type WidgetsConfig = z.infer<typeof WidgetsConfig>;
 
 /**
+ * Photo frames: a few small photos from one folder the user picked (Settings), standing beside
+ * the chat like frames on a desk, each changing to another photo every `minutes`. Off unless
+ * turned on. Only pictures by their bytes, never hidden files or links (core/src/frames.ts).
+ */
+export const FramesConfig = z.strictObject({
+  enabled: z.boolean().default(false),
+  /** `~/…` or an absolute path; its photos and those one folder down are shown. */
+  folder: z.string().min(1).max(500).default('~/Pictures'),
+  /** How many frames stand beside the chat. */
+  count: z.int().min(1).max(3).default(2),
+  /** How long each photo stays before the frame shows another. */
+  minutes: z.int().min(1).max(24 * 60).default(15),
+});
+export type FramesConfig = z.infer<typeof FramesConfig>;
+
+/**
  * K1: the knowledge base about the user, `~/.config/aios/knowledge/about-me.md`, updated in the
  * background from new mail (triage results), calendar events, file descriptions and chat. It is
  * notes from outside text, never memory: the chat reads it only through knowledge_read, inside
@@ -569,6 +585,8 @@ export const AiosConfig = z.strictObject({
   signal: SignalConfig.prefault({}),
   /** W1: tiles along the bottom of the chat screen. */
   widgets: WidgetsConfig.prefault({}),
+  /** Photo frames beside the chat. */
+  frames: FramesConfig.prefault({}),
   /** K1: the hourly knowledge base about the user. */
   knowledge: KnowledgeConfig.prefault({}),
   /** P1: the assistant's name and tone. */

@@ -506,6 +506,23 @@ export type WallpaperDim = z.infer<typeof WallpaperDim>;
 export const Wallpaper = z.strictObject({ version: z.string().regex(/^[0-9a-f]{12}$/), dim: WallpaperDim }).nullable();
 export type Wallpaper = z.infer<typeof Wallpaper>;
 
+/**
+ * Photo frames beside the chat (Settings, `[frames]`). The page fetches frame `slot`'s photo
+ * from /frame/<slot>?t=<turn>, where turn counts `minutes` since 1970 (each frame a little
+ * later than the one before it), and core picks the photo; the page never names a file.
+ * `version` changes when the folder's photos do. null: no frames.
+ */
+export const Frames = z.strictObject({ count: z.int().min(1).max(3), minutes: z.int().min(1).max(1440), version: z.string().regex(/^[0-9a-f]{12}$/) }).nullable();
+export type Frames = z.infer<typeof Frames>;
+
+/**
+ * Frame `slot`'s turn at `nowMs`: the number of `minutes` periods since 1970, with each frame
+ * changing a little after the one before it so they don't all change at once.
+ */
+export function frameTurn(nowMs: number, minutes: number, slot: number, count: number): number {
+  return Math.max(0, Math.floor(nowMs / (minutes * 60_000) - slot / count));
+}
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 export const ClientMessage = z.discriminatedUnion('type', [
@@ -581,7 +598,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional(), wallpaper: Wallpaper.optional() }),
+  z.strictObject({ type: z.literal('hello'), userName: z.string(), items: z.array(ChatItem), status: Status, theme: Theme, widgets: Widgets.optional(), clearedAt: z.number().optional(), signals: z.array(SignalRow).max(200).optional(), wallpaper: Wallpaper.optional(), frames: Frames.optional() }),
   z.strictObject({ type: z.literal('item'), item: ChatItem }),
   z.strictObject({ type: z.literal('delta'), id: z.string(), text: z.string() }),
   z.strictObject({ type: z.literal('patch'), id: z.string(), item: ChatItem }),
@@ -607,14 +624,16 @@ export interface ChatState {
   signals: SignalRow[];
   /** The picture behind the chat, or null. */
   wallpaper: Wallpaper;
+  /** Photo frames beside the chat, or null. */
+  frames: Frames;
 }
 
-export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [], wallpaper: null };
+export const initialChatState: ChatState = { userName: '', items: [], status: null, theme: {}, widgets: null, clearedAt: null, signals: [], wallpaper: null, frames: null };
 
 export function applyEvent(state: ChatState, ev: ServerEvent): ChatState {
   switch (ev.type) {
     case 'hello':
-      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [], wallpaper: ev.wallpaper ?? null };
+      return { userName: ev.userName, items: ev.items, status: ev.status, theme: ev.theme, widgets: ev.widgets ?? null, clearedAt: ev.clearedAt ?? null, signals: ev.signals ?? [], wallpaper: ev.wallpaper ?? null, frames: ev.frames ?? null };
     case 'item':
       return { ...state, items: [...state.items.filter((i) => i.id !== ev.item.id), ev.item] };
     case 'patch':

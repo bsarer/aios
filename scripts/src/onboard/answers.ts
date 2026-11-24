@@ -122,6 +122,14 @@ export const SetupAnswers = z.strictObject({
     .default({ change: 'keep', dim: 'medium' }),
   /** Older messages fade while the user is away from the chat (`[ui] fade`). */
   chat: z.strictObject({ fade: z.boolean() }).default({ fade: true }),
+  /** Photo frames beside the chat (`[frames]`): a folder in the home folder or a full path. Left out: kept as they were. */
+  frames: z
+    .strictObject({
+      enabled: z.boolean(),
+      folder: z.string().trim().max(300).regex(/^(~|~\/[^\0\p{Cc}]+|\/[^\0\p{Cc}]*)$/u, 'Type a folder such as ~/Pictures'),
+      count: z.int().min(1).max(3),
+    })
+    .optional(),
 });
 export type SetupAnswers = z.infer<typeof SetupAnswers>;
 
@@ -228,6 +236,7 @@ export function buildConfig(
     video: { ...(base?.video ?? {}), enabled: a.apps.video && !!found.mpv, ...(found.mpv ? { player: found.mpv } : {}) },
     builder: { ...(base?.builder ?? {}), enabled: a.apps.builder && !!found.claude, ...(found.claude ? { command: found.claude } : {}) },
     ui: { ...(base?.ui ?? { port: DEFAULT_PORT }), kiosk: a.desktop.autostart, fade: a.chat.fade },
+    ...(a.frames ? { frames: { ...(base?.frames ?? {}), enabled: a.frames.enabled, folder: a.frames.folder, count: a.frames.count } } : {}),
     screen: { ...(base?.screen ?? {}), monitor: a.monitor },
     signal: signalSection(a, base, found, signalLinked),
     knowledge: knowledgeSection(base, preset, prevChat?.baseUrl === baseUrl),
@@ -283,6 +292,7 @@ export function summarize(c: AiosConfig | null, presets: Record<string, Provider
     apps: { docs: c.docs.enabled, video: c.video.enabled, builder: c.builder.enabled, voice: !!c.models.speech },
     autostart: c.ui.kiosk,
     fade: c.ui.fade,
+    frames: { enabled: c.frames.enabled, folder: c.frames.folder, count: c.frames.count },
     calendar: !!c.calendar,
     signal: { enabled: c.signal.enabled, account: c.signal.account ?? null },
     monitor: c.screen.monitor,

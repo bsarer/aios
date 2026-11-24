@@ -89,6 +89,8 @@ function fakeDeps(state: { config: AiosConfig | null; secrets: Map<SecretRef, st
     wallpaper: state.wallpaper,
     done: () => void state.done++,
     exit: () => void state.exits++,
+    // Photo frames: a pretend home folder that has ~/Pictures only.
+    isFolder: (f) => f === '~/Pictures',
   };
 }
 
@@ -212,6 +214,11 @@ async function main(): Promise<void> {
     check(await page.isChecked('#chat-fade'), 'fading older messages starts on');
     if (shots) await page.screenshot({ path: join(shots, 'settings-wallpaper-fade.png') });
     await page.uncheck('#chat-fade');
+    check(!(await page.isChecked('#frames-on')) && (await page.locator('#frames-folder').count()) === 0, 'photo frames start off');
+    await page.check('#frames-on');
+    check((await page.inputValue('#frames-folder')) === '~/Pictures', 'photo frames offer ~/Pictures');
+    await page.click('button.card[data-frames="3"]');
+    if (shots) await page.screenshot({ path: join(shots, 'settings-photo-frames.png'), fullPage: true });
     await next(page);
     check((await page.textContent('main'))?.includes('You have 2 screens'), 'two screens ask which is Astra’s');
     check((await page.getAttribute('button.card[aria-pressed="true"]', 'aria-pressed')) === 'true' && (await page.textContent('button.card[aria-pressed="true"] b')) === 'eDP-1', 'the focused screen is picked');
@@ -233,6 +240,7 @@ async function main(): Promise<void> {
     check(!JSON.stringify(c).includes(FAKE_KEY) && !JSON.stringify(c).includes('abcdefghijklmnop'), 'no secret is in the config');
     check(state.wallpaper.current()?.dim === 'strong', 'Finish put the picture behind the chat, dimmed strongly');
     check(!c.ui.fade, 'fading older messages is saved off');
+    check(c.frames.enabled && c.frames.folder === '~/Pictures' && c.frames.count === 3, 'photo frames are saved on, three from ~/Pictures');
     check(state.installs === 1, 'the desktop parts were installed once');
     check((await page.inputValue('#key').catch(() => '')) === '', 'the page forgets the key');
     await next(page);
@@ -262,6 +270,7 @@ async function main(): Promise<void> {
     await until(async () => (await again.locator('[data-testid="wp-preview"] img').evaluate((img) => (img as unknown as { naturalWidth: number }).naturalWidth)) > 0);
     check((await again.getAttribute('[data-testid="wp-preview"]', 'data-dim')) === 'strong', 'the wallpaper comes back, with its dim');
     check(!(await again.isChecked('#chat-fade')), 'fading comes back off');
+    check((await again.isChecked('#frames-on')) && (await again.getAttribute('button.card[data-frames="3"]', 'aria-pressed')) === 'true', 'photo frames come back on, three of them');
     await again.click('nav button:has-text("Finish")');
     check((await again.textContent('#next')) === 'Save', 'the last button is Save');
     await next(again);

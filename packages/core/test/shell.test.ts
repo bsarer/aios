@@ -178,6 +178,12 @@ describe('slash commands', () => {
     expect(model.requests).toHaveLength(1);
   });
 
+  it('tells the chat to keep older messages solid only when [ui] fade is off', () => {
+    expect(setup().shell.status().fade).toBeUndefined();
+    expect(setup([], { fade: true }).shell.status().fade).toBeUndefined();
+    expect(setup([], { fade: false }).shell.status()).toMatchObject({ fade: false });
+  });
+
   it('/cost reports today from the usage table', async () => {
     const { shell, store, items } = setup();
     store.recordUsage({ at: CLOCK.getTime() - 1000, role: 'chat', model: 'm', ok: true, costUsd: 0.0123, promptTokens: 100, completionTokens: 20 });

@@ -120,6 +120,8 @@ export const SetupAnswers = z.strictObject({
   wallpaper: z
     .strictObject({ change: z.enum(['keep', 'new', 'remove', 'sample']), dim: WallpaperDim, sample: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).optional() })
     .default({ change: 'keep', dim: 'medium' }),
+  /** Older messages fade while the user is away from the chat (`[ui] fade`). */
+  chat: z.strictObject({ fade: z.boolean() }).default({ fade: true }),
 });
 export type SetupAnswers = z.infer<typeof SetupAnswers>;
 
@@ -225,7 +227,7 @@ export function buildConfig(
     },
     video: { ...(base?.video ?? {}), enabled: a.apps.video && !!found.mpv, ...(found.mpv ? { player: found.mpv } : {}) },
     builder: { ...(base?.builder ?? {}), enabled: a.apps.builder && !!found.claude, ...(found.claude ? { command: found.claude } : {}) },
-    ui: { ...(base?.ui ?? { port: DEFAULT_PORT }), kiosk: a.desktop.autostart },
+    ui: { ...(base?.ui ?? { port: DEFAULT_PORT }), kiosk: a.desktop.autostart, fade: a.chat.fade },
     screen: { ...(base?.screen ?? {}), monitor: a.monitor },
     signal: signalSection(a, base, found, signalLinked),
     knowledge: knowledgeSection(base, preset, prevChat?.baseUrl === baseUrl),
@@ -280,6 +282,7 @@ export function summarize(c: AiosConfig | null, presets: Record<string, Provider
     folders: c.files.roots,
     apps: { docs: c.docs.enabled, video: c.video.enabled, builder: c.builder.enabled, voice: !!c.models.speech },
     autostart: c.ui.kiosk,
+    fade: c.ui.fade,
     calendar: !!c.calendar,
     signal: { enabled: c.signal.enabled, account: c.signal.account ?? null },
     monitor: c.screen.monitor,

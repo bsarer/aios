@@ -625,6 +625,7 @@ async function main(): Promise<void> {
     timeZone: config.user.timezone,
     modelName: config.models.chat.model,
     costCapUsd: config.cost.dailyCapUsd,
+    fade: config.ui.fade,
     readBattery,
     readWifi,
     theme: await readTheme(themePath),

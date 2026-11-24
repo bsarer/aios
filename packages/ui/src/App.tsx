@@ -7,7 +7,9 @@ import { Message, type MessageActions } from './components/Message';
 import { StatusStrip } from './components/StatusStrip';
 import { Icon, type IconName } from './components/ui';
 import { WidgetBar } from './components/WidgetBar';
+import { fadeLevels } from './fade';
 import { applyTheme } from './theme';
+import { useFadeSteps } from './useFade';
 import { useChat } from './useChat';
 
 export function App() {
@@ -82,6 +84,9 @@ export function App() {
   }, [state.items, state.clearedAt]);
   // Before the first message of the session, the greeting sits mid-screen with a few starters.
   const fresh = !shown.some((i) => i.kind === 'user');
+  // Older exchanges fade while the user is away from the chat (fade.ts); `[ui] fade = false` turns it off.
+  const fadeSteps = useFadeSteps(state.status?.fade !== false);
+  const faded = useMemo(() => fadeLevels(shown, fadeSteps), [shown, fadeSteps]);
 
   return (
     // While the inbox is open on a wide screen, the chat moves aside for it (styles.css).
@@ -114,12 +119,20 @@ export function App() {
       )}
       <main className="flex-1 overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_28px)]" data-testid="chat">
         <div className={`mx-auto flex w-[min(760px,calc(100%-24px))] flex-col gap-6 py-10 ${fresh ? 'min-h-full justify-center' : ''}`}>
-          {shown.map((item) => (
-            // Everything but the two sides of the conversation lines up with the assistant's text.
-            <div key={item.id} className={item.kind === 'user' || item.kind === 'assistant' ? '' : 'pl-10 empty:hidden'}>
-              <Message item={item} actions={actions} />
-            </div>
-          ))}
+          {shown.map((item) => {
+            const opacity = faded.get(item.id);
+            return (
+              // Everything but the two sides of the conversation lines up with the assistant's text.
+              <div
+                key={item.id}
+                data-fade={opacity === undefined ? undefined : opacity}
+                className={`fade-msg ${item.kind === 'user' || item.kind === 'assistant' ? '' : 'pl-10 empty:hidden'}`}
+                style={opacity === undefined ? undefined : { opacity }}
+              >
+                <Message item={item} actions={actions} />
+              </div>
+            );
+          })}
           {fresh && shown.length > 0 && <Starters mail={state.status?.mail === 'connected'} disabled={conn !== 'open'} onSend={actions.onSend} />}
           <div ref={bottom} />
         </div>

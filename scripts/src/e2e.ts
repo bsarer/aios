@@ -1240,6 +1240,40 @@ async function main(): Promise<void> {
     await input.press('Enter');
     await waitFor(async () => (await wallpaper.getAttribute('data-dim')) === 'medium');
     await shot(page, 'wallpaper-sample-aurora');
+
+    // Fading older messages (ui/src/fade.ts): a second window on a pretend clock, left idle.
+    const away = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await away.clock.install();
+    await away.goto(`http://127.0.0.1:${port}/`);
+    await away.getByTestId('chat').locator('[data-kind="user"]').last().waitFor();
+    await away.mouse.move(640, 300);
+    // A little way up, so the picture shows a few exchanges.
+    await away.mouse.wheel(0, -420);
+    await sleep(300);
+    const fadedCount = () => away.locator('.fade-msg[data-fade]').count();
+    check('nothing fades while you are here', (await fadedCount()) === 0);
+    await shot(away, 'fade-here');
+    await away.clock.runFor(90_000);
+    check('nothing fades a minute and a half in', (await fadedCount()) === 0);
+    await away.clock.runFor(2 * 60_000);
+    check('older messages start to fade after a few idle minutes', await waitFor(async () => (await fadedCount()) > 0));
+    const lastAsk = away.locator('.fade-msg', { has: away.locator('[data-kind="user"]') }).last();
+    check('the latest question stays solid', (await lastAsk.getAttribute('data-fade')) === null);
+    const draftWaits = away.locator('.fade-msg', { has: away.getByTestId('draft-send') });
+    check('a draft waiting for Send stays solid', (await draftWaits.count()) === 0 || (await draftWaits.first().getAttribute('data-fade')) === null);
+    const fadeLevelsNow = async () => Promise.all((await away.locator('.fade-msg[data-fade]').all()).map(async (l) => Number(await l.getAttribute('data-fade'))));
+    const early = await fadeLevelsNow();
+    await sleep(8500);
+    await shot(away, 'fade-away');
+    await away.clock.runFor(5 * 60_000);
+    await sleep(8500);
+    const late = await fadeLevelsNow();
+    check('they get fainter the longer you are away, but are never gone', late.length >= early.length && Math.min(...late) < Math.min(...early) && late.every((v) => v >= 0.2 && v < 1), `${early.join(',')} then ${late.join(',')}`);
+    await shot(away, 'fade-long');
+    await away.mouse.move(700, 320);
+    check('moving the mouse brings them back', await waitFor(async () => (await fadedCount()) === 0));
+    await away.close();
+
     await input.fill('/wallpaper off');
     await input.press('Enter');
     check('/wallpaper off takes it away', await waitFor(async () => (await wallpaper.count()) === 0));

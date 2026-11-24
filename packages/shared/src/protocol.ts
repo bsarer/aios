@@ -456,6 +456,8 @@ export const Status = z.strictObject({
   knowledge: z.literal(true).optional(),
   /** SG1: Signal is linked, so the side rail shows its Signal button even before a message comes in. */
   signal: z.literal(true).optional(),
+  /** `[ui] fade = false`: older messages don't fade while the user is away (left out: they do). */
+  fade: z.literal(false).optional(),
 });
 export type Status = z.infer<typeof Status>;
 

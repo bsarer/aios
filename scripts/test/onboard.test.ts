@@ -52,7 +52,7 @@ describe('R2 answers: only what needs the person is asked', () => {
     expect(config.docs).toMatchObject({ enabled: true, roots: config.files.roots, wordCli: '/usr/bin/wordcraft-cli', sheetCli: '/home/j/gridcraft-0.11.1/gridcraft-cli' });
     expect(config.video).toMatchObject({ enabled: true, player: '/usr/bin/mpv' });
     expect(config.builder).toMatchObject({ enabled: true, command: '/home/j/.local/bin/claude' });
-    expect(config.ui).toEqual({ port: 7780, kiosk: true });
+    expect(config.ui).toEqual({ port: 7780, kiosk: true, fade: true });
     expect([...secrets]).toEqual([['keyring:model-chat', KEY], ['keyring:mail', 'abcdefghijklmnop']]);
     expect(JSON.stringify(config)).not.toContain(KEY);
     expect(JSON.stringify(config)).not.toContain('abcdefghij');
@@ -111,6 +111,17 @@ describe('R2 answers: only what needs the person is asked', () => {
     const custom = AiosConfig.parse({ ...on, models: { ...on.models, speech: { baseUrl: 'http://127.0.0.1:9000', language: 'tr' } } });
     expect(buildConfig(answers({ apps: voice, mail: { address: 'baris@gmail.com', password: '' } }), custom, presets, none, GMAIL).config.models.speech).toMatchObject({ baseUrl: 'http://127.0.0.1:9000', language: 'tr' });
     expect(buildConfig(answers({ mail: { address: 'baris@gmail.com', password: '' } }), custom, presets, none, GMAIL).config.models.speech).toBeUndefined();
+  });
+
+  it('keeps older chat messages fading unless the Wallpaper step turns it off, and tells the window which', () => {
+    const on = buildConfig(answers(), null, presets, all, GMAIL).config;
+    expect(on.ui.fade).toBe(true);
+    expect(summarize(on, presets)).toMatchObject({ fade: true });
+    const off = buildConfig(answers({ chat: { fade: false } }), null, presets, all, GMAIL).config;
+    expect(off.ui.fade).toBe(false);
+    expect(summarize(off, presets)).toMatchObject({ fade: false });
+    // An older config.toml without the line fades, like a new one.
+    expect(AiosConfig.parse({ ...on, ui: { port: 7780, kiosk: true } }).ui.fade).toBe(true);
   });
 
   it('tells the window about the config without any secret', () => {

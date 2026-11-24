@@ -34,7 +34,7 @@ describe('config schema', () => {
     const c = parseConfig(valid);
     expect(c.mail.pollIntervalSeconds).toBe(30);
     expect(c.mail.batchWindowSeconds).toBe(20);
-    expect(c.ui).toEqual({ port: 7777, kiosk: true });
+    expect(c.ui).toEqual({ port: 7777, kiosk: true, fade: true });
     expect(c.screen).toEqual({ monitor: '' });
     expect(c.models.chat.maxTokens).toBe(1024);
     expect(c.calendar).toBeUndefined();

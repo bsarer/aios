@@ -516,8 +516,10 @@ export const AiosConfig = z.strictObject({
     .strictObject({
       port: z.int().min(1024).max(65_535).default(7777),
       kiosk: z.boolean().default(true),
+      /** Older chat messages fade while the user is away from the chat; false keeps them solid. */
+      fade: z.boolean().default(true),
     })
-    .default({ port: 7777, kiosk: true }),
+    .default({ port: 7777, kiosk: true, fade: true }),
   /** S6/S7: the screen AI OS takes over. The chat is always full screen there and apps open elsewhere. */
   screen: z
     .strictObject({

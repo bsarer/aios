@@ -168,3 +168,13 @@ body {
   );
 }
 .wallpaper ~ main { text-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 60%, transparent); }
+
+/*
+ * Fading older messages (fade.ts): while the user is away they dim slowly, a step a minute;
+ * any activity brings them back quickly. `data-fade` is set only on the ones that fade.
+ */
+.fade-msg { transition: opacity 0.35s ease-out; }
+.fade-msg[data-fade] { transition: opacity 8s ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+  .fade-msg, .fade-msg[data-fade] { transition: none; }
+}

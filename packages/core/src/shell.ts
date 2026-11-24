@@ -57,6 +57,8 @@ export interface ShellOptions {
   timeZone: string;
   modelName: string;
   costCapUsd: number;
+  /** `[ui] fade`: false tells the chat to keep older messages solid. Default: they fade. */
+  fade?: boolean;
   readBattery: () => Promise<Battery | null>;
   readWifi: () => Promise<Wifi | null>;
   theme?: Theme;
@@ -237,6 +239,7 @@ export class Shell {
       ...(this.o.voice ? { voice: { maxSeconds: this.o.voice.maxSeconds } } : {}),
       ...(this.o.knowledge?.save ? { knowledge: true as const } : {}),
       ...(this.o.signal ? { signal: true as const } : {}),
+      ...(this.o.fade === false ? { fade: false as const } : {}),
     };
   }
 

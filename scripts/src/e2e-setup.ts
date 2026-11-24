@@ -209,6 +209,9 @@ async function main(): Promise<void> {
     check(state.wallpaper.current() === null, 'a picked picture shows in the preview, and nothing is saved yet');
     await page.click('button.card:has-text("Strong")');
     check((await page.getAttribute('[data-testid="wp-preview"]', 'data-dim')) === 'strong', 'the preview dims as chosen');
+    check(await page.isChecked('#chat-fade'), 'fading older messages starts on');
+    if (shots) await page.screenshot({ path: join(shots, 'settings-wallpaper-fade.png') });
+    await page.uncheck('#chat-fade');
     await next(page);
     check((await page.textContent('main'))?.includes('You have 2 screens'), 'two screens ask which is Astra’s');
     check((await page.getAttribute('button.card[aria-pressed="true"]', 'aria-pressed')) === 'true' && (await page.textContent('button.card[aria-pressed="true"] b')) === 'eDP-1', 'the focused screen is picked');
@@ -229,6 +232,7 @@ async function main(): Promise<void> {
     check(state.secrets.get('keyring:model-chat') === FAKE_KEY && state.secrets.get('keyring:mail') === 'abcdefghijklmnop', 'the key and app password went to the keyring');
     check(!JSON.stringify(c).includes(FAKE_KEY) && !JSON.stringify(c).includes('abcdefghijklmnop'), 'no secret is in the config');
     check(state.wallpaper.current()?.dim === 'strong', 'Finish put the picture behind the chat, dimmed strongly');
+    check(!c.ui.fade, 'fading older messages is saved off');
     check(state.installs === 1, 'the desktop parts were installed once');
     check((await page.inputValue('#key').catch(() => '')) === '', 'the page forgets the key');
     await next(page);
@@ -257,6 +261,7 @@ async function main(): Promise<void> {
     // The page's CSP allows no eval, so this is a function; the scripts are typed without the DOM.
     await until(async () => (await again.locator('[data-testid="wp-preview"] img').evaluate((img) => (img as unknown as { naturalWidth: number }).naturalWidth)) > 0);
     check((await again.getAttribute('[data-testid="wp-preview"]', 'data-dim')) === 'strong', 'the wallpaper comes back, with its dim');
+    check(!(await again.isChecked('#chat-fade')), 'fading comes back off');
     await again.click('nav button:has-text("Finish")');
     check((await again.textContent('#next')) === 'Save', 'the last button is Save');
     await next(again);

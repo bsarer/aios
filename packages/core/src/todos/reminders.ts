@@ -9,7 +9,8 @@
  * Reminders: every half minute code looks for open items whose reminder time has passed and
  * posts them as one card, with a desktop notification. Like new-mail notifications they wait
  * while AI OS is paused or in quiet hours, and come as soon as that ends. Each reminder fires
- * once for its time; moving the time (or Snooze) makes it fire again. No model is involved.
+ * once for its time; moving the time (or Snooze) makes it fire again, with a short chime
+ * (`chime.ts`, off with `[todos] sound = false`). No model is involved.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { ChatItem, TodoAction, TodoRow } from '@aios/shared';
@@ -90,6 +91,8 @@ export interface TodosOptions {
   patch: (item: ChatItem) => void;
   /** A desktop notification for a reminder (S4's notify-send). */
   notify?: (title: string, body: string) => void;
+  /** A short chime when reminders fire (`todos/chime.ts`); left out when `[todos] sound = false`. */
+  sound?: () => void;
   now?: () => number;
   newId?: () => string;
 }
@@ -242,6 +245,8 @@ export class Todos {
     // Counts only: the items' text stays out of the audit log.
     this.o.audit.append({ kind: 'todos', event: 'reminder', count: due.length, lateMinutes: Math.round((now - due[0]!.ms) / MINUTE) });
     this.o.notify?.(due.length === 1 ? 'Reminder' : `${due.length} reminders`, due.map((d) => d.t.text).join('\n'));
+    // One chime per card, however many reminders it holds.
+    this.o.sound?.();
     return due.length;
   }
 

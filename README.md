@@ -201,7 +201,7 @@ Settings: `[files]` `enabled`, `roots` (default `["~/Documents", "~/Downloads"]`
   - **Safety:** only your own messages can add, move or tick off items. While an email, invite or document is being read, the chat can't touch the list at all.
 - **Morning brief (T2):** the first time you use AI OS each day after 06:00 (outside quiet hours), one card lists urgent mail since the last brief, today's events and free time, and what is due today or overdue. `/brief` shows it any time. With the local model (below) it writes two friendly lines on top, without a cloud call; without it, the lines are written by code. It only shows things; nothing on it changes anything.
 
-Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
+Settings: `[todos]` `enabled` (default true), `snoozeMinutes` (default 60), `sound` (default true: a short chime when a reminder fires, never in quiet hours or while paused; `false` turns it off). `[brief]` `enabled` (default true), `after` (default `"06:00"`), `maxMails` (default 5), `maxEvents` (default 10). Free time uses `[calendar] workday`.
 
 Astra's voice (P1): `[personality]` `name` (default `"Astra"`) and `tone` (`"friendly"` default, `"playful"`, `"neutral"`, `"concise"`). Type `/tone` in the chat to see it and `/tone playful` to change it; the change applies to the next reply and is kept.
 
@@ -237,7 +237,9 @@ Settings: `[web]` `enabled` (default true), `browser` (default `"chromium"`), `s
 
 "Pause the music", "skip this song", "go back one" and "what's playing?" control Spotify, or any other player that works with playerctl (MPRIS: a browser tab, mpv, VLC...), through `playerctl`, which the Astra package installs (from source: `sudo pacman -S playerctl`; `astra doctor` says when it is missing). `/music` says what is playing without asking the model, and `/music pause`, `/music play`, `/music next` and `/music previous` change it. Song names are outside text (whoever published the song chose them), so they reach the model only inside `<untrusted>` tags; while one, or an email or document, is in view, a change waits for your click on a card. Searching for and starting a particular song or playlist isn't there yet: it needs a Spotify account sign-in, which is a later step.
 
-Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open).
+While a song plays, a quiet line above the message box names it (title · artist, with "Paused" in front when it is paused) and disappears when the music stops. It is display only: the song's words go to the screen as plain text and never to the AI.
+
+Settings: `[music]` `enabled` (default true), `players` (default `["spotify", "%any"]`: Spotify first, then any player that is open), `nowPlaying` (default true; false hides the line).
 
 ## Signal
 

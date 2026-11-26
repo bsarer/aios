@@ -28,6 +28,8 @@ class FakeServer {
   msgs: Msg[] = [];
   nextUid = 1;
   failOpen: string | null = null;
+  /** How long reading one email takes (Gmail: a few round trips each). */
+  readMs = 0;
   sources: FakeSource[] = [];
   deliver(key: string, internal = Date.now()): void {
     const uid = this.nextUid++;
@@ -64,12 +66,22 @@ class FakeSource implements MailSource {
     if (!this.open_) throw new Error('closed');
     return { uidValidity: this.s.uidValidity, uidNext: this.s.nextUid };
   }
-  async fetchAfter(uid: number) {
+  async uidsAfter(uid: number) {
     if (!this.open_) throw new Error('closed');
-    return this.s.msgs.filter((m) => m.uid > uid);
+    return this.s.msgs.filter((m) => m.uid > uid).map((m) => m.uid);
   }
-  async fetchSince(date: Date) {
-    return this.s.msgs.filter((m) => m.internal >= date.getTime());
+  async uidsSince(date: Date) {
+    return this.s.msgs.filter((m) => m.internal >= date.getTime()).map((m) => m.uid);
+  }
+  async fetch(uids: number[]) {
+    const out: Msg[] = [];
+    for (const uid of uids) {
+      if (!this.open_) throw new Error('closed');
+      if (this.s.readMs) await new Promise((r) => setTimeout(r, this.s.readMs));
+      const m = this.s.msgs.find((x) => x.uid === uid);
+      if (m) out.push(m);
+    }
+    return out;
   }
   onExists(cb: () => void) {
     this.existsCb.push(cb);
@@ -89,7 +101,7 @@ class FakeSource implements MailSource {
   }
 }
 
-function watcherSetup(checkTimeoutMs?: number) {
+function watcherSetup(checkTimeoutMs?: number, batchSize?: number) {
   const server = new FakeServer();
   const state = new MailState(new Store(':memory:'));
   const statuses: WatcherStatus[] = [];
@@ -102,6 +114,7 @@ function watcherSetup(checkTimeoutMs?: number) {
     onStatus: (s) => statuses.push(s),
     backoffMs: [5],
     ...(checkTimeoutMs ? { checkTimeoutMs } : {}),
+    ...(batchSize ? { batchSize } : {}),
   });
   const queued = () => state.withStatus('pending', 500).map((e) => e.messageId);
   return { server, state, w, statuses, queued, newCount: () => newCount };
@@ -167,6 +180,24 @@ describe('mail watcher', () => {
     await until(() => queued().length === 1);
     expect(queued()).toEqual(['<late@x>']);
     expect(statuses.filter((s) => s === 'connected').length).toBe(2);
+    await w.stop();
+  });
+
+  it('a backlog that takes longer to read than a check may run still reaches the queue, a batch at a time', async () => {
+    // A busy day after a night asleep: reading all 24 waiting emails takes 240 ms, a check may run
+    // 100 ms. Reading everything before queuing anything timed out, reconnected and started over
+    // forever, so the inbox stayed on yesterday's mail.
+    const { server, w, queued, statuses } = watcherSetup(100, 4);
+    w.start();
+    await until(() => statuses.includes('connected'));
+    await w.check();
+    server.readMs = 10;
+    for (let i = 0; i < 24; i++) server.msgs.push({ uid: server.nextUid, internal: Date.now(), messageId: `<m${i}@x>`, mailId: `INBOX:${server.nextUid++}`, from: 'f <f@x>', subject: 's', date: Date.now(), body: 'b' });
+    await w.check();
+    await until(() => queued().length === 24, 5000);
+    expect(queued()).toEqual(Array.from({ length: 24 }, (_, i) => `<m${i}@x>`));
+    await w.check();
+    expect(queued().length).toBe(24);
     await w.stop();
   });
 

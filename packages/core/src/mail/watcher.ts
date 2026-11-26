@@ -21,6 +21,13 @@ const TRIAGE_BODY_CHARS = 2000;
  * waiting for the socket to time out while new mail piles up.
  */
 const CHECK_TIMEOUT_MS = 90_000;
+/**
+ * New mail is read and queued this many at a time, oldest first, so a check always gets
+ * somewhere. Reading every waiting email before queuing any meant that, after a sleep or a busy
+ * day, a backlog that took longer than CHECK_TIMEOUT_MS to read was dropped and started again on
+ * every reconnect, and no new mail ever reached the inbox.
+ */
+export const FETCH_BATCH = 10;
 /** Restart IDLE this often, so a quietly dropped connection shows up within minutes. */
 export const MAX_IDLE_MS = 4 * 60 * 1000;
 
@@ -35,10 +42,12 @@ export interface MailSource {
   open(): Promise<MailboxInfo>;
   /** Current UIDVALIDITY and UIDNEXT of the open mailbox. */
   info(): Promise<MailboxInfo>;
-  /** Messages with UID greater than `uid`. */
-  fetchAfter(uid: number): Promise<(NewMail & { uid: number })[]>;
-  /** Messages that arrived on or after `date` (used after a UIDVALIDITY change). */
-  fetchSince(date: Date): Promise<(NewMail & { uid: number })[]>;
+  /** UIDs greater than `uid`. */
+  uidsAfter(uid: number): Promise<number[]>;
+  /** UIDs of messages that arrived on or after `date` (used after a UIDVALIDITY change). */
+  uidsSince(date: Date): Promise<number[]>;
+  /** Read these messages; one that is gone is left out. */
+  fetch(uids: number[]): Promise<(NewMail & { uid: number })[]>;
   /** Called when the server announces new messages. */
   onExists(cb: () => void): void;
   /** Called once when the connection ends, for any reason. */
@@ -60,6 +69,8 @@ export interface WatcherOptions {
   backoffMs?: number[];
   /** Longest a check may take before the connection is dropped and opened again. */
   checkTimeoutMs?: number;
+  /** Emails read and queued at a time. Default FETCH_BATCH. */
+  batchSize?: number;
 }
 
 export class MailWatcher {
@@ -72,11 +83,13 @@ export class MailWatcher {
   private readonly now: () => number;
   private readonly backoff: number[];
   private readonly checkTimeout: number;
+  private readonly batchSize: number;
 
   constructor(private readonly o: WatcherOptions) {
     this.now = o.now ?? Date.now;
     this.backoff = o.backoffMs ?? [1000, 2000, 5000, 10_000, 30_000];
     this.checkTimeout = o.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
+    this.batchSize = Math.max(1, o.batchSize ?? FETCH_BATCH);
   }
 
   start(): void {
@@ -172,13 +185,25 @@ export class MailWatcher {
       return;
     }
     const resync = prev.uidValidity !== info.uidValidity;
-    const found = resync ? await source.fetchSince(new Date(prev.checkedAt - RESYNC_MARGIN_MS)) : await source.fetchAfter(prev.lastUid);
-    // A check that outlived its connection (timed out above) records nothing; the new one rechecks.
+    const uids = [...new Set(resync ? await source.uidsSince(new Date(prev.checkedAt - RESYNC_MARGIN_MS)) : (await source.uidsAfter(prev.lastUid)).filter((u) => u > prev.lastUid))].sort((a, b) => a - b);
     if (this.source !== source) return;
-    const fresh = found.filter((m) => !this.o.state.known(m.messageId));
-    const lastUid = Math.max(resync ? info.uidNext - 1 : prev.lastUid, ...found.map((m) => m.uid));
-    const added = this.o.state.record(FOLDER, { uidValidity: info.uidValidity, lastUid, checkedAt: now }, fresh, now);
-    if (added) this.o.onNew(added);
+    if (!uids.length) {
+      this.o.state.record(FOLDER, { uidValidity: info.uidValidity, lastUid: resync ? info.uidNext - 1 : prev.lastUid, checkedAt: now }, [], now);
+      return;
+    }
+    // Oldest first, a batch at a time, each recorded before the next is read: a check that runs out
+    // of time keeps what it queued, and the next one carries on from there.
+    for (let i = 0; i < uids.length; i += this.batchSize) {
+      const chunk = uids.slice(i, i + this.batchSize);
+      const found = await source.fetch(chunk);
+      // A check that outlived its connection (timed out above) records nothing more; the new one rechecks.
+      if (this.source !== source) return;
+      const fresh = found.filter((m) => !this.o.state.known(m.messageId));
+      const last = i + this.batchSize >= uids.length;
+      const lastUid = Math.max(chunk.at(-1)!, last && resync ? info.uidNext - 1 : 0, resync ? 0 : prev.lastUid);
+      const added = this.o.state.record(FOLDER, { uidValidity: info.uidValidity, lastUid, checkedAt: last ? now : prev.checkedAt }, fresh, this.now());
+      if (added) this.o.onNew(added);
+    }
   }
 }
 
@@ -214,10 +239,10 @@ export class ImapMailSource implements MailSource {
     return this.client;
   }
 
-  private async load(uids: number[]): Promise<(NewMail & { uid: number })[]> {
+  async fetch(uids: number[]): Promise<(NewMail & { uid: number })[]> {
     const client = this.need();
     const out: (NewMail & { uid: number })[] = [];
-    for (const uid of uids.sort((a, b) => a - b)) {
+    for (const uid of [...uids].sort((a, b) => a - b)) {
       const m = await readFull(client, FOLDER, uid);
       if (!m) continue;
       out.push({
@@ -233,17 +258,16 @@ export class ImapMailSource implements MailSource {
     return out;
   }
 
-  async fetchAfter(uid: number): Promise<(NewMail & { uid: number })[]> {
-    const uids = ((await this.need().search({ uid: `${uid + 1}:*` }, { uid: true })) || []).filter((u) => u > uid);
-    return this.load(uids);
+  async uidsAfter(uid: number): Promise<number[]> {
+    return ((await this.need().search({ uid: `${uid + 1}:*` }, { uid: true })) || []).filter((u) => u > uid);
   }
 
-  async fetchSince(date: Date): Promise<(NewMail & { uid: number })[]> {
+  async uidsSince(date: Date): Promise<number[]> {
     // IMAP SINCE is date-only; filter to the exact time afterwards.
     const client = this.need();
     const uids = (await client.search({ since: date }, { uid: true })) || [];
     const fetched = uids.length ? await client.fetchAll(uids.join(','), { uid: true, internalDate: true }, { uid: true }) : [];
-    return this.load(fetched.filter((m) => m.internalDate && new Date(m.internalDate).getTime() >= date.getTime()).map((m) => m.uid));
+    return fetched.filter((m) => m.internalDate && new Date(m.internalDate).getTime() >= date.getTime()).map((m) => m.uid);
   }
 
   onExists(cb: () => void): void {

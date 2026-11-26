@@ -253,10 +253,16 @@ export function connect(c: MailConnection, password: string, opts: { idle: boole
  * Gmail and most providers report, whatever the folder's name or language), else one named
  * Drafts or Sent. Null when there is none.
  */
-export function findSpecial(list: Pick<ListResponse, 'path' | 'specialUse'>[], kind: 'drafts' | 'sent'): string | null {
-  const flag = kind === 'drafts' ? '\\Drafts' : '\\Sent';
-  const name = kind === 'drafts' ? 'drafts' : 'sent';
-  return list.find((m) => m.specialUse === flag)?.path ?? list.find((m) => m.path.toLowerCase() === name)?.path ?? null;
+export function findSpecial(list: Pick<ListResponse, 'path' | 'specialUse'>[], kind: 'drafts' | 'sent' | 'trash'): string | null {
+  const flag = kind === 'drafts' ? '\\Drafts' : kind === 'sent' ? '\\Sent' : '\\Trash';
+  const names = kind === 'drafts' ? ['drafts'] : kind === 'sent' ? ['sent'] : ['trash', 'deleted items', 'deleted messages', 'deleted'];
+  return list.find((m) => m.specialUse === flag)?.path ?? list.find((m) => names.includes(m.path.toLowerCase()))?.path ?? null;
+}
+
+/** One message as a mail action card names it, with the headers unsubscribing is decided from. */
+export interface InspectedMail extends MessageSummary {
+  /** The List-Unsubscribe, List-Unsubscribe-Post, DKIM-Signature and Authentication-Results lines, raw. */
+  headers: string;
 }
 
 /**
@@ -457,7 +463,7 @@ export class MailClient {
     return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
   }
 
-  private special: Partial<Record<'drafts' | 'sent', string>> = {};
+  private special: Partial<Record<'drafts' | 'sent' | 'trash', string>> = {};
 
   /** The Drafts or Sent folder: by special-use flag when the server reports one, else by name. */
   async specialFolder(kind: 'drafts' | 'sent'): Promise<string> {
@@ -492,6 +498,52 @@ export class MailClient {
       await client.messageDelete(String(uid), { uid: true });
     } finally {
       lock.release();
+    }
+  }
+
+  /** The summary and unsubscribe headers of one message; null when there is no such message. */
+  async inspect(id: string, headers: readonly string[], signal?: AbortSignal): Promise<InspectedMail | null> {
+    const ref = parseMailId(id);
+    if (!ref) return null;
+    return this.inFolder(
+      ref.folder,
+      async (client) => {
+        const msg = await client.fetchOne(String(ref.uid), { uid: true, envelope: true, internalDate: true, ...(headers.length ? { headers: [...headers] } : {}) }, { uid: true });
+        return msg ? { ...summaryOf(ref.folder, msg), headers: msg.headers?.toString('utf8').slice(0, 64 * 1024) ?? '' } : null;
+      },
+      signal,
+    );
+  }
+
+  /**
+   * Moves one message to the server's Trash folder (Gmail: "[Gmail]/Trash", where it stays 30
+   * days), only if the message at that id still has `messageId`, so a reused UID can never move
+   * another email. Never deletes outright: without a Trash folder it fails. 'gone' when the
+   * message isn't there any more (moved or deleted elsewhere).
+   */
+  async trash(id: string, messageId: string | null): Promise<'moved' | 'gone'> {
+    const ref = parseMailId(id);
+    if (!ref) return 'gone';
+    try {
+      const path = await this.mailboxOf(ref.folder);
+      if (!path) return 'gone';
+      const client = await this.connection();
+      const trash = this.special.trash ?? findSpecial(await client.list(), 'trash');
+      if (!trash) throw new Error('your mailbox has no Trash folder, so nothing was deleted');
+      this.special.trash = trash;
+      if (trash === path) return 'moved';
+      const lock = await client.getMailboxLock(path);
+      try {
+        const msg = await client.fetchOne(String(ref.uid), { uid: true, envelope: true }, { uid: true });
+        if (!msg || (msg.envelope?.messageId ?? null) !== messageId) return 'gone';
+        const moved = await client.messageMove(String(ref.uid), trash, { uid: true });
+        if (!moved) throw new Error('the mail server did not move it');
+        return 'moved';
+      } finally {
+        lock.release();
+      }
+    } catch (err) {
+      throw new Error(describeMailError(err), { cause: err });
     }
   }
 

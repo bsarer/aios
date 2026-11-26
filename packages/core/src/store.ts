@@ -117,6 +117,10 @@ const MIGRATIONS = [
    CREATE TABLE IF NOT EXISTS knowledge_person_events (person TEXT NOT NULL, source TEXT NOT NULL, ref TEXT NOT NULL, at INTEGER NOT NULL, dir TEXT NOT NULL,
                                         subject TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1, mine INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (person, source, ref));
    CREATE INDEX IF NOT EXISTS knowledge_person_events_at ON knowledge_person_events(person, at);`,
+  // Mail actions: moving emails to Trash or unsubscribing, waiting for a click. The hash is what the click must match.
+  `CREATE TABLE IF NOT EXISTS mail_actions (id TEXT PRIMARY KEY, spec TEXT NOT NULL, card TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL,
+                                           result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX IF NOT EXISTS mail_actions_state ON mail_actions(state);`,
 ];
 
 export interface UsageRow {

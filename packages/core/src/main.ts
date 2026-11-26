@@ -50,7 +50,7 @@ import { createDocumentOpener } from './docs/open.js';
 import { docTools } from './docs/tools.js';
 import { createVideoPlayer } from './video/play.js';
 import { pickVideo, videoTools } from './video/tools.js';
-import { createBrowserOpener } from './web/open.js';
+import { BROWSER_NAME, createBrowserOpener } from './web/open.js';
 import { createPageFetcher } from './web/read.js';
 import { webTools } from './web/tools.js';
 import { createMusicPlayer, describeNowPlaying } from './music/player.js';
@@ -66,6 +66,9 @@ import { modelGate } from './gate.js';
 import { ApprovalBroker } from './mail/approvals.js';
 import { AttachmentFiles } from './mail/attachments.js';
 import { draftTools } from './mail/draft-tools.js';
+import { MailActions } from './mail/actions.js';
+import { mailActionTools } from './mail/action-tools.js';
+import { createOneClickPoster } from './mail/unsubscribe.js';
 import { OutgoingFiles } from './mail/outgoing-files.js';
 import { MailClient, type MailConnection } from './mail/imap.js';
 import { ImapSmtpOutbox } from './mail/outbox.js';
@@ -653,6 +656,27 @@ async function main(): Promise<void> {
     : undefined;
   if (routineFolder && routineActions) for (const t of routineTools({ folder: routineFolder, actions: routineActions, post: (item) => shell?.agent.post(item) })) tools.register(t);
   const frames = config.frames.enabled ? new PhotoFrames({ config: config.frames }) : undefined;
+  // Moving mail to Trash and unsubscribing: a card, then the user's click (mail/actions.ts).
+  const browser = createBrowserOpener(config.web.browser);
+  const mailActions = new MailActions({
+    store,
+    mail: mailClient,
+    audit,
+    drafts: approvals,
+    postOneClick: createOneClickPoster(),
+    openLink: async (url) => {
+      await chatWindow.appStarting(BROWSER_NAME);
+      try {
+        await browser(url);
+      } catch (err) {
+        await chatWindow.appFailed(BROWSER_NAME);
+        throw new Error(`Chromium didn't open: ${(err as Error).message}`, { cause: err });
+      }
+    },
+    onTrashed: (ids) => shell?.markTrashed(ids),
+    show: (item, isNew) => (isNew ? shell?.agent.post(item) : shell?.patchItem(item)),
+  });
+  for (const t of mailActionTools({ actions: mailActions, userName: config.user.name })) tools.register(t);
   shell = new Shell({
     store,
     personality,
@@ -676,6 +700,7 @@ async function main(): Promise<void> {
     theme: await readTheme(themePath),
     memory,
     approvals,
+    mailActions,
     systemActions,
     ...(calendarActions ? { calendarActions } : {}),
     ...(docActions ? { docActions } : {}),
@@ -782,6 +807,7 @@ async function main(): Promise<void> {
   });
   await app.listen({ host: '127.0.0.1', port: config.ui.port });
   approvals.recover();
+  mailActions.recover();
   systemActions.recover();
   // S5: apps built before the Change button get it now (or lose it when it's turned off).
   void builder

@@ -67,6 +67,9 @@ export interface MessageActions {
   /** F1: a file change happens only on this click, which echoes the card's hash. */
   onFileChangeConfirm: (id: string, hash: string) => void;
   onFileChangeDiscard: (id: string) => void;
+  /** Moving emails to Trash or unsubscribing happens only on this click, which echoes the card's hash. */
+  onMailActionConfirm: (id: string, hash: string) => void;
+  onMailActionDiscard: (id: string) => void;
   /** F1: Save on an attachment card, into the folder picked (by its index on the card). */
   onAttachmentSave: (id: string, folder: number) => void;
   /** D3: Edit on a document card or its viewer; opens the card's file in WordCraft or GridCraft. */
@@ -826,6 +829,66 @@ function FileChangeCard({ item, actions }: { item: FileChangeItem; actions: Mess
   );
 }
 
+type MailActionItem = Extract<ChatItem, { kind: 'mail_action' }>;
+
+const MAIL_ACTION_STATE_TEXT: Record<MailActionItem['state'], string> = { pending: '', running: 'Working…', done: '✓ Done', discarded: 'Discarded. Nothing changed.', failed: '' };
+
+/** Moving emails to Trash, or unsubscribing, waiting for a click. Senders and subjects come from email: plain text only. */
+function MailActionCard({ item, actions }: { item: MailActionItem; actions: MessageActions }) {
+  const open = item.state === 'pending' || item.state === 'failed';
+  const n = item.mails.length;
+  const trash = item.action === 'trash';
+  const heading = trash ? (n === 1 ? 'Move this email to Trash?' : `Move these ${n} emails to Trash?`) : 'Unsubscribe from this sender?';
+  const confirm = trash ? 'Move to Trash' : item.method === 'link' ? 'Open unsubscribe page' : 'Unsubscribe';
+  const how = trash
+    ? 'Trash keeps emails for a while, so you can get them back.'
+    : item.method === 'one_click'
+      ? `Astra sends ${item.site ?? 'the sender'} the unsubscribe request their email asks for. Nothing else about you is sent.`
+      : `Opens ${item.site ?? 'their page'} in your browser to finish there.`;
+  return (
+    <Card data-kind="mail_action" data-action={item.action} data-state={item.state} icon="mail" title={heading} badge={open ? { text: NEEDS_OK, tone: 'warning' } : false}>
+      <ul className="space-y-1">
+        {item.mails.map((m, i) => (
+          <li key={i} data-testid="mail-action-row" className="text-[15px]">
+            <div className="truncate font-medium">{m.from}</div>
+            <div className="truncate text-sm" style={{ color: 'var(--muted)' }}>
+              {m.subject}
+              {m.date !== undefined ? ` · ${new Date(m.date).toLocaleDateString()}` : ''}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+        {how}
+      </div>
+      {item.warnings.map((w) => (
+        <div key={w} data-testid="mail-action-warning" className="mt-2 text-sm" style={{ color: 'var(--warning)' }}>
+          {w}
+        </div>
+      ))}
+      {item.state === 'failed' && item.result && (
+        <div data-testid="mail-action-state" className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
+          {item.result}
+        </div>
+      )}
+      {open ? (
+        <CardActions>
+          <button type="button" data-testid="mail-action-confirm" className={trash ? 'btn btn-danger' : 'btn btn-primary'} onClick={() => actions.onMailActionConfirm(item.id, item.hash)}>
+            {item.state === 'failed' ? `Try again: ${confirm}` : confirm}
+          </button>
+          <button type="button" data-testid="mail-action-discard" className="btn btn-quiet" onClick={() => actions.onMailActionDiscard(item.id)}>
+            Discard
+          </button>
+        </CardActions>
+      ) : (
+        <div data-testid="mail-action-state" className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+          {item.result ?? MAIL_ACTION_STATE_TEXT[item.state]}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /** /routines: the user's routines with Show, Open in editor and Run. Names and phrases are the user's own: plain text. */
 function RoutinesCard({ item, actions }: { item: Extract<ChatItem, { kind: 'routines' }>; actions: MessageActions }) {
   return (
@@ -1337,6 +1400,8 @@ export function Message({ item, actions }: { item: ChatItem; actions: MessageAct
       return <DocChangeCard item={item} actions={actions} />;
     case 'file_change':
       return <FileChangeCard item={item} actions={actions} />;
+    case 'mail_action':
+      return <MailActionCard item={item} actions={actions} />;
     case 'resource_alert':
       return <ResourceAlert item={item} />;
     case 'update':

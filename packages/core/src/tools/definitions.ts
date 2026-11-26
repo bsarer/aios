@@ -88,6 +88,20 @@ export const ALPHA_TOOLS = [
     input: z.strictObject({ draftId: z.string() }),
   }),
   def({
+    name: 'mail_trash',
+    tier: 'draft',
+    description:
+      'Ask to move emails to Trash (delete them). Only shows a card listing them; nothing is deleted until the user clicks Move to Trash on it. Give the ids from mail_search, mail_recent or mail_read.',
+    input: z.strictObject({ ids: z.array(z.string().regex(/^(INBOX|Sent):\d{1,10}$/)).min(1).max(25).describe('Message ids, e.g. ["INBOX:37"]') }),
+  }),
+  def({
+    name: 'mail_unsubscribe',
+    tier: 'draft',
+    description:
+      "Ask to unsubscribe from the mailing list or newsletter one email came from, using that email's own unsubscribe header. Only shows a card (or an unsubscribe email as a draft); nothing happens until the user clicks it.",
+    input: z.strictObject({ id: z.string().regex(/^(INBOX|Sent):\d{1,10}$/).describe('Message id of one email from that list, e.g. "INBOX:37"') }),
+  }),
+  def({
     name: 'memory_propose',
     tier: 'draft',
     description:

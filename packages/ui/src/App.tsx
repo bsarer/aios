@@ -61,6 +61,8 @@ export function App() {
     onDocChangeDiscard: (id) => send({ type: 'doc_change_discard', id }),
     onFileChangeConfirm: (id, hash) => send({ type: 'file_change_confirm', id, hash }),
     onFileChangeDiscard: (id) => send({ type: 'file_change_discard', id }),
+    onMailActionConfirm: (id, hash) => send({ type: 'mail_action_confirm', id, hash }),
+    onMailActionDiscard: (id) => send({ type: 'mail_action_discard', id }),
     onAttachmentSave: (id, folder) => send({ type: 'attachment_save', id, folder }),
     onDocumentEdit: (id) => send({ type: 'document_edit', id }),
     onActionStop: (id) => send({ type: 'action_stop', id }),
@@ -167,7 +169,7 @@ export function App() {
       <NowPlayingLine nowPlaying={state.nowPlaying} />
       <Composer tight={(state.widgets?.pinned.length ?? 0) > 0} working={working} disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} onStop={() => send({ type: 'stop' })} voiceMaxSeconds={state.status?.voice?.maxSeconds ?? null} earlier={earlier} />
       {/* W1: pinned system features along the bottom of the screen. */}
-      <MailRail inbox={inbox} disabled={conn !== 'open'} onSend={actions.onSend} onIgnoreMail={actions.onIgnoreMail} signals={signals} />
+      <MailRail inbox={inbox} disabled={conn !== 'open'} onSend={actions.onSend} onIgnoreMail={actions.onIgnoreMail} onMailAction={(mailId, action) => send({ type: 'mail_action_propose', mailId, action })} signals={signals} />
       {/* The floating Feedback button: it only sends /feedback, the same as typing it. */}
       <FeedbackButton disabled={conn !== 'open'} onSend={(text) => send({ type: 'send', text })} />
       <WidgetBar

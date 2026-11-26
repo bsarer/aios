@@ -133,6 +133,8 @@ Output a table; pick the default per role from the results, not from reputation.
 | `mail_thread(id)` | read | Thread messages, truncated |
 | `mail_create_draft(inReplyTo?, to, subject, body, attachments?)` | draft | Saves to IMAP Drafts and returns a draft card. M1: `attachments` are paths of files in `[files] roots`, listed on the card and sent only by its Send click |
 | `mail_send_draft(draftId)` | **write** | Blocked until the user clicks Send on the card |
+| `mail_trash(ids)` | draft | Mail actions (added 2026-11-26 at the user's request): a card listing the emails (sender, subject, date, read by code from the server) with Move to Trash; the click moves them to the server's Trash folder, never deletes outright, and only if each id still has the same Message-ID |
+| `mail_unsubscribe(id)` | draft | Mail actions: from that email's own List-Unsubscribe header only. A card for RFC 8058 one-click (only with a passing DKIM signature covering both headers) or a page to open; a mailto address becomes a draft card. Nothing happens without the click |
 | `memory_propose(fact)` | draft | Queues a memory suggestion for user confirmation (see §6) |
 | `apps_list(query?)` | read | S3: installed apps from their desktop entries, with the id `open_app` takes |
 | `open_app(app, place?, screen?)` | device | S3: starts one installed app by its desktop id (`uwsm-app -- gtk-launch <id>`); no command, file, link or option. A confirm card while an email is in view. S6: `place` is over (the orb), beside (split screen) or screen (another screen) |
@@ -167,7 +169,7 @@ Output a table; pick the default per role from the results, not from reputation.
 | System controls (S1) | read / device / write | See S1 in §11: status reads are `read`; small reversible changes are `device`; Wi-Fi off, switching networks, pairing and forgetting Bluetooth devices are `write` |
 
 ### Risk tiers (enforced in core code, not just in prompts)
-- `read`: auto-allow. `draft`: auto-allow, result displayed. `device` (S1): auto-allow small, reversible changes to this computer within fixed limits (volume 0-100%, brightness 5-100%, at most 10 changes a minute); never run while untrusted content is in context (a change requested then becomes a card the user must click). `write`: approval broker must receive a UI click for that exact action. `destructive` (delete, trash): not implemented in alpha.
+- `read`: auto-allow. `draft`: auto-allow, result displayed. `device` (S1): auto-allow small, reversible changes to this computer within fixed limits (volume 0-100%, brightness 5-100%, at most 10 changes a minute); never run while untrusted content is in context (a change requested then becomes a card the user must click). `write`: approval broker must receive a UI click for that exact action. `destructive` (delete): not implemented in alpha. Moving mail to Trash (added 2026-11-26) is the draft pattern: the tool only shows a card, and the move runs from its hash-checked click, audited as write tier.
 - **Send integrity:** the approval card shows the full draft; Send transmits exactly the approved text (verify hash of approved body vs sent body). Editing creates a new approval.
 
 ### Untrusted content

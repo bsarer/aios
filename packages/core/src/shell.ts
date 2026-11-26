@@ -17,6 +17,7 @@ import type { FileActions } from './files/actions.js';
 import type { AttachmentFiles } from './mail/attachments.js';
 import type { DocumentFiles } from './docs/viewer.js';
 import type { ApprovalBroker } from './mail/approvals.js';
+import type { MailActions } from './mail/actions.js';
 import type { Memory } from './memory/memory.js';
 import { localDate } from './memory/nightly.js';
 import { memoryProposeTool } from './memory/tool.js';
@@ -79,6 +80,8 @@ export interface ShellOptions {
   calendarActions?: CalendarActions;
   /** Word and Excel change cards and their clicks (D2). Without it, doc_change messages are ignored. */
   docActions?: DocActions;
+  /** Trash and Unsubscribe cards and their clicks. Without it, mail_action messages are ignored. */
+  mailActions?: Pick<MailActions, 'confirm' | 'discard' | 'proposeTrash' | 'proposeUnsubscribe'>;
   /** File change cards and their clicks (F1). Without it, file_change messages are ignored. */
   fileActions?: FileActions;
   /** The file index (F2). Without it, /reindex says file search is off. */
@@ -332,6 +335,8 @@ export class Shell {
     // SG1: the user's own click on a Signal card; the broker checks its hash and state before anything is sent. Works while paused, like Send on a draft.
     if (msg.type === 'signal_send' || msg.type === 'signal_discard' || msg.type === 'signal_edit') return this.signalAction(msg);
     if (msg.type === 'file_change_confirm' || msg.type === 'file_change_discard') return this.fileChangeAction(msg);
+    // The user's own clicks: Delete or Unsubscribe in the inbox (a card, no model), and the card's own buttons. Work while paused, like Send.
+    if (msg.type === 'mail_action_propose' || msg.type === 'mail_action_confirm' || msg.type === 'mail_action_discard') return this.mailAction(msg);
     // The user's own click on Save, so like Send on a draft it works while paused.
     if (msg.type === 'attachment_save') return void (await this.o.attachments?.save(msg.id, msg.folder));
     // D3: the user's own click on Edit; the card's file is checked again before its app opens. Works while paused.
@@ -535,6 +540,40 @@ export class Shell {
       return;
     }
     await actions.send(msg.id, msg.hash);
+  }
+
+  /**
+   * Mail actions. Delete or Unsubscribe on an inbox row only asks for a card, from code with no
+   * model; the card's own click (hash-checked by the broker) moves mail or unsubscribes.
+   */
+  private async mailAction(msg: Extract<ClientMessage, { type: 'mail_action_propose' | 'mail_action_confirm' | 'mail_action_discard' }>): Promise<void> {
+    const actions = this.o.mailActions;
+    if (!actions) return;
+    if (msg.type === 'mail_action_discard') return void actions.discard(msg.id);
+    if (msg.type === 'mail_action_confirm') return void (await actions.confirm(msg.id, msg.hash));
+    try {
+      if (msg.action === 'trash') {
+        const { item } = await actions.proposeTrash([msg.mailId], []);
+        if (!item) this.agent.notice('info', 'That email is no longer in your mailbox.');
+        return;
+      }
+      const r = await actions.proposeUnsubscribe(msg.mailId, []);
+      if (r.kind === 'missing') this.agent.notice('info', 'That email is no longer in your mailbox.');
+      if (r.kind === 'none') this.agent.notice('info', `The email from ${r.from} has no unsubscribe link, so I can't unsubscribe from it. You can move it to Trash instead.`);
+    } catch (err) {
+      this.agent.notice('warning', `I couldn't check that email: ${(err as Error).message}.`);
+    }
+  }
+
+  /** Grey out emails moved to Trash in the inbox's notification rows. */
+  markTrashed(mailIds: readonly string[]): void {
+    const ids = new Set(mailIds);
+    for (const item of this.o.store.recentItems(500)) {
+      if (item.kind !== 'notification' || !item.mails?.some((m) => ids.has(m.id))) continue;
+      const updated: ChatItem = { ...item, mails: item.mails.map((m) => (ids.has(m.id) ? { ...m, ignored: true, trashed: true } : m)) };
+      this.o.store.saveItem(updated);
+      this.broadcast({ type: 'patch', id: item.id, item: updated });
+    }
   }
 
   /** Clicks on a file change card (F1): the user's own action; the broker checks hash, state and the file. */

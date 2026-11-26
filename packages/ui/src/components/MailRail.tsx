@@ -122,11 +122,13 @@ interface RailProps {
   disabled: boolean;
   onSend: (text: string) => void;
   onIgnoreMail: (itemId: string, mailId: string) => void;
+  /** Delete or Unsubscribe on a row: asks core for a card in the chat; nothing happens until that card is clicked. */
+  onMailAction?: (mailId: string, action: 'trash' | 'unsubscribe') => void;
   /** SG1: Signal's button and panel, once a Signal message has come in. */
   signals?: Signals;
 }
 
-export function MailRail({ inbox, disabled, onSend, onIgnoreMail, signals }: RailProps) {
+export function MailRail({ inbox, disabled, onSend, onIgnoreMail, onMailAction, signals }: RailProps) {
   const { fresh, urgent, open: mailOpen, setOpen: setMailOpen, quietUntil, toggleQuiet, peek } = inbox;
   const signalOpen = signals?.open ?? false;
   const open = mailOpen || signalOpen;
@@ -230,19 +232,24 @@ export function MailRail({ inbox, disabled, onSend, onIgnoreMail, signals }: Rai
       {/* A mail peek goes first; a Signal peek waits until it is gone. */}
       {signals && !peek && !open && <SignalPeek signals={signals} onOpen={() => openSignal(true)} />}
 
-      {mailOpen && <InboxPanel inbox={inbox} disabled={disabled} onSend={onSend} onIgnoreMail={onIgnoreMail} />}
+      {mailOpen && <InboxPanel inbox={inbox} disabled={disabled} onSend={onSend} onIgnoreMail={onIgnoreMail} {...(onMailAction ? { onMailAction } : {})} />}
       {signals && signalOpen && <SignalPanel signals={signals} disabled={disabled} onSend={onSend} />}
     </>
   );
 }
 
-function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
+function InboxPanel({ inbox, disabled, onSend, onIgnoreMail, onMailAction }: RailProps) {
   const { rows, newSince, setOpen, quietUntil, toggleQuiet } = inbox;
   const [showLow, setShowLow] = useState(false);
   const g = groups(rows, Date.now());
   const fresh = rows.filter((r) => isNew(r, newSince)).length;
   const go = (text: string) => {
     onSend(text);
+    setOpen(false);
+  };
+  /** The card appears in the chat, so the panel closes to show it. */
+  const ask = (mailId: string, action: 'trash' | 'unsubscribe') => {
+    onMailAction?.(mailId, action);
     setOpen(false);
   };
 
@@ -265,7 +272,7 @@ function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
       <div style={{ color: 'var(--muted)' }}>{r.subject}</div>
       <div className="mt-0.5">{r.summary}</div>
       {!r.ignored && (
-        <div className="mt-1.5 flex gap-1.5 text-[12.5px]">
+        <div className="mt-1.5 flex flex-wrap gap-1.5 text-[12.5px]">
           <button type="button" data-testid="mail-read" disabled={disabled} className="btn btn-secondary btn-sm" onClick={() => go(`Read email ${r.id}`)}>
             Read
           </button>
@@ -275,6 +282,21 @@ function InboxPanel({ inbox, disabled, onSend, onIgnoreMail }: RailProps) {
           <button type="button" data-testid="mail-ignore" disabled={disabled} className="btn btn-secondary btn-sm" onClick={() => onIgnoreMail(r.itemId, r.id)}>
             Ignore
           </button>
+          {onMailAction && (
+            <>
+              <button type="button" data-testid="mail-unsubscribe" disabled={disabled} className="btn btn-quiet btn-sm" onClick={() => ask(r.id, 'unsubscribe')}>
+                Unsubscribe
+              </button>
+              <button type="button" data-testid="mail-trash" disabled={disabled} className="btn btn-quiet btn-sm" aria-label="Delete (asks first)" onClick={() => ask(r.id, 'trash')}>
+                Delete
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {r.trashed && (
+        <div data-testid="mail-trashed" className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>
+          Moved to Trash
         </div>
       )}
     </li>

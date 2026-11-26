@@ -46,6 +46,7 @@ export function needsYou(item: ChatItem): boolean {
       return item.state === 'pending' || item.state === 'running';
     case 'event':
     case 'file_change':
+    case 'mail_action':
     case 'doc_change':
       return item.state === 'pending' || item.state === 'running' || item.state === 'failed';
     case 'update':

@@ -20,6 +20,8 @@ export const MailRow = z.strictObject({
   urgency: z.enum(['low', 'normal', 'high']),
   needsReply: z.boolean(),
   ignored: z.boolean().optional(),
+  /** Moved to Trash from a mail action card's click (shown greyed, like ignored). */
+  trashed: z.boolean().optional(),
   /** When the email was sent (its Date header, else when it arrived), ms. Shown in the inbox. */
   date: z.number().optional(),
 });
@@ -311,6 +313,24 @@ export const ChatItem = z.discriminatedUnion('kind', [
     preview: z.string().optional(),
     /** F2: the file's tags after the click (tag). */
     tags: z.array(z.string()).optional(),
+    warnings: z.array(z.string()),
+    hash: z.string(),
+    state: z.enum(['pending', 'running', 'done', 'discarded', 'failed']),
+    result: z.string().optional(),
+    at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal('mail_action'),
+    /** Moving emails to Trash, or unsubscribing from a list, waiting for a click. */
+    id: z.string(),
+    action: z.enum(['trash', 'unsubscribe']),
+    /** The emails it is about, as the mail server lists them. Senders write these: plain text only. */
+    mails: z.array(z.strictObject({ from: z.string(), subject: z.string(), date: z.number().optional() })),
+    /** Unsubscribe: one_click is a request code sends to the sender; link opens their page in the browser. */
+    method: z.enum(['one_click', 'link']).optional(),
+    /** Unsubscribe: the site the click reaches, e.g. "news.example.com", written by code. */
+    site: z.string().optional(),
+    /** Written by code. */
     warnings: z.array(z.string()),
     hash: z.string(),
     state: z.enum(['pending', 'running', 'done', 'discarded', 'failed']),
@@ -625,6 +645,10 @@ export const ClientMessage = z.discriminatedUnion('type', [
   /** F1: clicks on a file change card. */
   z.strictObject({ type: z.literal('file_change_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ type: z.literal('file_change_discard'), id: z.string().max(100) }),
+  /** Mail actions: Delete or Unsubscribe on an inbox row asks for a card (code only, no model); the card's own click does it. */
+  z.strictObject({ type: z.literal('mail_action_propose'), mailId: z.string().regex(/^(INBOX|Sent):\d{1,10}$/), action: z.enum(['trash', 'unsubscribe']) }),
+  z.strictObject({ type: z.literal('mail_action_confirm'), id: z.string().max(100), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.strictObject({ type: z.literal('mail_action_discard'), id: z.string().max(100) }),
   /** F1: Save on an attachment card, into one of the folders the card offers (by index). */
   /** D3: Edit on a document card or in its viewer; names the card, never a path or app. */
   z.strictObject({ type: z.literal('document_edit'), id: z.string().max(100) }),
